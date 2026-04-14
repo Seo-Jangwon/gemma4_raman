@@ -7,6 +7,11 @@ Raman 하드웨어 tool 래퍼
 from __future__ import annotations
 import sys
 import os
+import time
+
+# Andor SDK 상수 (USE_andor_test.py 와 동일한 값)
+_READ_MODE_FVB       = 0   # Full Vertical Binning — 스펙트럼 1D
+_TRIGGER_MODE_INTERNAL = 0 # 내부 트리거
 
 STAGE_MAX_X =  75.3169
 STAGE_MAX_Y =  50.1879
@@ -121,21 +126,71 @@ def set_laser_power(percent: int) -> dict:
 # 스펙트럼 수집 (Andor CCD)
 # ──────────────────────────────────────────
 
-def acquire_spectrum(exposure: float = 0.1) -> dict:
-    """스펙트럼 1회 수집. exposure: 노출시간(초)."""
+def acquire_spectrum(
+    exposure: float = 0.1,
+    power: int = 100,
+    stabilize_sec: float = 0.5,
+) -> dict:
+    """
+    라만 스펙트럼 1회 수집 — 레이저 ON → 안정화 → CCD 촬영 → 레이저 OFF 를 원자적으로 실행.
+
+    Parameters
+    ----------
+    exposure      : CCD 노출 시간 (초). 기본 0.1
+    power         : 레이저 출력 (20/40/60/80/100 %). 기본 100
+    stabilize_sec : 레이저 ON 후 출력 안정화 대기 시간 (초). 기본 0.5
+    """
     if _ccd is None:
         return {"ok": False, "error": "분광기가 초기화되지 않았습니다."}
+    if _laser is None:
+        return {"ok": False, "error": "레이저가 초기화되지 않았습니다."}
+
+    valid_powers = {20, 40, 60, 80, 100}
+    if power not in valid_powers:
+        return {"ok": False, "error": f"유효한 출력값: {valid_powers}"}
+
+    data = None
     try:
-        _ccd.setup_acquisition(exposure_time=exposure)
+        # 1. 레이저 출력 설정 (필터 모터 이동 — 블로킹)
+        _laser.set_power(power)
+
+        # 2. 레이저 ON
+        _laser.laser_on()
+
+        # 3. 출력 안정화 대기
+        time.sleep(stabilize_sec)
+
+        # 4. CCD 파라미터 설정 (FVB 모드, 내부 트리거)
+        _ccd.setup_acquisition(
+            read_mode=_READ_MODE_FVB,
+            exposure_time=exposure,
+            trigger_mode=_TRIGGER_MODE_INTERNAL,
+        )
+
+        # 5. 촬영 (StartAcquisition → WaitForAcquisition → GetAcquiredData, 블로킹)
         data = _ccd.start_acquisition_cycle()
-        return {
-            "ok": True,
-            "length": len(data),
-            "max_intensity": float(max(data)),
-            "sum_intensity": float(sum(data)),
-        }
+
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+    finally:
+        # 6. 성공/실패 무관하게 반드시 레이저 OFF
+        try:
+            _laser.laser_off()
+        except Exception:
+            pass
+
+    if data is None:
+        return {"ok": False, "error": "CCD 데이터 수집 실패"}
+
+    spectrum = data[:_ccd.width]  # FVB 모드: 앞 width 개만 유효한 스펙트럼
+    return {
+        "ok": True,
+        "length": len(spectrum),
+        "max_intensity": float(max(spectrum)),
+        "sum_intensity": float(sum(spectrum)),
+        "data": spectrum,
+    }
 
 
 # ──────────────────────────────────────────

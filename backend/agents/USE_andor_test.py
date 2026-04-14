@@ -123,6 +123,32 @@ class AndorCamera:
             print(f"[ERROR] GetAcquiredData failed: {ret}")
             return None
 
+    def set_temperature(self, target_celsius: int) -> bool:
+        """목표 온도 설정 (정수 °C)."""
+        ret = self.dll.SetTemperature(ctypes.c_int(target_celsius))
+        return self.check_error(ret, f"SetTemperature({target_celsius})")
+
+    def cooler_on(self) -> bool:
+        """냉각기 ON."""
+        ret = self.dll.CoolerON()
+        return self.check_error(ret, "CoolerON")
+
+    def cooler_off(self) -> bool:
+        """냉각기 OFF."""
+        ret = self.dll.CoolerOFF()
+        return self.check_error(ret, "CoolerOFF")
+
+    def get_temperature(self) -> tuple[int, int]:
+        """
+        현재 온도 조회.
+        반환: (status_code, temperature_celsius)
+        status_code: DRV_TEMP_STABILIZED(20036), DRV_TEMP_NOT_REACHED(20037),
+                     DRV_TEMP_DRIFT(20040), DRV_TEMP_NOT_STABILIZED(20035), DRV_TEMP_OFF(20034)
+        """
+        temp = ctypes.c_int()
+        status = self.dll.GetTemperature(ctypes.byref(temp))
+        return status, temp.value
+
     def shutdown(self):
         self.dll.ShutDown()
         print("[INFO] Camera Shutdown.")

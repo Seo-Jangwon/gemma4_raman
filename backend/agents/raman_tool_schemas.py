@@ -81,14 +81,26 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "acquire_spectrum",
-            "description": "현재 위치에서 라만 스펙트럼 1회를 수집한다.",
+            "description": (
+                "현재 위치에서 라만 스펙트럼 1회를 수집한다. "
+                "레이저 ON → 출력 안정화 → CCD 촬영 → 레이저 OFF 순서를 자동으로 처리한다."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "exposure": {
                         "type": "number",
-                        "description": "노출 시간 (초). 기본값 0.1",
-                    }
+                        "description": "CCD 노출 시간 (초). 기본값 0.1",
+                    },
+                    "power": {
+                        "type": "integer",
+                        "description": "레이저 출력 (%). 기본값 100",
+                        "enum": [20, 40, 60, 80, 100],
+                    },
+                    "stabilize_sec": {
+                        "type": "number",
+                        "description": "레이저 ON 후 출력 안정화 대기 시간 (초). 기본값 0.5",
+                    },
                 },
                 "required": [],
             },

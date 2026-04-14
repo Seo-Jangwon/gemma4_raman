@@ -1,8 +1,12 @@
 import ollama
 import json
+import sys
+import atexit
+from pathlib import Path
 
-OLLAMA_HOST = "http://192.168.1.16:11434"
-OLLAMA_MODEL = "gemma4:31b"
+# hardware_manager 경로 확보
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from hardware_manager import HardwareManager, OLLAMA_MODEL
 
 SYSTEM_PROMPT = """당신은 라만 분광기 제어 AI입니다.
 사용 가능한 tool을 순서대로 호출해 사용자의 요청을 수행하세요.
@@ -10,7 +14,15 @@ SYSTEM_PROMPT = """당신은 라만 분광기 제어 AI입니다.
 - 레이저를 켜기 전에 반드시 안전 여부를 확인하세요.
 - 모든 작업이 끝나면 결과를 한국어로 요약해 주세요."""
 
-client = ollama.Client(host=OLLAMA_HOST)
+# ── 하드웨어 전체 초기화 (스테이지 homing + CCD -40°C 안정화 완료 전까지 블로킹) ──
+_hw = HardwareManager()
+_hw.startup()
+
+# 프로세스 정상 종료 시에도 CCD 온도 복구 후 종료
+atexit.register(_hw.shutdown)
+
+# Ollama 클라이언트는 HardwareManager가 검증한 연결 재사용
+client: ollama.Client = _hw.ollama
 
 
 def generate(prompt: str) -> str:
