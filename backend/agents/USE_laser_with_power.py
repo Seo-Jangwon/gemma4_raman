@@ -93,6 +93,9 @@ class LaserController:
         self._execute_command("00", "SSPW", "0")
 
     def set_power(self, power_level):
+
+        self.set_guide_beam()
+
         """모터 좌표를 이동시켜 레이저 출력 조절"""
         power_map = {
             20: "-0113343",
