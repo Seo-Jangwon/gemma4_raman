@@ -109,7 +109,7 @@ class AndorCamera:
         # FVB 모드면 Width만큼, Image 모드면 Width * Height 만큼
         # 현재 설정된 ReadMode를 확인해야 정확하지만, 편의상 size를 넉넉히 잡거나 문맥에 맞게 처리
         # 여기서는 가장 큰 버퍼인 전체 이미지 크기로 할당
-        size = self.width * self.height
+        size = self.width
         data_buffer = (ctypes.c_long * size)() # 32-bit integer array
         
         # 데이터 가져오기
