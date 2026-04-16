@@ -98,7 +98,7 @@ def run_agent(user_message: str, tools: list, tool_dispatch: dict,
 
 if __name__ == "__main__":
     import sys
-    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
     # ── 기본 연결 테스트 ──────────────────────────────
     # print(generate("안녕하세요! 연결 테스트입니다."))

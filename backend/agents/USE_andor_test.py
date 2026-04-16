@@ -158,10 +158,10 @@ class AndorCamera:
 # ==========================================
 if __name__ == "__main__":
     # TODO: 실제 atmcd64d.dll 경로로 수정하세요
-    dll_path = r"C:\Users\user\Desktop\RamanGPT\backend\agents\andor\atmcd64d.dll" 
+    dll_path = r"C:\Users\user\Desktop\gemma_raman\backend\agents" 
     
     # TODO: Detector.ini 파일이 있는 폴더 경로 (보통 Andor 설치 폴더)
-    config_path = r"C:\Users\user\Desktop\RamanGPT\backend\agents\andor" 
+    config_path = r"C:\Users\user\Desktop\gemma_raman\backend" 
 
     cam = AndorCamera(dll_path)
 

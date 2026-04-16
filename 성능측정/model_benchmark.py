@@ -167,7 +167,7 @@ def query_with_timeout(model: str, prompt: str) -> dict:
 # ── 실행 ──────────────────────────────────────────────────────────────────────
 
 def run_benchmark():
-    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
     results = {
         "timestamp": datetime.now().isoformat(),

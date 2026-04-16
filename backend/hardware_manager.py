@@ -53,17 +53,17 @@ from backend.agents.USE_laser_with_power import LaserController    # noqa: E402
 #   DLL 이 없는 환경에서 모듈 import 자체가 실패하는 것을 방지
 
 STAGE_DLL_PATH   = str(_BACKEND / "agents" / "Tango_DLL.dll")
-ANDOR_DLL_PATH   = str(_BACKEND / "agents" / "andor" / "atmcd64d.dll")
-ANDOR_CONFIG_DIR = str(_BACKEND / "agents" / "andor")
+ANDOR_DLL_PATH   = str(_BACKEND / "agents" / "atmcd64d.dll")
+ANDOR_CONFIG_DIR = str(_BACKEND / "agents")
 LASER_PORT       = "COM4"
 OLLAMA_HOST      = "http://192.168.1.16:11434"
 OLLAMA_MODEL     = "gemma4:31b"
 
 # 스테이지 한계 (mm)
-STAGE_MAX_X   = 75.3169
-STAGE_MAX_Y   = 50.1879
-STAGE_CENTER_X = STAGE_MAX_X / 2.0
-STAGE_CENTER_Y = STAGE_MAX_Y / 2.0
+STAGE_MAX_X    = 75.7518    # Config.ini [STAGE_INFO] MaxX
+STAGE_MAX_Y    = 50.4961    # Config.ini [STAGE_INFO] MaxY
+STAGE_CENTER_X = 37.8759    # Config.ini [STAGE_INFO] CenterX (교정된 중점)
+STAGE_CENTER_Y = 25.24805   # Config.ini [STAGE_INFO] CenterY (교정된 중점)
 
 # CCD 온도 목표 (°C)
 CCD_COOL_TARGET = -40   # 냉각 목표 — 안정화될 때까지 블로킹
@@ -134,22 +134,33 @@ class HardwareManager:
         tango.set_velocity(v, v, v * 0.1, v)
 
         print("[STAGE] 초기화 이동: (0,0) → (max,max) → 중점")
+        pos = tango.get_position()
+        if pos is None:
+            raise RuntimeError("스테이지 현재 위치 조회 실패 — get_position() 반환값 없음")
+        z = pos[2]
 
         # ① (0, 0)
-        tango.move_absolute(0.0, 0.0, 0.0, wait=True)
+        tango.move_absolute(0.0, 0.0, z, wait=True)
         pos = tango.get_position()
-        print(f"        → (0, 0)      도달  X={pos[0]:.4f}  Y={pos[1]:.4f}")
+        if pos is not None:
+            print(f"        → (0, 0)      도달  X={pos[0]:.4f}  Y={pos[1]:.4f}")
+        time.sleep(0.5)
 
         # ② (max_x, max_y)
-        tango.move_absolute(STAGE_MAX_X, STAGE_MAX_Y, 0.0, wait=True)
+        tango.move_absolute(STAGE_MAX_X, STAGE_MAX_Y, z, wait=True)
         pos = tango.get_position()
-        print(f"        → (max, max)  도달  X={pos[0]:.4f}  Y={pos[1]:.4f}")
+        if pos is not None:
+            print(f"        → (max, max)  도달  X={pos[0]:.4f}  Y={pos[1]:.4f}")
+        time.sleep(0.5)
 
         # ③ 중점
-        tango.move_absolute(STAGE_CENTER_X, STAGE_CENTER_Y, 0.0, wait=True)
+        tango.move_absolute(STAGE_CENTER_X, STAGE_CENTER_Y, z, wait=True)
         pos = tango.get_position()
-        print(f"        → 중점        도달  X={pos[0]:.4f}  Y={pos[1]:.4f}")
+        if pos is not None:
+            print(f"        → 중점        도달  X={pos[0]:.4f}  Y={pos[1]:.4f}")
+        time.sleep(1)
 
+        tango.set_velocity(0.1, 0.1, 0.1, 0.1)
         print("[STAGE] 초기화 완료")
         self.stage = tango
 
@@ -271,22 +282,34 @@ class HardwareManager:
         ccd_done.wait()
 
         if stage_exc[0] is not None:
-            raise RuntimeError(f"[STAGE] 초기화 실패: {stage_exc[0]}") from stage_exc[0]
+            print(f"[WARN] [STAGE] 초기화 실패 (건너뜀): {stage_exc[0]}")
         if ccd_exc[0] is not None:
-            raise RuntimeError(f"[CCD] 초기화 실패: {ccd_exc[0]}") from ccd_exc[0]
+            print(f"[WARN] [CCD]   초기화 실패 (건너뜀): {ccd_exc[0]}")
 
         print("\n" + "-" * 60)
-        print("  [Phase 1 완료] 스테이지 초기화 + CCD -40°C 안정화")
-        print("  → Phase 2 진행: 카메라 / 레이저 / Ollama")
+        print("  [Phase 1 완료] → Phase 2 진행: 카메라 / 레이저 / Ollama")
         print("-" * 60)
 
-        # ── Phase 2: 카메라 / 레이저 / Ollama (순차) ─────────────────────────
-        self._init_camera()
-        self._init_laser()
-        self._init_ollama()
+        # ── Phase 2: 카메라 / 레이저 / Ollama (순차, 실패해도 계속) ──────────
+        for name, init_fn in [
+            ("CAM",   self._init_camera),
+            ("LASER", self._init_laser),
+            ("LLM",   self._init_ollama),
+        ]:
+            try:
+                init_fn()
+            except Exception as e:
+                print(f"[WARN] [{name}]   초기화 실패 (건너뜀): {e}")
 
+        connected = [
+            k for k, v in [
+                ("STAGE", self.stage), ("CCD", self.ccd),
+                ("CAM",   self.camera), ("LASER", self.laser),
+                ("LLM",   self.ollama),
+            ] if v is not None
+        ]
         print("\n" + "=" * 60)
-        print("  모든 하드웨어 초기화 완료 — 시스템 준비 완료")
+        print(f"  초기화 완료 — 연결된 장비: {', '.join(connected) if connected else '없음'}")
         print("=" * 60 + "\n")
 
     def shutdown(self):
@@ -411,7 +434,7 @@ def get_manager() -> HardwareManager:
 
 # ── 단독 실행 시 초기화 테스트 ────────────────────────────────────────────────
 if __name__ == "__main__":
-    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
     hw = HardwareManager()
     try:

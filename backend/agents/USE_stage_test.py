@@ -92,25 +92,46 @@ class TangoController:
         print("  3. 다른 프로그램(rays-on.exe 등)이 이미 연결 중인지")
         print("  4. 장치 드라이버가 설치되어 있는지")
     
+    def calibrate(self, axes: int = 3) -> bool:
+        """
+        Tango 스테이지 홈(교정) — 물리적 한계로 이동 후 (0,0)으로 리셋.
+        axes: 1=X만, 2=Y만, 3=XY 모두 (기본값)
+        """
+        if not self.connected:
+            print("[ERROR] 연결되지 않았습니다")
+            return False
+        error = self.dll.LSX_Calibrate(self.LSID, axes)
+        if error > 0:
+            print(f"[ERROR] 교정 실패, 에러코드: {error}")
+            return False
+        print(f"[OK] 스테이지 교정(homing) 완료 (axes={axes})")
+        return True
+
     def disconnect(self) -> bool:
         """연결 해제"""
         if not self.connected:
             return True
-            
-        error = self.dll.LSX_Disconnect(self.LSID)
-        if error > 0:
-            print(f"[ERROR] 연결 해제 실패, 에러코드: {error}")
+        try:
+            error = self.dll.LSX_Disconnect(self.LSID)
+            if error > 0:
+                print(f"[ERROR] 연결 해제 실패, 에러코드: {error}")
+                return False
+        except OSError as e:
+            print(f"[WARN] 연결 해제 중 DLL 예외 (무시): {e}")
             return False
-        
+
         self.connected = False
         print("[OK] 연결 해제 완료")
         return True
-    
+
     def free_session(self):
         """세션 ID 해제"""
         if self.dll and self.LSID.value > 0:
-            self.dll.LSX_FreeLSID(self.LSID)
-            print("[OK] 세션 해제 완료")
+            try:
+                self.dll.LSX_FreeLSID(self.LSID)
+                print("[OK] 세션 해제 완료")
+            except OSError as e:
+                print(f"[WARN] 세션 해제 중 DLL 예외 (무시): {e}")
     
     def get_position(self) -> tuple:
         """현재 위치 조회"""

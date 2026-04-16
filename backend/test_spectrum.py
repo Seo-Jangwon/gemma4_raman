@@ -27,10 +27,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from backend.hardware_manager import HardwareManager
+from hardware_manager import HardwareManager
 
 # raman_tools는 backend/agents/ 안에 있으므로 직접 경로로 import
-sys.path.insert(0, str(_PROJECT_ROOT / "backend" / "agents"))
+_AGENTS_DIR = str(Path(__file__).resolve().parent / "agents")
+if _AGENTS_DIR not in sys.path:
+    sys.path.insert(0, _AGENTS_DIR)
 import raman_tools
 
 
@@ -40,7 +42,7 @@ def parse_args():
                    help="CCD 노출 시간 (초, 기본 0.1)")
     p.add_argument("--power",      type=int,   default=20,
                    choices=[20, 40, 60, 80, 100],
-                   help="레이저 출력 %% (기본 100)")
+                   help="레이저 출력 %% (기본 20)")
     p.add_argument("--stabilize",  type=float, default=0.5,
                    help="레이저 ON 후 안정화 대기 (초, 기본 0.5)")
     p.add_argument("--plot",       action="store_true",
@@ -94,7 +96,7 @@ def plot_spectrum(result: dict):
 
 
 def main():
-    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     args = parse_args()
 
     hw = HardwareManager()
