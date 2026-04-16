@@ -139,20 +139,6 @@ class HardwareManager:
             raise RuntimeError("스테이지 현재 위치 조회 실패 — get_position() 반환값 없음")
         z = pos[2]
 
-        # ① (0, 0)
-        tango.move_absolute(0.0, 0.0, z, wait=True)
-        pos = tango.get_position()
-        if pos is not None:
-            print(f"        → (0, 0)      도달  X={pos[0]:.4f}  Y={pos[1]:.4f}")
-        time.sleep(0.5)
-
-        # ② (max_x, max_y)
-        tango.move_absolute(STAGE_MAX_X, STAGE_MAX_Y, z, wait=True)
-        pos = tango.get_position()
-        if pos is not None:
-            print(f"        → (max, max)  도달  X={pos[0]:.4f}  Y={pos[1]:.4f}")
-        time.sleep(0.5)
-
         # ③ 중점
         tango.move_absolute(STAGE_CENTER_X, STAGE_CENTER_Y, z, wait=True)
         pos = tango.get_position()

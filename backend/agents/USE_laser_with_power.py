@@ -8,6 +8,7 @@ class LaserController:
         self.baud = baud
         self.ser = None
         self._connect()
+        self.set_guide_beam()
 
     def _connect(self):
         try:
