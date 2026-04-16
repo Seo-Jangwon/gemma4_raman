@@ -19,7 +19,9 @@ acquire_spectrum() 단독 테스트 스크립트
 """
 
 import argparse
+import csv
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # 프로젝트 루트를 sys.path에 추가
@@ -47,10 +49,12 @@ def parse_args():
                    help="레이저 ON 후 안정화 대기 (초, 기본 0.5)")
     p.add_argument("--plot",       action="store_true",
                    help="결과를 matplotlib으로 출력")
+    p.add_argument("--full",       action="store_true",
+                   help="전체 픽셀 데이터를 출력")
     return p.parse_args()
 
 
-def print_result(result: dict, exposure: float, power: int):
+def print_result(result: dict, exposure: float, power: int, full: bool = False):
     print("\n" + "=" * 50)
     print("  acquire_spectrum() 결과")
     print("=" * 50)
@@ -67,12 +71,36 @@ def print_result(result: dict, exposure: float, power: int):
 
     data = result.get("data", [])
     if data:
-        top5 = sorted(enumerate(data), key=lambda x: x[1], reverse=True)[:5]
-        print("\n  상위 5개 픽셀:")
-        for px, cnt in top5:
-            print(f"    pixel {px:4d}  →  {cnt}")
+        if full:
+            print("\n  전체 픽셀 데이터:")
+            print(f"  {'pixel':>6}  {'count':>10}")
+            print("  " + "-" * 20)
+            for px, cnt in enumerate(data):
+                print(f"  {px:>6}  {cnt:>10}")
+        else:
+            top5 = sorted(enumerate(data), key=lambda x: x[1], reverse=True)[:5]
+            print("\n  상위 5개 픽셀:")
+            for px, cnt in top5:
+                print(f"    pixel {px:4d}  →  {cnt}")
 
     print("=" * 50)
+
+
+def save_csv(result: dict, exposure: float, power: int) -> str:
+    """스펙트럼 데이터를 CSV로 저장. 반환값: 저장된 파일 경로."""
+    data = result.get("data", [])
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = Path(__file__).resolve().parent / "spectra"
+    out_dir.mkdir(exist_ok=True)
+    filepath = out_dir / f"spectrum_{timestamp}_exp{exposure}s_pwr{power}pct.csv"
+
+    with open(filepath, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["pixel", "intensity"])
+        for px, cnt in enumerate(data):
+            writer.writerow([px, cnt])
+
+    return str(filepath)
 
 
 def plot_spectrum(result: dict):
@@ -124,7 +152,11 @@ def main():
         )
 
         # ── 4. 결과 출력 ───────────────────────────────────────────────────────
-        print_result(result, args.exposure, args.power)
+        print_result(result, args.exposure, args.power, full=args.full)
+
+        if result["ok"]:
+            csv_path = save_csv(result, args.exposure, args.power)
+            print(f"\n  [CSV] 저장 완료: {csv_path}")
 
         if args.plot and result["ok"]:
             plot_spectrum(result)
