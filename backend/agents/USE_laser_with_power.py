@@ -30,54 +30,63 @@ class LaserController:
         packet = f"@{body}{checksum}$"
         return packet.encode('utf-8')
 
-    def _execute_command(self, target_id, cmd, arg, timeout=15.0):
+    def _execute_command(self, target_id, cmd, arg, timeout=15.0, retries=2):
         """
         패킷을 전송하고, 장비로부터 '소문자 변환된 완료 응답'이 올 때까지 스마트하게 대기합니다.
-        (디버그 기능 추가: 수신되는 모든 데이터를 화면에 출력)
+        ercd(장비 알람) 응답 시 즉시 감지하고 최대 retries회 재시도합니다.
         """
         if not (self.ser and self.ser.is_open):
             print("⚠️ 포트가 연결되어 있지 않습니다.")
             return False
 
-        # 1. 패킷 생성 및 전송
-        packet = self._make_packet(target_id, cmd, arg)
-        
-        # 전송 전에 버퍼에 남아있는 쓰레기 응답들 싹 비우기
-        if self.ser.in_waiting:
-            self.ser.read(self.ser.in_waiting)
-            
-        print(f"   [데이터 송신] {packet.decode()}") # 우리가 쏜 데이터 확인
-        self.ser.write(packet)
-        
-        # 2. 우리가 기다리는 '정답' 문자열 만들기 (예: SMMA -> smma)
         expected_body = f"{target_id}{cmd.lower()}{arg}"
-        
-        start_time = time.time()
-        buffer = ""
-        
-        # 3. 응답 대기 루프
-        while (time.time() - start_time) < timeout:
+
+        for attempt in range(retries + 1):
+            # 1. 패킷 생성 및 전송
+            packet = self._make_packet(target_id, cmd, arg)
+
+            # 전송 전에 버퍼에 남아있는 쓰레기 응답들 싹 비우기
             if self.ser.in_waiting:
-                # 데이터를 뭉텅이로 읽어서 더 빠르고 안전하게 처리
-                chunk = self.ser.read(self.ser.in_waiting).decode(errors='ignore')
-                buffer += chunk
-                
-                # 수신 버퍼 안에 패킷의 끝 기호인 '$'가 들어왔다면
-                if '$' in buffer:
-                    # 장비가 보낸 데이터를 화면에 강제로 전부 찍어봅니다.
-                    print(f"   [장비 수신 로그] {buffer.strip()}")
-                    
-                    if expected_body in buffer:
-                        print(f"   ✅ [목표 도달 확인] {expected_body} 일치!")
-                        return True
-                    else:
-                        # 우리가 기다리는 응답이 아니면 (예: 에러 메시지나 GMMS 등) 다음 달러($)를 위해 비움
-                        buffer = ""
+                self.ser.read(self.ser.in_waiting)
+
+            print(f"   [데이터 송신] {packet.decode()}")
+            self.ser.write(packet)
+
+            start_time = time.time()
+            buffer = ""
+
+            # 2. 응답 대기 루프
+            while (time.time() - start_time) < timeout:
+                if self.ser.in_waiting:
+                    chunk = self.ser.read(self.ser.in_waiting).decode(errors='ignore')
+                    buffer += chunk
+
+                    if '$' in buffer:
+                        print(f"   [장비 수신 로그] {buffer.strip()}")
+
+                        if expected_body in buffer:
+                            print(f"   ✅ [목표 도달 확인] {expected_body} 일치!")
+                            return True
+                        elif "ercd" in buffer:
+                            # 장비 알람 상태 — 타임아웃 기다리지 않고 즉시 감지
+                            print(f"   ❌ 장비 에러(ercd) [{attempt + 1}/{retries + 1}회]")
+                            break
+                        else:
+                            buffer = ""
+                else:
+                    time.sleep(0.01)
             else:
-                time.sleep(0.01) 
-                
-        # 타임아웃
-        print(f"⚠️ 시간 초과: 장비가 응답하지 않습니다. (명령: {cmd}, 기다린응답: {expected_body})")
+                # 타임아웃
+                print(f"⚠️ 시간 초과 [{attempt + 1}/{retries + 1}회] (명령: {cmd}, 기다린응답: {expected_body})")
+
+            # 재시도 여부 판단
+            if attempt < retries:
+                print(f"   ⏳ 300ms 대기 후 재시도...")
+                time.sleep(0.3)
+            else:
+                break
+
+        print(f"⚠️ 최종 실패: {cmd} 명령이 {retries + 1}회 모두 실패")
         return False
 
     # ==========================================
@@ -89,6 +98,7 @@ class LaserController:
         self._execute_command("00", "SSPW", "1")
 
     def laser_off(self):
+        self.set_guide_beam()
         print("🛑 레이저 정지 (OFF)")
         self._execute_command("00", "SSPW", "0")
 
