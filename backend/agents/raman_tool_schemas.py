@@ -83,7 +83,8 @@ RAMAN_TOOLS = [
             "name": "acquire_spectrum",
             "description": (
                 "현재 위치에서 라만 스펙트럼 1회를 수집한다. "
-                "레이저 ON → 출력 안정화 → CCD 촬영 → 레이저 OFF 순서를 자동으로 처리한다."
+                "레이저 ON → 출력 안정화 → CCD 촬영 → 레이저 OFF 순서를 자동으로 처리한다. "
+                "캘리브레이터가 연결된 경우 반환값에 raman_shift_cm-1, wavelength_nm, laser_nm, calibrated=True 필드가 포함된다."
             ),
             "parameters": {
                 "type": "object",

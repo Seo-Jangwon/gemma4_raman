@@ -52,6 +52,8 @@ def move_stage(x: float, y: float, z: float = None) -> dict:
         kw = {"x": x, "y": y, "wait": True}
         if z is not None:
             kw["z"] = z
+        else:
+            kw["z"] = _stage.get_position()[2]  # 현재 Z 유지
         _stage.move_absolute(**kw)
         pos = _stage.get_position()
         return {"ok": True, "position": {"x": pos[0], "y": pos[1], "z": pos[2]}}
@@ -86,7 +88,7 @@ def move_stage_relative(dx: float = 0.0, dy: float = 0.0, dz: float = 0.0) -> di
 # 레이저
 # ──────────────────────────────────────────
 
-def laser_on() -> dict:
+def laser_on() -> dict: 
     """레이저를 켠다."""
     if _laser is None:
         return {"ok": False, "error": "레이저가 초기화되지 않았습니다."}
@@ -183,14 +185,20 @@ def acquire_spectrum(
     if data is None:
         return {"ok": False, "error": "CCD 데이터 수집 실패"}
 
-    spectrum = data[:_ccd.width]  # FVB 모드: 앞 width 개만 유효한 스펙트럼
-    return {
+    intensity = data["intensity"]
+    result = {
         "ok": True,
-        "length": len(spectrum),
-        "max_intensity": float(max(spectrum)),
-        "sum_intensity": float(sum(spectrum)),
-        "data": spectrum,
+        "length": len(intensity),
+        "max_intensity": float(max(intensity)),
+        "sum_intensity": float(sum(intensity)),
+        "data": intensity,
+        "calibrated": data.get("calibrated", False),
     }
+    if data.get("calibrated"):
+        result["raman_shift_cm-1"] = data["raman_shift_cm-1"]
+        result["wavelength_nm"] = data["wavelength_nm"]
+        result["laser_nm"] = data["laser_nm"]
+    return result
 
 
 # ──────────────────────────────────────────
