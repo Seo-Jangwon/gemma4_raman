@@ -48,13 +48,21 @@ if str(_PROJECT_ROOT) not in sys.path:
 from backend.agents.USE_stage_test       import TangoController   # noqa: E402
 from backend.agents.USE_andor_test       import AndorCamera        # noqa: E402
 from backend.agents.USE_laser_with_power import LaserController    # noqa: E402
+from backend.agents                      import raman_tools         # noqa: E402
 # StreamingTUCam 은 _init_camera() 안에서 lazy import
 # → TUCam.py 가 import 시점에 TUCam.dll 을 바로 로드하기 때문에
 #   DLL 이 없는 환경에서 모듈 import 자체가 실패하는 것을 방지
 
+try:
+    from backend.agents.raman_calibration import RamanCalibrator    # noqa: E402
+except ImportError:
+    RamanCalibrator = None
+
 STAGE_DLL_PATH   = str(_BACKEND / "agents" / "Tango_DLL.dll")
 ANDOR_DLL_PATH   = str(_BACKEND / "agents" / "atmcd64d.dll")
-ANDOR_CONFIG_DIR = str(_BACKEND / "agents")
+ANDOR_CONFIG_DIR = str(_BACKEND / "agents")         # Detector.ini 위치
+ANDOR_CONFIG_TXT = str(_BACKEND / "Config.txt")  
+
 LASER_PORT       = "COM4"
 OLLAMA_HOST      = "http://192.168.1.16:11434"
 OLLAMA_MODEL     = "gemma4:31b"
@@ -152,41 +160,53 @@ class HardwareManager:
 
     def _init_ccd(self):
         """
-        Andor CCD:
-          연결 → SetTemperature(-40) → CoolerON
-          → GetTemperature 폴링 — DRV_TEMP_STABILIZED 까지 블로킹.
+        Andor CCD 초기화.
+
+        흐름:
+          1) RamanCalibrator.from_factory_calibration() → 외부 파일 없이 캘리브레이터 생성
+          2) AndorCamera(dll, calibrator) 생성
+          3) cam.initialize(config_dir, config_txt_path) → Config.txt 기반 파라미터 적용
+             ★ 이 단계에서 VSSpeed/HSSpeed/PreAmpGain 이 설정됨
+          4) 냉각 -40°C 안정화 대기 (블로킹)
         """
         print("\n[CCD]   Andor CCD 연결 중...")
-        ccd = AndorCamera(ANDOR_DLL_PATH)
 
-        if not ccd.initialize(ANDOR_CONFIG_DIR):
+        # ── 캘리브레이터 생성 (외부 파일 불필요) ──
+        calibrator = None
+        if RamanCalibrator is not None:
+            calibrator = RamanCalibrator.from_factory_calibration()
+            print(f"[CCD]   Factory calibration 적용: "
+                  f"{calibrator._lut.min():.0f}~{calibrator._lut.max():.0f} cm⁻¹")
+
+        # ── CCD 초기화 (Config.txt 기반) ──
+        ccd = AndorCamera(ANDOR_DLL_PATH, calibrator=calibrator)
+        if not ccd.initialize(ANDOR_CONFIG_DIR, config_txt_path=ANDOR_CONFIG_TXT):
             raise RuntimeError("Andor CCD 초기화 실패")
 
+        # ── 냉각 시작 ──
         if not ccd.set_temperature(CCD_COOL_TARGET):
             raise RuntimeError(f"SetTemperature({CCD_COOL_TARGET}) 실패")
         if not ccd.cooler_on():
             raise RuntimeError("CoolerON 실패")
 
-        print(f"[CCD]   냉각 시작 → {CCD_COOL_TARGET}°C 안정화 대기 (절대 다음 단계로 넘어가지 않음)")
-
+        # ── 온도 안정화 대기 (블로킹) ──
+        print(f"[CCD]   냉각 시작 → {CCD_COOL_TARGET}°C 안정화까지 대기")
+        _LABELS = {
+            DRV_TEMP_STABILIZED:     "안정화",
+            DRV_TEMP_NOT_REACHED:    "냉각 중",
+            DRV_TEMP_NOT_STABILIZED: "미안정",
+            DRV_TEMP_DRIFT:          "드리프트",
+            DRV_TEMP_OFF:            "냉각기 OFF",
+        }
         while True:
             status, t = ccd.get_temperature()
-            label = {
-                DRV_TEMP_STABILIZED:     "안정화",
-                DRV_TEMP_NOT_REACHED:    "냉각 중",
-                DRV_TEMP_NOT_STABILIZED: "미안정",
-                DRV_TEMP_DRIFT:          "드리프트",
-                DRV_TEMP_OFF:            "냉각기 OFF",
-            }.get(status, f"status={status}")
-
-            print(f"\r        현재: {t:5d}°C  [{label}]  (목표: {CCD_COOL_TARGET}°C) ...",
-                  end="", flush=True)
-
+            label = _LABELS.get(status, f"status={status}")
+            print(f"\r        현재: {t:5d}°C  [{label}]  "
+                  f"(목표: {CCD_COOL_TARGET}°C) ...", end="", flush=True)
             if status == DRV_TEMP_STABILIZED:
                 print(f"\n[CCD]   온도 안정화 완료: {t}°C")
                 break
-
-            time.sleep(5)
+            time.sleep(3)
 
         self.ccd = ccd
 
@@ -297,6 +317,8 @@ class HardwareManager:
         print("\n" + "=" * 60)
         print(f"  초기화 완료 — 연결된 장비: {', '.join(connected) if connected else '없음'}")
         print("=" * 60 + "\n")
+
+        raman_tools.init_hardware(stage=self.stage, laser=self.laser, ccd=self.ccd)
 
     def shutdown(self):
         """

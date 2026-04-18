@@ -134,13 +134,37 @@ def acquire_spectrum(
     stabilize_sec: float = 0.5,
 ) -> dict:
     """
-    라만 스펙트럼 1회 수집 — 레이저 ON → 안정화 → CCD 촬영 → 레이저 OFF 를 원자적으로 실행.
+    라만 스펙트럼 1회 수집.
+
+    원자적 실행 흐름:
+      1. 레이저 출력 설정 (ND filter motor 이동, 블로킹)
+      2. 레이저 ON
+      3. 출력 안정화 대기 (stabilize_sec)
+      4. CCD 파라미터 설정 (FVB, 내부 트리거)
+      5. CCD 촬영 (StartAcquisition → 폴링 → GetAcquiredData)
+      6. 레이저 OFF (성공/실패 무관하게 반드시 실행)
 
     Parameters
     ----------
-    exposure      : CCD 노출 시간 (초). 기본 0.1
-    power         : 레이저 출력 (20/40/60/80/100 %). 기본 100
-    stabilize_sec : 레이저 ON 후 출력 안정화 대기 시간 (초). 기본 0.5
+    exposure : float
+        CCD 노출 시간 [초]. 기본 0.1.
+    power : int
+        레이저 출력 [%]. 20/40/60/80/100. 기본 100.
+    stabilize_sec : float
+        레이저 ON 후 안정화 대기 [초]. 기본 0.5.
+
+    Returns
+    -------
+    dict
+        ok: bool
+        length: int           — pixel 수
+        max_intensity: float  — 최대 강도
+        sum_intensity: float  — 합산 강도
+        data: list[int]       — raw intensity 배열
+        calibrated: bool      — 캘리브레이션 적용 여부
+        raman_shift_cm-1: list[float]  — (calibrated=True 시)
+        wavelength_nm: list[float]     — (calibrated=True 시)
+        laser_nm: float                — (calibrated=True 시)
     """
     if _ccd is None:
         return {"ok": False, "error": "분광기가 초기화되지 않았습니다."}
@@ -153,30 +177,32 @@ def acquire_spectrum(
 
     data = None
     try:
-        # 1. 레이저 출력 설정 (필터 모터 이동 — 블로킹)
+        # 1. 레이저 출력 설정 (ND filter motor 이동 — 블로킹)
         _laser.set_power(power)
 
         # 2. 레이저 ON
         _laser.laser_on()
 
-        # 3. 출력 안정화 대기
+        # 3. 출력 안정화 대기 (레이저 모드 전환 후 출력 안정화에 필요)
         time.sleep(stabilize_sec)
 
-        # 4. CCD 파라미터 설정 (FVB 모드, 내부 트리거)
+        # 4. CCD 파라미터 설정
+        #    VSSpeed/HSSpeed/PreAmpGain 은 initialize() 에서 이미 설정됨.
+        #    여기서는 노출/모드/트리거만 변경.
         _ccd.setup_acquisition(
             read_mode=_READ_MODE_FVB,
             exposure_time=exposure,
             trigger_mode=_TRIGGER_MODE_INTERNAL,
         )
 
-        # 5. 촬영 (StartAcquisition → WaitForAcquisition → GetAcquiredData, 블로킹)
+        # 5. 촬영 → dict 반환 (pixel, intensity, + calibrated axes)
         data = _ccd.start_acquisition_cycle()
 
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
     finally:
-        # 6. 성공/실패 무관하게 반드시 레이저 OFF
+        # 6. 레이저 OFF (성공/실패 무관 — 안전 보장)
         try:
             _laser.laser_off()
         except Exception:
@@ -185,6 +211,7 @@ def acquire_spectrum(
     if data is None:
         return {"ok": False, "error": "CCD 데이터 수집 실패"}
 
+    # ── 결과 조립 ──
     intensity = data["intensity"]
     result = {
         "ok": True,
@@ -194,11 +221,15 @@ def acquire_spectrum(
         "data": intensity,
         "calibrated": data.get("calibrated", False),
     }
+
+    # 캘리브레이션 된 경우 축 정보 추가
     if data.get("calibrated"):
         result["raman_shift_cm-1"] = data["raman_shift_cm-1"]
-        result["wavelength_nm"] = data["wavelength_nm"]
-        result["laser_nm"] = data["laser_nm"]
+        result["wavelength_nm"]    = data["wavelength_nm"]
+        result["laser_nm"]         = data["laser_nm"]
+
     return result
+
 
 
 # ──────────────────────────────────────────
