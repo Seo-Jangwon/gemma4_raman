@@ -8,6 +8,7 @@ class LaserController:
         self.baud = baud
         self.ser = None
         self._connect()
+        time.sleep(0.5)
         self.set_guide_beam()
 
     def _connect(self):
@@ -16,7 +17,7 @@ class LaserController:
             print(f"✅ [{self.port}] 레이저 컨트롤러 연결 성공!")
             
             # [추가됨] 장비 연결 직후, 04번 셔터를 한 번 열어주는 초기화 과정 (로그 1번 줄 반영)
-            print("   -> 초기 하드웨어 세팅 중...")
+            print("  ")
             self._execute_command("04", "SMMA", "-0612828", timeout=10.0)
             
         except Exception as e:
@@ -104,8 +105,6 @@ class LaserController:
         self._execute_command("00", "SSPW", "0")
 
     def set_power(self, power_level):
-
-        self.set_guide_beam()
 
         """모터 좌표를 이동시켜 레이저 출력 조절"""
         power_map = {

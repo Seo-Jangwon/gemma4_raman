@@ -110,6 +110,11 @@ def save_csv(result: dict, exposure: float, power: int) -> str:
     out_dir = Path(__file__).resolve().parent / "spectra"
     out_dir.mkdir(exist_ok=True)
     filepath = out_dir / f"spectrum_{timestamp}_exp{exposure}s_pwr{power}pct.csv"
+    
+    if "pixel" not in result and "data" in result:
+        result["pixel"] = list(range(len(result["data"])))
+        result["intensity"] = result["data"]
+
     save_spectrum_csv(result, filepath)
     return str(filepath)
 

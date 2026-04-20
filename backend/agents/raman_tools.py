@@ -130,7 +130,7 @@ def set_laser_power(percent: int) -> dict:
 
 def acquire_spectrum(
     exposure: float = 0.1,
-    power: int = 100,
+    power: int = 20,
     stabilize_sec: float = 0.5,
 ) -> dict:
     """
@@ -179,7 +179,7 @@ def acquire_spectrum(
     try:
         # 1. 레이저 출력 설정 (ND filter motor 이동 — 블로킹)
         _laser.set_power(power)
-
+        time.sleep(stabilize_sec)
         # 2. 레이저 ON
         _laser.laser_on()
 
