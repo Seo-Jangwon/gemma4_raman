@@ -129,8 +129,8 @@ def set_laser_power(percent: int) -> dict:
 # ──────────────────────────────────────────
 
 def acquire_spectrum(
-    exposure: float = 0.1,
-    power: int = 20,
+    exposure: float = 0.2,
+    power: int = 40,
     stabilize_sec: float = 0.5,
 ) -> dict:
     """

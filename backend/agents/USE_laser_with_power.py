@@ -273,7 +273,7 @@ def main():
         print("2. 🛑 레이저 끄기 (OFF)")
         print("3. ⚙️ 파워 설정 (20 / 40 / 60 / 80 / 100)")
         print("4. 🔦 가이드빔 켜기")
-        print("5. 🏠 원점 복귀 (SMMH — 모터 물리적 이동 주의)")
+        # print("5. 🏠 원점 복귀 (SMMH — 모터 물리적 이동 주의)")
         print("Q. 🚪 프로그램 종료")
         print("-" * 50)
 
@@ -291,8 +291,8 @@ def main():
                 print("⚠️ 숫자로 입력해주세요.")
         elif choice == '4':
             laser.set_guide_beam()
-        elif choice == '5':
-            laser.home_search()
+        # elif choice == '5':
+        #     laser.home_search()
         elif choice == 'Q':
             laser.close()
             print("터미널을 종료합니다. 수고하셨습니다!")
