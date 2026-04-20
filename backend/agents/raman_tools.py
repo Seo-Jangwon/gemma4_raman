@@ -147,9 +147,9 @@ def acquire_spectrum(
     Parameters
     ----------
     exposure : float
-        CCD 노출 시간 [초]. 기본 0.1.
+        CCD 노출 시간 [초]. 기본 0.2.
     power : int
-        레이저 출력 [%]. 20/40/60/80/100. 기본 100.
+        레이저 출력 [%]. 20/40/60/80/100. 기본 40.
     stabilize_sec : float
         레이저 ON 후 안정화 대기 [초]. 기본 0.5.
 
@@ -220,6 +220,8 @@ def acquire_spectrum(
         "sum_intensity": float(sum(intensity)),
         "data": intensity,
         "calibrated": data.get("calibrated", False),
+        "exposure_time": exposure,
+        "laser_power_pct": power,
     }
 
     # 캘리브레이션 된 경우 축 정보 추가

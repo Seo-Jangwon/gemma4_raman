@@ -152,6 +152,8 @@ class AndorConfig:
         self.num_accumulation   = int(cp[s].get("NumberOfAccumulation", "1"))
         self.track_centre       = int(cp[s].get("TrackCentre", "0"))
         self.track_height       = int(cp[s].get("TrackHeight", "0"))
+        self.shutter_type       = int(cp[s].get("ShutterType", "1"))
+        self.shutter_mode       = int(cp[s].get("ShutterMode", "0"))
 
     def __repr__(self):
         return (f"AndorConfig(exp={self.exposure_time}s, "
@@ -418,7 +420,13 @@ class AndorCamera:
             print(f"[CCD]   PreAmpGain idx={cfg.preamp_gain_index} "
                   f"({self.preamp_gains[cfg.preamp_gain_index]:.1f}x)")
 
-        # 4) 기본 acquisition 설정
+        # 4) 셔터 설정
+        #    ShutterType=1 → TTL High to open, ShutterMode=0 → Auto
+        self._call("SetShutter", c_int(cfg.shutter_type), c_int(cfg.shutter_mode),
+                   c_int(0), c_int(0))
+        print(f"[CCD]   Shutter type={cfg.shutter_type}, mode={cfg.shutter_mode}")
+
+        # 5) 기본 acquisition 설정
         self._call("SetAcquisitionMode", c_int(cfg.acquisition_mode))
         self._call("SetTriggerMode", c_int(cfg.trigger_mode))
         self._call("SetExposureTime", c_float(cfg.exposure_time))
@@ -496,7 +504,7 @@ class AndorCamera:
     # ══════════════════════════════════════════════════════════════════════════
 
     def setup_acquisition(self, read_mode: int = READ_MODE_FVB,
-                          exposure_time: float = 0.1,
+                          exposure_time: float = 0.2,
                           trigger_mode: int = TRIGGER_MODE_INTERNAL,
                           acq_mode: int = ACQ_MODE_SINGLE,
                           num_accumulations: int = 1,
@@ -569,17 +577,21 @@ class AndorCamera:
     # Shutter 제어
     # ══════════════════════════════════════════════════════════════════════════
 
+    def _shutter_type(self) -> int:
+        """Config.txt ShutterType 값. Config 없으면 1 (TTL High to open, IDUS 기본)."""
+        return self._config.shutter_type if self._config else 1
+
     def set_shutter_auto(self):
         """셔터를 자동 모드로 (촬영 시 열림, 완료 시 닫힘)."""
-        self._call("SetShutter", c_int(0), c_int(0), c_int(0), c_int(0))
+        self._call("SetShutter", c_int(self._shutter_type()), c_int(0), c_int(0), c_int(0))
 
     def set_shutter_open(self):
         """셔터 상시 열림."""
-        self._call("SetShutter", c_int(0), c_int(1), c_int(0), c_int(0))
+        self._call("SetShutter", c_int(self._shutter_type()), c_int(1), c_int(0), c_int(0))
 
     def set_shutter_close(self):
         """셔터 상시 닫힘 (dark frame 촬영 시)."""
-        self._call("SetShutter", c_int(0), c_int(2), c_int(0), c_int(0))
+        self._call("SetShutter", c_int(self._shutter_type()), c_int(2), c_int(0), c_int(0))
 
     # ══════════════════════════════════════════════════════════════════════════
     # Image Flip
@@ -718,6 +730,10 @@ def save_spectrum_csv(result: dict, path: str | Path):
             # 메타 정보를 주석으로
             f.write(f"# laser_nm,{result['laser_nm']}\n")
             f.write(f"# calibration,factory_polynomial\n")
+            if "exposure_time" in result:
+                f.write(f"# exposure_time,{result['exposure_time']}\n")
+            if "laser_power_pct" in result:
+                f.write(f"# laser_power_pct,{result['laser_power_pct']}\n")
             w.writerow(["pixel", "raman_shift_cm-1", "wavelength_nm", "intensity"])
             for i in range(len(result["pixel"])):
                 w.writerow([
@@ -753,7 +769,7 @@ if __name__ == "__main__":
             # ── 3. 측정 ──
             cam.setup_acquisition(
                 read_mode=READ_MODE_FVB,
-                exposure_time=0.1,
+                exposure_time=0.2,
                 trigger_mode=TRIGGER_MODE_INTERNAL,
             )
             result = cam.start_acquisition_cycle()

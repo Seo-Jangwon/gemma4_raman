@@ -41,8 +41,8 @@ from backend.agents.USE_autofocus_local import AutoFocusLocal
 def parse_args():
     """명령줄 인자 파싱."""
     p = argparse.ArgumentParser(description="acquire_spectrum() 테스트")
-    p.add_argument("--exposure",   type=float, default=0.1,
-                   help="CCD 노출 시간 (초, 기본 0.1)")
+    p.add_argument("--exposure",   type=float, default=0.2,
+                   help="CCD 노출 시간 (초, 기본 0.2)")
     p.add_argument("--power",      type=int,   default=20,
                    choices=[20, 40, 60, 80, 100],
                    help="레이저 출력 %% (기본 20)")
