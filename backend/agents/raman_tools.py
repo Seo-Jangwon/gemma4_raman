@@ -177,23 +177,25 @@ def acquire_spectrum(
 
     data = None
     try:
-        # 1. 레이저 출력 설정 (ND filter motor 이동 — 블로킹)
-        _laser.set_power(power)
-        time.sleep(stabilize_sec)
-        # 2. 레이저 ON
-        _laser.laser_on()
 
-        # 3. 출력 안정화 대기 (레이저 모드 전환 후 출력 안정화에 필요)
-        time.sleep(stabilize_sec)
-
-        # 4. CCD 파라미터 설정
+        # 1. CCD 파라미터 설정
         #    VSSpeed/HSSpeed/PreAmpGain 은 initialize() 에서 이미 설정됨.
-        #    여기서는 노출/모드/트리거만 변경.
+        #    여기서는 노출/모드/트리거만 변경
         _ccd.setup_acquisition(
             read_mode=_READ_MODE_FVB,
             exposure_time=exposure,
             trigger_mode=_TRIGGER_MODE_INTERNAL,
         )
+
+        _ccd.take_dark_frame()  # 배경 노이즈 측정
+
+        # 2. 레이저 출력 설정
+        _laser.set_power(power)
+        time.sleep(stabilize_sec)
+
+        # 3. 레이저 ON
+        _laser.laser_on()
+        time.sleep(stabilize_sec)  # 레이저가 켜지는 물리적 시간 대기
 
         # 5. 촬영 → dict 반환 (pixel, intensity, + calibrated axes)
         data = _ccd.start_acquisition_cycle()
