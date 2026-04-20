@@ -214,7 +214,6 @@ class AndorCamera:
         self.preamp_gains = []            # 사용 가능한 게인 목록
         self.hs_speeds = []               # 사용 가능한 수평 속도 목록 [MHz]
         self.vs_speeds = []               # 사용 가능한 수직 속도 목록 [µs/pixel]
-        self.dark_frame = None            # 배경 노이즈 저장용
 
         # DLL 로드
         try:
@@ -340,21 +339,6 @@ class AndorCamera:
             self._apply_defaults()
 
         return True
-
-    def take_dark_frame(self):
-        """셔터를 닫고 배경 노이즈(Dark Frame)를 1회 측정하여 저장"""
-        print("[CCD] 다크 프레임(노이즈) 측정 시작...")
-        self.set_shutter_close() # 셔터 강제 폐쇄
-        time.sleep(0.2)          # 셔터가 닫히는 물리적 시간 대기
-        
-        # 현재 설정된 노출 시간으로 노이즈 촬영 (subtract_bg=False로 원본 획득)
-        res = self.start_acquisition_cycle(subtract_bg=False)
-        if res:
-            self.dark_frame = np.array(res['intensity'])
-            print("[CCD] 다크 프레임 저장 완료.")
-        
-        self.set_shutter_auto()  # 다시 자동 모드로 복구
-        return self.dark_frame
 
     def _enum_speeds(self):
         """
@@ -615,7 +599,7 @@ class AndorCamera:
     # 촬영 + 데이터 수집
     # ══════════════════════════════════════════════════════════════════════════
 
-    def start_acquisition_cycle(self, subtract_bg=True) -> dict | None:
+    def start_acquisition_cycle(self) -> dict | None:
         """
         1회 촬영 사이클: StartAcquisition → 폴링 대기 → GetAcquiredData → dict 반환.
 
@@ -658,13 +642,6 @@ class AndorCamera:
 
         # FVB 모드 (1D) 면 ravel, Image 모드 (2D) 면 copy
         intensity = self._buffer.ravel() if self.Ny_ro == 1 else self._buffer.copy()
-
-        # 다크 프레임 차분
-        if subtract_bg and self.dark_frame is not None:
-            if len(intensity) == len(self.dark_frame):
-                intensity = intensity - self.dark_frame
-                # 배경을 뺐을 때 센서 노이즈가 튀어서 음수가 된 값은 0으로 평탄화
-                intensity = np.where(intensity < 0, 0, intensity)
 
         # pixel / intensity + 캘리브레이션 축 붙여서 반환
         return self._attach_axes(intensity)
