@@ -123,6 +123,8 @@ class LaserController:
             self._execute_command(axis, "SMSE", "", timeout=5.0, retries=1)
             time.sleep(0.05)
 
+        self.home_search()
+
         # ── Step 3: 레이저 OFF 확인 (안전) ──
         print("\n[Step 3/4] 레이저 OFF 확인 (SSPW 0)")
         self._execute_command("00", "SSPW", "0", timeout=5.0, retries=1)
@@ -150,10 +152,10 @@ class LaserController:
         
         비정상 종료 후 좌표계가 어긋났다고 판단될 때 사용하세요.
         """
-        confirm = input("⚠️ 모든 모터가 원점으로 이동합니다. 계속하시겠습니까? (y/N): ").strip().lower()
-        if confirm != 'y':
-            print("   -> 원점 복귀 취소됨.")
-            return
+        # confirm = input("⚠️ 모든 모터가 원점으로 이동합니다. 계속하시겠습니까? (y/N): ").strip().lower()
+        # if confirm != 'y':
+        #     print("   -> 원점 복귀 취소됨.")
+        #     return
 
         print("\n🏠 4축 원점 복귀 시작 (SMMH) — FAS_MoveOriginSingleAxis")
 
