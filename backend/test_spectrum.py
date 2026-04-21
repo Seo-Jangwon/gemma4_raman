@@ -175,9 +175,8 @@ def main():
             csv_path = save_csv(result, args.exposure, args.power)
             print(f"\n  [CSV] 저장 완료: {csv_path}")
 
-        # 5. 선택적 플롯
-        if args.plot and result["ok"]:
-            plot_spectrum(result)
+        # 5. 플롯
+        plot_spectrum(result)
 
     except KeyboardInterrupt:
         print("\n[!] Ctrl+C — 종료 시퀀스 진입")

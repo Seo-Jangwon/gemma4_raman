@@ -100,31 +100,20 @@ if __name__ == "__main__":
     import sys
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
-    # ── 기본 연결 테스트 ──────────────────────────────
-    # print(generate("안녕하세요! 연결 테스트입니다."))
-
-    # ── Tool calling mock 테스트 ──────────────────────
-    import sys, os
-    sys.path.insert(0, os.path.dirname(__file__))
     from agents.raman_tool_schemas import RAMAN_TOOLS
+    from agents.raman_tools import TOOL_DISPATCH
 
-    # 실제 하드웨어 없이 동작 확인용 mock
-    def mock_dispatch(args):
-        return {"ok": True, "mock": True, "args_received": args}
-
-    mock_tool_dispatch = {
-        "move_stage":          mock_dispatch,
-        "get_stage_position":  mock_dispatch,
-        "move_stage_relative": mock_dispatch,
-        "laser_on":            mock_dispatch,
-        "laser_off":           mock_dispatch,
-        "set_laser_power":     mock_dispatch,
-        "acquire_spectrum":    mock_dispatch,
-    }
-
-    result = run_agent(
-        user_message="현재 스테이지 위치를 알려줘.",
-        tools=RAMAN_TOOLS,
-        tool_dispatch=mock_tool_dispatch,
-    )
-    print("\n[최종 답변]", result)
+    print("라만 분광기 AI 에이전트 시작 (종료: 'exit' 또는 Ctrl+C)")
+    while True:
+        try:
+            user_input = input("\n명령 > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if not user_input or user_input.lower() in {"exit", "quit", "종료"}:
+            break
+        result = run_agent(
+            user_message=user_input,
+            tools=RAMAN_TOOLS,
+            tool_dispatch=TOOL_DISPATCH,
+        )
+        print("\n[답변]", result)
