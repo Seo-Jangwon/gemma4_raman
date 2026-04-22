@@ -329,13 +329,10 @@ class LaserController:
             if key in inner:
                 data_start = inner.index(key) + len(key)
                 data_raw = inner[data_start:]
-                # 8-hex 위치값 + 2-hex 체크섬
+                # 부호+7자리 10진수 위치값 + 2자리 체크섬 (e.g. "-0602895" + "2b")
                 if len(data_raw) >= 10:
                     try:
-                        val = int(data_raw[:8], 16)
-                        if val >= 0x80000000:
-                            val -= 0x100000000
-                        return val
+                        return int(data_raw[:8])
                     except ValueError:
                         pass
         return None
@@ -356,7 +353,7 @@ class LaserController:
             param_cmd: "WCHS" (HomingVelocity) 또는 "WCNS" (MovingVelocity)
             value: 속도값 (pps, unsigned 32-bit → 8-hex 인코딩)
         """
-        arg = f"{value & 0xFFFFFFFF:08x}"
+        arg = str(value)
         ok, _ = self._send_command(axis_id, param_cmd, arg, timeout=3.0, retries=0)
         return ok
 
@@ -396,15 +393,13 @@ class LaserController:
         """
         v2 호환 인터페이스.
 
-        모션 명령(SMMA/SMMH/SMMI)인 경우:
+        모션 명령(SMMA/SMMI)인 경우:
           1. 패킷 전송 → ACK 확인
           2. GMMS 폴링 → 실제 모션 완료 대기
           3. GMCP → 위치 검증
         비모션 명령은 ACK 확인만.
         """
-        is_motion = cmd.upper() in ("SMMA", "SMMH", "SMMI")
-        is_homing = cmd.upper() == "SMMH"
-
+        is_motion = cmd.upper() in ("SMMA", "SMMI")
         # 1) ACK 확인
         ok, _ = self._send_command(target_id, cmd, arg,
                                    timeout=5.0, retries=retries)
@@ -415,7 +410,7 @@ class LaserController:
             done = self._wait_motion_complete(
                 target_id,
                 timeout=timeout,
-                check_origin=is_homing
+                check_origin=False
             )
             if done:
                 # 3) 위치 검증
@@ -430,19 +425,15 @@ class LaserController:
         return ok
 
     # ==============================================================
-    # 초기화 시퀀스 (Rays-ON.exe 패킷 캡처 기반)
+    # 초기화 시퀀스 (Rays-ON.exe 패킷 캡처 기반, 체크섬 검증 완료)
     #
     # 실증된 순서:
-    #   1. ERCL ×2          — 알람 리셋
-    #   2. SMSE ×4축        — 서보 ON (02→01→05→04, ARG 없음)
-    #   3. SSPW 0           — 레이저 OFF (안전)
-    #   4. SMMH F ×4축      — 원점 복귀 + GMMS 폴링
-    #   5. SMMA + GMMS 폴링 — 셔터/가이드빔 위치 이동
-    #
-    # 참고: Rays-ON.exe 캡처에서 SMSE와 SMMH 사이에 속도 설정 명령이
-    # 관찰되었으나, 이 ASCII 래퍼에서 해당 명령(WCHS/WCNS)이 ercd 03으로
-    # 거부됨. EEPROM에 Rays-ON.exe가 이전에 저장한 값이 사용되므로
-    # 실용상 문제 없음. 정확한 명령 이름 확인 시 추가 가능.
+    #   1. ERCL ×2           — 알람 리셋
+    #   2. SMSE ×4축         — 서보 활성화 (02→01→05→04)
+    #   3. SSPW 0            — 레이저 OFF (안전)
+    #   3.5. WCHS/WCNS ×4축  — 속도 설정 (10진수 문자열 형식)
+    #   4. home_search()     — SMMHF(모드설정) → SMMA(사전위치) → SIPW(트리거)
+    #   5. SMMA              — 셔터/가이드빔 위치 이동
     # ==============================================================
     def _full_initialization(self):
         if not (self.ser and self.ser.is_open):
@@ -470,13 +461,14 @@ class LaserController:
         self._send_command("00", "SSPW", "0", timeout=3.0, retries=1)
         time.sleep(0.05)
 
-        # ── Step 4: 원점 복귀 (SMMH F + GMMS 폴링) ──
+        # ── Step 3.5: 속도 파라미터 설정 (WCHS + WCNS) ──
+        self._set_all_speeds()
+
+        # ── Step 4: 원점 복귀 (SMMHF 모드설정 → SMMA 사전위치 → SIPW 트리거) ──
         self.home_search()
 
-        # ── Step 5: 셔터 오픈 + 가이드빔 ──
-        print("\n[Step 5/5] 셔터 오픈 + 가이드빔 전환")
-        self._execute_command("04", "SMMA", "-0612828", timeout=10.0)
-        time.sleep(0.3)
+        # ── Step 5: 가이드빔 대기 상태 ──
+        print("\n[Step 5/5] 가이드빔 대기 상태 전환")
         self.set_guide_beam()
 
         print("\n" + "=" * 55)
@@ -488,38 +480,59 @@ class LaserController:
     # ==============================================================
     def home_search(self):
         """
-        4축 원점 복귀 (SMMH F) + GMMS 폴링 완료 대기.
+        4축 원점 복귀.
 
-        주의: 모터가 물리적으로 이동하므로 사용자 확인 후에만 실행.
-        Rays-ON.exe 순서: 02 → 01 → 05 → 04 (각 축 완료 대기)
-
-        비정상 종료 후 좌표계가 어긋났다고 판단될 때 사용하세요.
+        패킷 캡처(Rays-ON.exe) 검증된 실제 순서:
+          1. SMMHF → 즉시 홈 복귀 실행 (축 02, 05, 04 순서, 각 축 ORIGIN_OK 대기)
+          2. SMMA  — 홈 복귀 완료 후 운용 위치로 이동
+          3. SIPW 1 — 축01 트리거
+          4. SMMA 축01 → -0070600
         """
-        # confirm = input("⚠️ 모든 모터가 원점으로 이동합니다. 계속? (y/N): ")
-        # if confirm.strip().lower() != 'y':
-        #     print("   -> 원점 복귀 취소됨.")
-        #     return False
+        print("\n🏠 4축 원점 복귀 시작")
 
-        print("\n🏠 4축 원점 복귀 시작 (SMMH F + GMMS 폴링)")
-
+        # [1] 축별 홈 복귀: SMMHF 전송 → 즉시 물리적 홈 복귀 시작 → ORIGIN_OK 대기
+        #     축01(LASER_FILTER)은 SMMHF 없음 — SIPW로 별도 처리
         home_axes = [
-            ("02", 20.0),   # ND Filter ~1.3초
-            ("01", 20.0),   # Laser Filter ~5초
-            ("05", 25.0),   # Grating ~7.8초 (가장 오래 걸림)
-            ("04", 20.0),   # Beam Splitter ~5초
+            ("02", 20.0),  # ND_FILTER
+            ("05", 25.0),  # GRATING (가장 오래 걸림)
+            ("04", 20.0),  # BEAM_SPLITTER
         ]
-
-        for axis_id, timeout in home_axes:
-            name = self.AXES[axis_id]["name"]
-            print(f"\n   [{axis_id} {name}] 원점 복귀 중...")
-            success = self._execute_command(axis_id, "SMMH", "F",
-                                            timeout=timeout, retries=1)
-            if success:
-                print(f"   [{axis_id} {name}] ✅ 원점 복귀 완료")
-            else:
-                print(f"   [{axis_id} {name}] ❌ 원점 복귀 실패 — 중단")
+        for axis, timeout in home_axes:
+            name = self.AXES[axis]["name"]
+            print(f"\n   [{axis} {name}] 홈 복귀 중...")
+            ok, _ = self._send_command(axis, "SMMHF", "", timeout=3.0, retries=1)
+            if not ok:
+                print(f"   ❌ [{axis} {name}] SMMHF 실패")
                 return False
-            time.sleep(0.3)
+            done = self._wait_motion_complete(axis, timeout=timeout, check_origin=True)
+            if done:
+                print(f"   ✅ [{axis} {name}] 홈 복귀 완료")
+            else:
+                print(f"   ❌ [{axis} {name}] 홈 복귀 타임아웃")
+                return False
+
+        # [2] 홈 복귀 후 운용 위치로 이동 (패킷 캡처 순서: 04→05→02)
+        print("\n   [2/4] 홈 복귀 후 운용 위치 이동")
+        post_positions = [
+            ("04", "-0010000"),  # BEAM_SPLITTER 운용 대기
+            ("05", "-0570000"),  # GRATING 운용 대기
+            ("02", "-0602895"),  # ND_FILTER → 가이드빔(메인빔 차단) 위치
+        ]
+        for axis, pos in post_positions:
+            name = self.AXES[axis]["name"]
+            print(f"   [{axis} {name}] → {pos}")
+            self._execute_command(axis, "SMMA", pos, timeout=15.0)
+
+        # [3] SIPW — 축01 홈 복귀 트리거
+        print("\n   [3/4] SIPW — 축01 트리거")
+        ok, _ = self._send_command("00", "SIPW", "1", timeout=5.0, retries=1)
+        if not ok:
+            print("   ❌ SIPW 전송 실패")
+            return False
+
+        # [4] 축01 운용 위치 이동 (패킷 캡처 Row 114)
+        print("\n   [4/4] 축01(LASER_FILTER) 운용 위치 이동")
+        self._execute_command("01", "SMMA", "-0070600", timeout=20.0)
 
         print("\n🏠 4축 원점 복귀 전체 완료!")
         return True
@@ -534,18 +547,19 @@ class LaserController:
         주의: 먼저 set_power()로 파워를 설정해야 합니다.
         가이드빔 상태(ND 필터 극한 위치)에서는 빔이 차단됩니다.
         """
-        if not hasattr(self, '_power_set') or not self._power_set:
-            print("⚠️ 파워가 설정되지 않았습니다. 먼저 '3. 파워 설정'을 하세요.")
-            print("   (가이드빔 상태에서는 ND 필터가 빔을 차단합니다)")
-            return
-        print("⚡ 레이저 발사 (ON)")
+        if self._power_set:
+            print("⚡ 레이저 발사 준비 (축04 측정 위치 이동 중...)")
+            self._execute_command("04", "SMMA", "-0303764", timeout=10.0)
+        else:
+            print("🔦 가이드빔 ON (축04 이동 없음)")
+        print("⚡ 레이저 ON (SSPW 1)")
         self._send_command("00", "SSPW", "1", timeout=3.0)
 
     def laser_off(self):
-        self.set_guide_beam()
-        self._power_set = False
         print("🛑 레이저 정지 (OFF)")
         self._send_command("00", "SSPW", "0", timeout=3.0)
+        self._power_set = False
+        self.set_guide_beam()
 
     def set_power(self, power_level):
         """모터 좌표를 이동시켜 레이저 출력 조절 (Target 02, SMMA)"""
@@ -570,14 +584,16 @@ class LaserController:
             print("⚠️ 지원하지 않는 파워 레벨입니다. (20, 40, 60, 80, 100 중 선택)")
 
     def set_guide_beam(self):
-        """가이드빔용 레이저 모터 제어 (Target 02, 극한 위치로 필터 닫기)"""
-        target_pos = "-0602895"
-        print(f"🔦 가이드빔 모드로 전환 중... (메인 필터를 극한으로 닫음)")
-        success = self._execute_command("02", "SMMA", target_pos, timeout=15.0)
-        if success:
-            print("   -> 🔦 가이드빔 전환 완료!")
-        else:
-            print("   -> ❌ 가이드빔 전환 실패 (응답 없음)")
+        """
+        가이드빔 대기 상태로 전환.
+        - 축04(BEAM_SPLITTER) → -0612828 (대기 위치)
+        - 축02(ND_FILTER)    → -0602895 (메인 빔 차단)
+        """
+        self._power_set = False
+        print("🔦 가이드빔 모드로 전환 중...")
+        self._execute_command("04", "SMMA", "-0612828", timeout=10.0)
+        self._execute_command("02", "SMMA", "-0602895", timeout=15.0)
+        print("   -> 🔦 가이드빔 전환 완료!")
 
     # ==============================================================
     # 종료 시퀀스
@@ -585,30 +601,20 @@ class LaserController:
     def close(self):
         """
         안전 종료 시퀀스.
-        Rays-ON.exe 관찰 기반:
-          1. 레이저 OFF
-          2. 가이드빔 위치로 이동 (02번 축)
-          3. 04번 셔터 닫기
-        모든 SMMA에 GMMS 폴링 적용.
+          1. SSPW 0 — 레이저 OFF
+          2. set_guide_beam() — 축04 대기 위치, 축02 빔 차단
         """
         if self.ser and self.ser.is_open:
             print("\n🔌 안전 종료 시퀀스 시작...")
 
             # 1. 레이저 OFF
-            print("   [1/3] 레이저 OFF")
+            print("   [1/2] 레이저 OFF")
             self._send_command("00", "SSPW", "0", timeout=5.0, retries=1)
             time.sleep(0.1)
 
-            # 2. 가이드빔 위치로 이동 (GMMS 폴링)
-            print("   [2/3] 가이드빔 위치로 이동")
-            self._execute_command("02", "SMMA", "-0602895",
-                                  timeout=10.0, retries=1)
-            time.sleep(0.3)
-
-            # 3. 04번 셔터 닫기 (GMMS 폴링)
-            print("   [3/3] 04번 셔터 닫기")
-            self._execute_command("04", "SMMA", "-0612828",
-                                  timeout=10.0, retries=1)
+            # # 2. 가이드빔 대기 상태 (축04 → -0612828, 축02 → -0602895)
+            # print("   [2/2] 가이드빔 대기 위치로 복귀")
+            # self.set_guide_beam()
             time.sleep(0.1)
 
             self.ser.close()
@@ -617,7 +623,7 @@ class LaserController:
 
 def main():
     print("\n" + "=" * 55)
-    print("   🚀 Raman Laser Control Terminal v3")
+    print("   Raman Laser Control Terminal")
     print("      Rays-ON.exe 패킷 캡처 + Fastech SDK 헤더 기반")
     print("      GMMS 폴링 / ercd 자동감지 / GMCP 위치검증")
     print("=" * 55)
@@ -631,9 +637,8 @@ def main():
 
     while True:
         print("\n" + "-" * 50)
-        print("  사용법: 3(파워설정) → 1(레이저ON) → 2(OFF)")
         print("-" * 50)
-        print("1. ⚡ 레이저 켜기 (ON)  ※ 파워 먼저 설정 필요")
+        print("1. ⚡ 레이저 켜기 (ON)")
         print("2. 🛑 레이저 끄기 (OFF)")
         print("3. ⚙️ 파워 설정 (20 / 40 / 60 / 80 / 100)")
         print("4. 🔦 가이드빔 켜기")
