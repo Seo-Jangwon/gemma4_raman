@@ -493,9 +493,9 @@ class LaserController:
         # [1] 축별 홈 복귀: SMMHF 전송 → 즉시 물리적 홈 복귀 시작 → ORIGIN_OK 대기
         #     축01(LASER_FILTER)은 SMMHF 없음 — SIPW로 별도 처리
         home_axes = [
-            ("02", 20.0),  # ND_FILTER
-            ("05", 25.0),  # GRATING (가장 오래 걸림)
-            ("04", 20.0),  # BEAM_SPLITTER
+            ("02", 30.0),  # ND_FILTER
+            ("05", 30.0),  # GRATING (가장 오래 걸림)
+            ("04", 30.0),  # BEAM_SPLITTER
         ]
         for axis, timeout in home_axes:
             name = self.AXES[axis]["name"]
