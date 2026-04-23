@@ -318,7 +318,12 @@ class HardwareManager:
         print(f"  초기화 완료 — 연결된 장비: {', '.join(connected) if connected else '없음'}")
         print("=" * 60 + "\n")
 
-        raman_tools.init_hardware(stage=self.stage, laser=self.laser, ccd=self.ccd)
+        raman_tools.init_hardware(
+            stage=self.stage, 
+            laser=self.laser, 
+            ccd=self.ccd, 
+            camera=self.camera
+        )
 
     def shutdown(self):
         """

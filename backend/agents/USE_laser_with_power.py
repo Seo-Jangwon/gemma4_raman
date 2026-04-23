@@ -183,14 +183,16 @@ class LaserController:
                     ercd_idx = inner.index("ercd") + 4
                     ercd_raw = inner[ercd_idx:]
                     # 체크섬(마지막 2자리) 제거
-                    ercd_data = ercd_raw[:-2] if len(ercd_raw) > 2 else ercd_raw
+                    ercd_data = ercd_raw[:8] if len(ercd_raw) >= 8 else ercd_raw[:-2]
                     print(f"   ❌ ercd 에러: 0x{ercd_data} [{attempt + 1}/{retries + 1}]")
                     got_ercd = True
                     break
 
                 # 정상 ACK (소문자 cmd echo)
-                if expected_key in inner:
-                    data_start = inner.index(expected_key) + len(expected_key)
+                inner_lower = inner.lower()
+                if expected_key in inner_lower:
+                    data_start = inner_lower.index(expected_key) + len(expected_key)
+                    # 원본 inner에서 데이터를 추출하여 대소문자 변형 방지
                     data_raw = inner[data_start:]
                     return True, data_raw
 
@@ -496,6 +498,7 @@ class LaserController:
             ("02", 30.0),  # ND_FILTER
             ("05", 30.0),  # GRATING (가장 오래 걸림)
             ("04", 30.0),  # BEAM_SPLITTER
+            ("01", 30.0),
         ]
         for axis, timeout in home_axes:
             name = self.AXES[axis]["name"]

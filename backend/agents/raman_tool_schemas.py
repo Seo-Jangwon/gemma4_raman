@@ -107,4 +107,20 @@ RAMAN_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_camera_stream",
+            "description": "카메라 실시간 스트리밍(미리보기)을 시작한다. 시편의 위치를 확인하거나 초점을 맞출 때 사용한다.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_camera_stream",
+            "description": "카메라 실시간 스트리밍을 중지한다.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]

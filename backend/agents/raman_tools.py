@@ -21,14 +21,22 @@ STAGE_MAX_Z =   1.0
 _stage = None
 _laser = None
 _ccd   = None
+_camera = None
 
 
-def init_hardware(stage=None, laser=None, ccd=None):
+def init_hardware(stage=None, laser=None, ccd=None, camera=None):
     """하드웨어 객체를 주입. run_scan.py 등에서 초기화 후 호출."""
-    global _stage, _laser, _ccd
+    global _stage, _laser, _ccd, _camera
     _stage = stage
     _laser = laser
     _ccd = ccd
+    _camera = camera
+    print(f"[DEBUG] raman_tools.init_hardware() 호출됨: stage={_stage}, laser={_laser}, ccd={_ccd}, camera={_camera}")
+
+
+# ──────────────────────────────────────────
+# 스테이지
+# ──────────────────────────────────────────
 
 
 # ──────────────────────────────────────────
@@ -246,4 +254,18 @@ TOOL_DISPATCH = {
     "laser_off":           lambda a: laser_off(),
     "set_laser_power":     lambda a: set_laser_power(**a),
     "acquire_spectrum":    lambda a: acquire_spectrum(**a),
+}─────────────────────────────────────────
+# tool dispatch 테이블 (agent loop에서 사용)
+# ──────────────────────────────────────────
+
+TOOL_DISPATCH = {
+    "move_stage":          lambda a: move_stage(**a),
+    "get_stage_position":  lambda a: get_stage_position(),
+    "move_stage_relative": lambda a: move_stage_relative(**a),
+    "laser_on":            lambda a: laser_on(),
+    "laser_off":           lambda a: laser_off(),
+    "set_laser_power":     lambda a: set_laser_power(**a),
+    "acquire_spectrum":    lambda a: acquire_spectrum(**a),
+    "start_camera_stream": lambda a: start_camera_stream(),
+    "stop_camera_stream":  lambda a: stop_camera_stream(),
 }
