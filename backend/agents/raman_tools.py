@@ -38,11 +38,6 @@ def init_hardware(stage=None, laser=None, ccd=None, camera=None):
 # 스테이지
 # ──────────────────────────────────────────
 
-
-# ──────────────────────────────────────────
-# 스테이지
-# ──────────────────────────────────────────
-
 def move_stage(x: float, y: float, z: float = None) -> dict:
     """스테이지를 절대 좌표(mm)로 이동."""
     if _stage is None:
@@ -240,6 +235,43 @@ def acquire_spectrum(
 
     return result
 
+def start_camera_stream() -> dict:
+    """
+    카메라 실시간 스트리밍을 시작합니다.
+    USE_camera_stream.py의 StreamingTUCam.start_stream()을 호출합니다.
+    """
+    if _camera is None:
+        return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
+    
+    try:
+        # 이미 스트리밍 중인지 확인 (StreamingTUCam 내부 속성 활용)
+        if getattr(_camera, 'is_streaming', False):
+            return {"ok": True, "status": "카메라는 이미 스트리밍 중입니다."}
+            
+        _camera.start_stream()
+        return {"ok": True, "status": "카메라 스트리밍이 성공적으로 시작되었습니다."}
+        
+    except Exception as e:
+        return {"ok": False, "error": f"스트리밍 시작 실패: {str(e)}"}
+
+def stop_camera_stream() -> dict:
+    """
+    카메라 실시간 스트리밍을 중지합니다.
+    USE_camera_stream.py의 StreamingTUCam.stop_stream()을 호출합니다.
+    """
+    if _camera is None:
+        return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
+
+    try:
+        # 스트리밍 중인지 확인
+        if not getattr(_camera, 'is_streaming', False):
+            return {"ok": True, "status": "카메라는 현재 스트리밍 중이 아닙니다."}
+
+        _camera.stop_stream()
+        return {"ok": True, "status": "카메라 스트리밍이 성공적으로 중지되었습니다."}
+
+    except Exception as e:
+        return {"ok": False, "error": f"스트리밍 중지 실패: {str(e)}"}
 
 # ─────────────────────────────────────────
 # tool dispatch 테이블 (agent loop에서 사용)
@@ -253,6 +285,6 @@ TOOL_DISPATCH = {
     "laser_off":           lambda a: laser_off(),
     "set_laser_power":     lambda a: set_laser_power(**a),
     "acquire_spectrum":    lambda a: acquire_spectrum(**a),
-    # "start_camera_stream": lambda a: start_camera_stream(),
-    # "stop_camera_stream":  lambda a: stop_camera_stream(),
+    "start_camera_stream": lambda a: start_camera_stream(),
+    "stop_camera_stream":  lambda a: stop_camera_stream(),
 }

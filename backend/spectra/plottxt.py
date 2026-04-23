@@ -35,4 +35,4 @@ def plot_commercial_txt(file_path):
     plt.show()
 
 # 아래 파일명만 바꿔서 실행하세요
-plot_commercial_txt('SPECTRUM_ans.txt')
+plot_commercial_txt('./SPECTRUM_ans.txt')
