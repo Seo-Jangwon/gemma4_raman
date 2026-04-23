@@ -241,8 +241,7 @@ def acquire_spectrum(
     return result
 
 
-
-# ──────────────────────────────────────────
+# ─────────────────────────────────────────
 # tool dispatch 테이블 (agent loop에서 사용)
 # ──────────────────────────────────────────
 
@@ -254,18 +253,6 @@ TOOL_DISPATCH = {
     "laser_off":           lambda a: laser_off(),
     "set_laser_power":     lambda a: set_laser_power(**a),
     "acquire_spectrum":    lambda a: acquire_spectrum(**a),
-}─────────────────────────────────────────
-# tool dispatch 테이블 (agent loop에서 사용)
-# ──────────────────────────────────────────
-
-TOOL_DISPATCH = {
-    "move_stage":          lambda a: move_stage(**a),
-    "get_stage_position":  lambda a: get_stage_position(),
-    "move_stage_relative": lambda a: move_stage_relative(**a),
-    "laser_on":            lambda a: laser_on(),
-    "laser_off":           lambda a: laser_off(),
-    "set_laser_power":     lambda a: set_laser_power(**a),
-    "acquire_spectrum":    lambda a: acquire_spectrum(**a),
-    "start_camera_stream": lambda a: start_camera_stream(),
-    "stop_camera_stream":  lambda a: stop_camera_stream(),
+    # "start_camera_stream": lambda a: start_camera_stream(),
+    # "stop_camera_stream":  lambda a: stop_camera_stream(),
 }

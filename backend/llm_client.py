@@ -100,21 +100,13 @@ if __name__ == "__main__":
     import sys
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
+    from agents.raman_tool_schemas import RAMAN_TOOLS
+    from agents.raman_tools import TOOL_DISPATCH
+
     print("라만 분광기 AI 에이전트 시작 (종료: 'exit' 또는 Ctrl+C)")
     while True:
         try:
             user_input = input("\n명령 > ").strip()
-        except (EOFError, KeyboardInterrupt):
-            break
-        if not user_input or user_input.lower() in {"exit", "quit", "종료"}:
-            break
-        result = run_agent(
-            user_message=user_input,
-            tools=RAMAN_TOOLS,
-            tool_dispatch=TOOL_DISPATCH,
-        )
-        print("\n[답변]", result)
-.strip()
         except (EOFError, KeyboardInterrupt):
             break
         if not user_input or user_input.lower() in {"exit", "quit", "종료"}:

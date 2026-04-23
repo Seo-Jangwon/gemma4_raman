@@ -77,7 +77,7 @@ class LaserController:
         self._power_set = False
         self._connect()
         time.sleep(0.5)
-        self._full_initialization()
+        # self._full_initialization()
 
     def _connect(self):
         try:
