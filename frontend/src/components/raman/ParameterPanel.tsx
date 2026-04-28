@@ -13,6 +13,8 @@ export interface SpectrumParams {
   cosmicrayFilter: boolean
   accumType: 'sum' | 'avg'
   rayleighCorr: number
+  stageSpeedX: number        // mm/s
+  stageSpeedY: number        // mm/s
 }
 
 interface ParameterPanelProps {
@@ -265,6 +267,24 @@ export default function ParameterPanel({
               type="number" className={INP} step="0.001"
               value={params.rayleighCorr}
               onChange={e => onParamChange({ rayleighCorr: Number(e.target.value) })}
+            />
+          </div>
+
+          <div>
+            <div className={LBL}>Stage Speed X (mm/s)</div>
+            <input
+              type="number" className={INP} step="0.5" min="0.1"
+              value={params.stageSpeedX}
+              onChange={e => onParamChange({ stageSpeedX: Number(e.target.value) })}
+            />
+          </div>
+
+          <div>
+            <div className={LBL}>Stage Speed Y (mm/s)</div>
+            <input
+              type="number" className={INP} step="0.5" min="0.1"
+              value={params.stageSpeedY}
+              onChange={e => onParamChange({ stageSpeedY: Number(e.target.value) })}
             />
           </div>
         </div>

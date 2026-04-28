@@ -318,7 +318,7 @@ def acquire_spectrum(
                     "calibrated": True,
                     "raman_shift_cm-1": [float(cal.pixel_to_raman_shift(p)) for p in pixels],
                     "wavelength_nm":    [float(cal.pixel_to_wavelength(p))   for p in pixels],
-                    "laser_nm":         float(cal._laser_nm),
+                    "laser_nm":         float(cal.laser_nm),
                 })
             frames.append(frame)
         return {

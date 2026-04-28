@@ -26,6 +26,8 @@ const DEFAULT_PARAMS: SpectrumParams = {
   cosmicrayFilter: false,
   accumType: 'sum',
   rayleighCorr: 532.191,
+  stageSpeedX: 5.0,
+  stageSpeedY: 5.0,
 }
 
 export default function AFMHardwareControlPanel() {

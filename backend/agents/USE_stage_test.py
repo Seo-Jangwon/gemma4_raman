@@ -260,6 +260,7 @@ class TangoController:
             print(f"[WARN] z축 속도 {vz}mm/s는 최대 {MAX_SPEED_Z}mm/s를 초과합니다. 클리핑합니다.")
             vz = max(-MAX_SPEED_Z, min(MAX_SPEED_Z, vz))
 
+        error = ""
         dx=c_double(vx)
         error1 = self.dll.LSX_SetVelSingleAxis(self.LSID, 1, dx)
         if error1 > 0:

@@ -95,10 +95,11 @@ function DeviceCard({ icon, name, detail, state, onRetry, children }: DeviceCard
 }
 
 export default function SystemInitModal({ onComplete }: Props) {
-  const [camera, setCamera] = useState<DeviceState>({ status: 'idle' })
-  const [stage,  setStage]  = useState<DeviceState>({ status: 'idle' })
-  const [laser,  setLaser]  = useState<DeviceState>({ status: 'idle' })
-  const [ccd,    setCcd]    = useState<DeviceState>({ status: 'idle' })
+  const [camera,  setCamera]  = useState<DeviceState>({ status: 'idle' })
+  const [stage,   setStage]   = useState<DeviceState>({ status: 'idle' })
+  const [laser,   setLaser]   = useState<DeviceState>({ status: 'idle' })
+  const [ccd,     setCcd]     = useState<DeviceState>({ status: 'idle' })
+  const [ccdTemp, setCcdTemp] = useState<number | null>(null)
   const [laserPort, setLaserPort] = useState('COM4')
   const [phase, setPhase]   = useState<'running' | 'done'>('running')
   const started = useRef(false)
@@ -135,15 +136,30 @@ export default function SystemInitModal({ onComplete }: Props) {
 
   const connectCcd = useCallback(async () => {
     setCcd({ status: 'connecting' })
+    setCcdTemp(null)
     try {
-      // 서버 startup에서 이미 연결됐을 수 있으므로 status 먼저 확인
-      const statusRes = await axios.get('/api/ccd/status')
-      if (statusRes.data.connected) {
-        setCcd({ status: 'connected' })
-        return
+      // ccd_init_state가 stabilized 될 때까지 3초 간격으로 폴링
+      while (true) {
+        const [healthRes, statusRes] = await Promise.all([
+          axios.get('/api/health'),
+          axios.get('/api/ccd/status'),
+        ])
+        const ccdState: string = healthRes.data.ccd_init_state
+        const temp: number | null = statusRes.data.temperature ?? null
+        if (temp !== null) setCcdTemp(temp)
+
+        if (ccdState === 'stabilized') {
+          setCcd({ status: 'connected' })
+          return
+        }
+        if (ccdState === 'failed') {
+          const errMsg = healthRes.data.ccd_error ?? 'CCD 초기화 실패'
+          setCcd({ status: 'failed', error: errMsg })
+          return
+        }
+        // idle 또는 cooling — 3초 대기
+        await new Promise(r => setTimeout(r, 3000))
       }
-      await axios.post('/api/ccd/connect', { target_temp: -40 })
-      setCcd({ status: 'connected' })
     } catch (e: any) {
       setCcd({ status: 'failed', error: e.response?.data?.detail ?? e.message })
     }
@@ -229,7 +245,13 @@ export default function SystemInitModal({ onComplete }: Props) {
             detail="목표 온도: -40°C  |  쿨러 ON"
             state={ccd}
             onRetry={isDone ? connectCcd : undefined}
-          />
+          >
+            {ccd.status === 'connecting' && ccdTemp !== null && (
+              <div className="text-xs text-blue-500 mt-0.5">
+                냉각 중: {ccdTemp}°C → -40°C
+              </div>
+            )}
+          </DeviceCard>
         </div>
 
         {/* 연결 진행 상태 */}

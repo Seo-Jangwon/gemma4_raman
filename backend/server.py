@@ -211,6 +211,11 @@ class AcquireSpectrumRequest(BaseModel):
     single_track_width: int = 1
     trigger_mode: str = 'internal'
 
+class StageSpeedRequest(BaseModel):
+    x: float = 5.0
+    y: float = 5.0
+    z: float = 5.0
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 장비 초기화 엔드포인트
@@ -590,9 +595,30 @@ async def hardware_state(request: Request):
             pos = hw.stage.get_position()
             out["stage"] = {"x": float(pos[0]), "y": float(pos[1]), "z": float(pos[2])}
         except Exception:
+            out["stage"] = {}
+        try:
+            vel = hw.stage.get_velocity()
+            if out["stage"] is None:
+                out["stage"] = {}
+            out["stage"]["velocity"] = {"x": float(vel[0]), "y": float(vel[1]), "z": float(vel[2])}
+        except Exception:
             pass
 
     return out
+
+
+@app.post("/api/stage/speed")
+async def stage_set_speed(body: StageSpeedRequest, request: Request):
+    """스테이지 이동 속도 직접 설정 — 파라미터 패널 수동 변경용."""
+    from backend.agents.raman_tools import set_stage_speed
+
+    state = _state(request)
+    loop  = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        state.executor,
+        lambda: set_stage_speed(x_speed_mm_s=body.x, y_speed_mm_s=body.y, z_speed_mm_s=body.z),
+    )
+    return result
 
 
 @app.post("/api/spectrum/acquire")

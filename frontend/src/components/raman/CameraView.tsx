@@ -47,9 +47,9 @@ export default function CameraView({ stagePos, onMoved }: CameraViewProps) {
   )
 
   return (
-    <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-700 select-none">
+    <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-700 select-none flex flex-col h-full">
       {/* 상단 상태 바 */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 text-xs text-gray-400">
+      <div className="flex-shrink-0 flex items-center justify-between px-3 py-1.5 bg-gray-800 text-xs text-gray-400">
         <span>카메라 뷰 — 클릭 시 스테이지 이동</span>
         {stagePos && (
           <span className="font-mono text-gray-300">
@@ -61,8 +61,7 @@ export default function CameraView({ stagePos, onMoved }: CameraViewProps) {
       {/* 뷰포트 */}
       <div
         ref={containerRef}
-        className="relative cursor-crosshair"
-        style={{ aspectRatio: '1060 / 800' }}
+        className="relative flex-1 cursor-crosshair overflow-hidden"
         onClick={handleClick}
       >
         {/* 플레이스홀더 (카메라 미연결 시 표시) */}
