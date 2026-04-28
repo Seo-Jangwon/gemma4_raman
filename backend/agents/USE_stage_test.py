@@ -215,20 +215,73 @@ class TangoController:
         tz = pos[2] + dz
 
         return self.move_absolute(tx, ty, tz, da, wait)
+
+    def get_velocity(self) -> dict:
+        """현재 설정된 속도 조회, mm/s 단위"""
+        if not self.connected:
+            return {"ok": False, "error": "연결되지 않았습니다"}
+
+        # 결과를 담을 빈 ctypes double 객체 생성
+        vx = c_double()
+        vy = c_double()
+        vz = c_double()
+        va = c_double()
+
+        # LSX_GetVel 호출 (포인터로 넘기기 위해 byref 사용)
+        # 문서 기준: int LSX_GetVel (int ILSID, double *pdX, double *pdY, double *pdZ, double *pdA);
+        error = self.dll.LSX_GetVel(self.LSID, byref(vx), byref(vy), byref(vz), byref(va))
+        
+        if error == 0:
+            return {
+                "ok": True, 
+                "x_speed_mm_s": vx.value, 
+                "y_speed_mm_s": vy.value, 
+                "z_speed_mm_s": vz.value,
+                "a_speed_mm_s": va.value
+            }
+        else:
+            return {"ok": False, "error": f"속도 조회 실패, 에러코드: {error}"}
     
     def set_velocity(self, vx: float, vy: float, vz: float, va: float) -> bool:
-        """속도 설정"""
+        """속도 설정, mm/s 단위"""
         if not self.connected:
             print("[ERROR] 연결되지 않았습니다")
             return False
-        
-        dx, dy, dz, da = c_double(vx), c_double(vy), c_double(vz), c_double(va)
-        error = self.dll.LSX_SetVel(self.LSID, dx, dy, dz, da)
-        
-        if error > 0:
-            print(f"[ERROR] 속도 설정 실패, 에러코드: {error}")
+
+        MAX_SPEED_XY = 5.0  # mm/s
+        MAX_SPEED_Z = 0.1   # mm/s
+        if abs(vx) > MAX_SPEED_XY:
+            print(f"[WARN] x축 속도 {vx}mm/s는 최대 {MAX_SPEED_XY}mm/s를 초과합니다. 클리핑합니다.")
+            vx = max(-MAX_SPEED_XY, min(MAX_SPEED_XY, vx))
+        if abs(vy) > MAX_SPEED_XY:
+            print(f"[WARN] y축 속도 {vy}mm/s는 최대 {MAX_SPEED_XY}mm/s를 초과합니다. 클리핑합니다.")
+            vy = max(-MAX_SPEED_XY, min(MAX_SPEED_XY, vy))
+        if abs(vz) > MAX_SPEED_Z:
+            print(f"[WARN] z축 속도 {vz}mm/s는 최대 {MAX_SPEED_Z}mm/s를 초과합니다. 클리핑합니다.")
+            vz = max(-MAX_SPEED_Z, min(MAX_SPEED_Z, vz))
+
+        dx=c_double(vx)
+        error1 = self.dll.LSX_SetVelSingleAxis(self.LSID, 1, dx)
+        if error1 > 0:
+            print(f"[ERROR] x축 속도 설정 실패, 에러코드: {error1}")
+            error += f"x축 에러코드: {error1}"
+
+        dy=c_double(vy)
+        error2 = self.dll.LSX_SetVelSingleAxis(self.LSID, 2, dy)
+        if error2 > 0:
+            print(f"[ERROR] y축 속도 설정 실패, 에러코드: {error2}")
+            error += f"/ y축 에러코드: {error2} "
+
+        dz=c_double(vz)
+        error3 =   self.dll.LSX_SetVelSingleAxis(self.LSID, 3, dz)
+        if error3 > 0:
+            print(f"[ERROR] z축 속도 설정 실패, 에러코드: {error3}")
+            error += f"/ z축 에러코드: {error3} "
+
+        if error:
+            print(f"[ERROR] 속도 설정 실패: {error}")
             return False
-        
+
         return True
     
     def send_command(self, command: str) -> str:

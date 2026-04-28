@@ -6,7 +6,7 @@ from pathlib import Path
 
 # hardware_manager 경로 확보
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from hardware_manager import HardwareManager, OLLAMA_MODEL
+from hardware_manager import OLLAMA_MODEL
 
 SYSTEM_PROMPT = """당신은 라만 분광기 제어 AI입니다.
 사용 가능한 tool을 순서대로 호출해 사용자의 요청을 수행하세요.
@@ -14,25 +14,33 @@ SYSTEM_PROMPT = """당신은 라만 분광기 제어 AI입니다.
 - 레이저를 켜기 전에 반드시 안전 여부를 확인하세요.
 - 모든 작업이 끝나면 결과를 한국어로 요약해 주세요."""
 
-# ── 하드웨어 전체 초기화 (스테이지 homing + CCD -40°C 안정화 완료 전까지 블로킹) ──
-_hw = HardwareManager()
-_hw.startup()
+# ── 클라이언트 (server.py lifespan에서 setup()으로 주입) ──
+_client: "ollama.Client | None" = None
 
-# 프로세스 정상 종료 시에도 CCD 온도 복구 후 종료
-atexit.register(_hw.shutdown)
 
-# Ollama 클라이언트는 HardwareManager가 검증한 연결 재사용
-client: ollama.Client = _hw.ollama
+def setup(ollama_client: "ollama.Client") -> None:
+    """
+    server.py의 lifespan에서 HardwareManager 초기화 후 호출.
+    ollama.Client 인스턴스를 모듈 전역 상태로 주입.
+    """
+    global _client
+    _client = ollama_client
+
+
+def _get_client() -> "ollama.Client":
+    if _client is None:
+        raise RuntimeError("llm_client.setup()이 먼저 호출되어야 합니다.")
+    return _client
 
 
 def generate(prompt: str) -> str:
-    response = client.generate(model=OLLAMA_MODEL, prompt=prompt)
+    response = _get_client().generate(model=OLLAMA_MODEL, prompt=prompt)
     return response["response"]
 
 
 def chat(messages: list) -> str:
     """messages: [{"role": "user"/"assistant", "content": "..."}]"""
-    response = client.chat(model=OLLAMA_MODEL, messages=messages)
+    response = _get_client().chat(model=OLLAMA_MODEL, messages=messages)
     return response["message"]["content"]
 
 
@@ -53,6 +61,7 @@ def run_agent(user_message: str, tools: list, tool_dispatch: dict,
     -------
     LLM의 최종 텍스트 응답
     """
+    client = _get_client()
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user",   "content": user_message},
@@ -97,8 +106,16 @@ def run_agent(user_message: str, tools: list, tool_dispatch: dict,
 
 
 if __name__ == "__main__":
-    import sys
+    # 단독 실행 시: HardwareManager를 직접 초기화 후 setup() 호출
+    from hardware_manager import HardwareManager
+    import atexit
+
     sys.stdout.reconfigure(encoding="utf-8")
+
+    _hw = HardwareManager()
+    _hw.startup()
+    atexit.register(_hw.shutdown)
+    setup(_hw.ollama)
 
     from backend.agents.raman_tool_schemas import RAMAN_TOOLS
     from backend.agents.raman_tools import TOOL_DISPATCH

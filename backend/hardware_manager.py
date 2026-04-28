@@ -46,22 +46,19 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 # ── 하드웨어 모듈 import (Pylance가 추적 가능한 절대 경로) ────────────────────
 from backend.agents.USE_stage_test       import TangoController   # noqa: E402
-from backend.agents.USE_andor_test       import AndorCamera        # noqa: E402
 from backend.agents.USE_laser_with_power import LaserController    # noqa: E402
 from backend.agents                      import raman_tools         # noqa: E402
+from backend.andor_codes                 import AndorCCD            # noqa: E402
 # StreamingTUCam 은 _init_camera() 안에서 lazy import
 # → TUCam.py 가 import 시점에 TUCam.dll 을 바로 로드하기 때문에
 #   DLL 이 없는 환경에서 모듈 import 자체가 실패하는 것을 방지
 
 try:
-    from backend.agents.raman_calibration import RamanCalibrator    # noqa: E402
+    from backend.andor_codes import RamanCalibrator                 # noqa: E402
 except ImportError:
     RamanCalibrator = None
 
 STAGE_DLL_PATH   = str(_BACKEND / "agents" / "Tango_DLL.dll")
-ANDOR_DLL_PATH   = str(_BACKEND / "agents" / "atmcd64d.dll")
-ANDOR_CONFIG_DIR = str(_BACKEND / "agents")         # Detector.ini 위치
-ANDOR_CONFIG_TXT = str(_BACKEND / "Config.txt")  
 
 LASER_PORT       = "COM4"
 OLLAMA_HOST      = "http://192.168.1.16:11434"
@@ -97,7 +94,7 @@ class HardwareManager:
 
     def __init__(self):
         self.stage  = None   # TangoController
-        self.ccd    = None   # AndorCamera
+        self.ccd    = None   # AndorCCD
         self.camera = None   # StreamingTUCam
         self.laser  = None   # LaserController
         self.ollama = None   # ollama.Client
@@ -164,9 +161,8 @@ class HardwareManager:
 
         흐름:
           1) RamanCalibrator.from_factory_calibration() → 외부 파일 없이 캘리브레이터 생성
-          2) AndorCamera(dll, calibrator) 생성
-          3) cam.initialize(config_dir, config_txt_path) → Config.txt 기반 파라미터 적용
-             ★ 이 단계에서 VSSpeed/HSSpeed/PreAmpGain 이 설정됨
+          2) AndorCCD(initialize_to_defaults=False) 생성 — SDK 초기화 + DLL 자동 탐색
+          3) _calibrator 주입 (start_acquisition_cycle 에서 캘리브레이션 적용)
           4) 냉각 -40°C 안정화 대기 (블로킹)
         """
         print("\n[CCD]   Andor CCD 연결 중...")
@@ -178,16 +174,18 @@ class HardwareManager:
             print(f"[CCD]   Factory calibration 적용: "
                   f"{calibrator._lut.min():.0f}~{calibrator._lut.max():.0f} cm⁻¹")
 
-        # ── CCD 초기화 (Config.txt 기반) ──
-        ccd = AndorCamera(ANDOR_DLL_PATH, calibrator=calibrator)
-        if not ccd.initialize(ANDOR_CONFIG_DIR, config_txt_path=ANDOR_CONFIG_TXT):
-            raise RuntimeError("Andor CCD 초기화 실패")
+        # ── CCD 초기화 ──
+        # initialize_to_defaults=False: 냉각/셔터/gain 등을 여기서 직접 제어
+        ccd = AndorCCD(initialize_to_defaults=False)
+        ccd._calibrator = calibrator
 
         # ── 냉각 시작 ──
-        if not ccd.set_temperature(CCD_COOL_TARGET):
-            raise RuntimeError(f"SetTemperature({CCD_COOL_TARGET}) 실패")
-        if not ccd.cooler_on():
-            raise RuntimeError("CoolerON 실패")
+        ccd.set_temperature(CCD_COOL_TARGET)
+        ccd.set_cooler(True)
+
+        # 냉각 중에도 온도 조회가 가능하도록 즉시 할당
+        # (server.py의 백그라운드 스레드에서 /api/ccd/status 폴링 지원)
+        self.ccd = ccd
 
         # ── 온도 안정화 대기 (블로킹) ──
         print(f"[CCD]   냉각 시작 → {CCD_COOL_TARGET}°C 안정화까지 대기")
@@ -199,16 +197,15 @@ class HardwareManager:
             DRV_TEMP_OFF:            "냉각기 OFF",
         }
         while True:
-            status, t = ccd.get_temperature()
-            label = _LABELS.get(status, f"status={status}")
+            t      = ccd.get_temperature()
+            status = ccd.temperature_status_num
+            label  = _LABELS.get(status, f"status={status}")
             print(f"\r        현재: {t:5d}°C  [{label}]  "
                   f"(목표: {CCD_COOL_TARGET}°C) ...", end="", flush=True)
             if status == DRV_TEMP_STABILIZED:
                 print(f"\n[CCD]   온도 안정화 완료: {t}°C")
                 break
             time.sleep(3)
-
-        self.ccd = ccd
 
     def _init_camera(self):
         """TUCam 카메라 연결 + 스트리밍 시작."""
@@ -388,22 +385,23 @@ class HardwareManager:
         print("        (이 단계가 끝나기 전에는 절대 종료되지 않습니다)")
 
         try:
-            if not self.ccd.cooler_off():
-                print("[CCD]   [WARN] CoolerOFF 실패 — 온도 폴링은 계속 진행")
+            self.ccd.set_cooler(False)
         except Exception as e:
             print(f"[CCD]   [WARN] CoolerOFF 예외: {e}")
 
         # 온도가 목표 이상 오를 때까지 폴링
+        _LABELS = {
+            DRV_TEMP_STABILIZED:     "안정",
+            DRV_TEMP_NOT_REACHED:    "냉각 중",
+            DRV_TEMP_NOT_STABILIZED: "미안정",
+            DRV_TEMP_DRIFT:          "드리프트",
+            DRV_TEMP_OFF:            "냉각기 OFF",
+        }
         while True:
             try:
-                status, t = self.ccd.get_temperature()
-                label = {
-                    DRV_TEMP_STABILIZED:     "안정",
-                    DRV_TEMP_NOT_REACHED:    "냉각 중",
-                    DRV_TEMP_NOT_STABILIZED: "미안정",
-                    DRV_TEMP_DRIFT:          "드리프트",
-                    DRV_TEMP_OFF:            "냉각기 OFF",
-                }.get(status, f"status={status}")
+                t      = self.ccd.get_temperature()
+                status = self.ccd.temperature_status_num
+                label  = _LABELS.get(status, f"status={status}")
 
                 print(f"\r        온도 복구 중: {t:5d}°C  [{label}]  (목표: ≥ {CCD_WARM_TARGET}°C) ...",
                       end="", flush=True)
@@ -417,7 +415,7 @@ class HardwareManager:
             time.sleep(5)
 
         try:
-            self.ccd.shutdown()
+            self.ccd.close()
             print("[CCD]   Andor SDK 종료 완료")
         except Exception as e:
             print(f"[CCD]   [WARN] SDK 종료 예외: {e}")
