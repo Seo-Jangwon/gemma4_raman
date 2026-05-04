@@ -384,6 +384,14 @@ class HardwareManager:
         print(f"[CCD]   냉각기 OFF → {CCD_WARM_TARGET}°C 이상 복구까지 대기")
         print("        (이 단계가 끝나기 전에는 절대 종료되지 않습니다)")
 
+        # 취득 중이면 먼저 중단 (DRV_ACQUIRING 상태에서는 CoolerOFF 불가)
+        try:
+            if self.ccd.get_status() == 'ACQUIRING':
+                self.ccd.sdk.AbortAcquisition()
+                time.sleep(0.5)
+        except Exception:
+            pass
+
         try:
             self.ccd.set_cooler(False)
         except Exception as e:

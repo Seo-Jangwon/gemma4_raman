@@ -37,11 +37,16 @@ import logging
 import numpy as np
 
 # pyAndorSDK2 패키지 경로 추가 (pip 미설치 환경 대비)
-_SDK_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), '..', 'Andor SDK', 'Python', 'pyAndorSDK2')
-)
-if _SDK_PATH not in sys.path:
-    sys.path.insert(0, _SDK_PATH)
+_SDK_CANDIDATES = [
+    r"C:\Program Files\Andor SDK\Python\pyAndorSDK2",
+    os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'Andor SDK', 'Python', 'pyAndorSDK2')),
+]
+for _SDK_PATH in _SDK_CANDIDATES:
+    if _SDK_PATH not in sys.path:
+        sys.path.insert(0, _SDK_PATH)
+
+# atmcd64d.dll 위치 — ctypes.util.find_library()가 PATH에서 탐색하도록 전달
+_DLL_DIR = r"C:\Program Files\Andor SDK"
 
 from pyAndorSDK2 import atmcd
 from pyAndorSDK2.atmcd_errors import Error_Codes
@@ -84,8 +89,8 @@ class AndorCCD(object):
         self.lock = threading.Lock()
         self._calibrator = None  # RamanCalibrator 인스턴스 (외부에서 주입)
 
-        # SDK 객체 생성 — DLL 자동 로딩 (pyAndorSDK2/libs/Windows/64/)
-        self.sdk = atmcd()
+        # SDK 객체 생성 — DLL 경로 명시 전달 (find_library가 PATH에서 탐색)
+        self.sdk = atmcd(userPath=_DLL_DIR)
 
         # SDK 초기화
         with self.lock:
