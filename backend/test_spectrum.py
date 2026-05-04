@@ -1,33 +1,23 @@
 """
-test_spectrum.py — acquire_spectrum() 단독 테스트 스크립트 (v2)
-==============================================================
+test_spectrum.py — acquire_spectrum() 파라미터 대화형 검증 스크립트
+================================================================
 
-[역할]
-  시스템 전체 초기화 후 스펙트럼 1회 측정 → 결과 출력/저장/플롯.
-  캘리브레이션 적용 여부에 따라 Raman shift 또는 pixel 축으로 자동 전환.
-
-[실행 예시]
+[실행]
   python backend/test_spectrum.py
-  python backend/test_spectrum.py --exposure 0.5 --power 60
-  python backend/test_spectrum.py --plot         # matplotlib 그래프
-  python backend/test_spectrum.py --full         # 전체 pixel 데이터 출력
+  → 파라미터를 하나씩 입력받은 뒤 촬영 → 검증 → 출력/저장
 
 [흐름]
-  1. HardwareManager.startup()
-     → 스테이지 homing, CCD Config.txt 적용 + 냉각 -40°C,
-       factory calibration 자동 주입, 카메라/레이저/Ollama 연결
-  2. raman_tools.acquire_spectrum() 호출
-     → 레이저 ON → CCD 촬영 → 레이저 OFF
-  3. 결과 출력 + CSV 저장 (+ 선택적 플롯)
-  4. HardwareManager.shutdown()
-     → CCD -5°C 복구 → 전체 연결 해제
+  1. HardwareManager.startup()  (냉각 -40°C, factory calibration 자동 주입)
+  2. 파라미터 대화형 입력
+  3. acquire_spectrum() 호출
+  4. 결과 유효성 검증 (shape / 강도 / calibration)
+  5. 콘솔 출력 + CSV 저장 + 선택적 플롯
+  6. HardwareManager.shutdown()  (온도 복구 블로킹)
 """
-import argparse
 import sys
 from datetime import datetime
 from pathlib import Path
 
-# 프로젝트 루트를 sys.path 에 추가
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -35,157 +25,343 @@ if str(_PROJECT_ROOT) not in sys.path:
 from hardware_manager import HardwareManager
 from backend.agents import raman_tools
 from backend.agents.USE_andor_test import save_spectrum_csv
-from backend.agents.USE_autofocus_local import AutoFocusLocal
 
 
-def parse_args():
-    """명령줄 인자 파싱."""
-    p = argparse.ArgumentParser(description="acquire_spectrum() 테스트")
-    p.add_argument("--exposure",   type=float, default=0.2,
-                   help="CCD 노출 시간 (초, 기본 0.2)")
-    p.add_argument("--power",      type=int,   default=20,
-                   choices=[20, 40, 60, 80, 100],
-                   help="레이저 출력 %% (기본 20)")
-    p.add_argument("--stabilize",  type=float, default=0.5,
-                   help="레이저 ON 후 안정화 대기 (초, 기본 0.5)")
-    p.add_argument("--plot",       action="store_true",
-                   help="matplotlib 으로 스펙트럼 그래프 출력")
-    p.add_argument("--full",       action="store_true",
-                   help="전체 pixel 데이터 출력 (기본: 상위 5개만)")
-    return p.parse_args()
+# ── 대화형 입력 ───────────────────────────────────────────────────────────────
+
+def _ask(prompt: str, default, cast=str, choices=None):
+    """한 줄 프롬프트. Enter 입력 시 default 반환."""
+    if choices:
+        opts = " / ".join(str(c) for c in choices)
+        line = input(f"  {prompt} [{opts}] (기본: {default}): ").strip()
+    else:
+        line = input(f"  {prompt} (기본: {default}): ").strip()
+
+    if not line:
+        return default
+    try:
+        val = cast(line)
+    except (ValueError, TypeError):
+        print(f"    !! 잘못된 입력 — 기본값 {default} 사용")
+        return default
+    if choices is not None and val not in choices:
+        print(f"    !! 허용값 아님 — 기본값 {default} 사용")
+        return default
+    return val
 
 
-def print_result(result: dict, exposure: float, power: int, full: bool = False):
-    """측정 결과 콘솔 출력."""
+def _ask_yn(prompt: str, default: bool) -> bool:
+    label = "Y/n" if default else "y/N"
+    line = input(f"  {prompt} [{label}]: ").strip().lower()
+    if not line:
+        return default
+    return line in ("y", "yes")
+
+
+def prompt_params() -> dict:
+    """파라미터를 대화형으로 입력받아 dict 반환."""
     print("\n" + "=" * 60)
-    print("  acquire_spectrum() 결과")
+    print("  측정 파라미터 입력  (Enter = 기본값)")
     print("=" * 60)
 
-    if not result["ok"]:
-        print(f"  [FAIL] {result['error']}")
-        return
+    p = {}
 
-    # 기본 정보
-    print(f"  노출시간    : {exposure} 초")
-    print(f"  레이저 출력 : {power} %")
-    print(f"  픽셀 수     : {result['length']}")
-    print(f"  최대 강도   : {result['max_intensity']:.1f}")
-    print(f"  합산 강도   : {result['sum_intensity']:.1f}")
-    print(f"  캘리브레이션: {'예 (factory)' if result.get('calibrated') else '아니오'}")
+    # ── 기본 ──
+    print("\n  [레이저 / 기본]")
+    p["exposure"]     = _ask("노출 시간 [초]", 0.2, float)
+    p["power"]        = _ask("레이저 출력 [%]", 20, int, [20, 40, 60, 80, 100])
+    p["stabilize_sec"]= _ask("안정화 대기 [초]", 0.5, float)
 
-    data = result.get("data", [])
-    if not data:
-        return
+    # ── 취득 모드 ──
+    print("\n  [취득 모드]")
+    p["acq_mode"] = _ask("취득 모드", "single", str,
+                         ["single", "accumulate", "kinetic"])
 
+    if p["acq_mode"] in ("accumulate", "kinetic"):
+        p["num_accumulations"] = _ask("누적 횟수", 1, int)
+    else:
+        p["num_accumulations"] = 1
+
+    if p["acq_mode"] == "kinetic":
+        p["kinetic_count"]      = _ask("kinetic 프레임 수", 3, int)
+        cyc = input("  kinetic 프레임 간격 [초] (기본: SDK 자동): ").strip()
+        p["kinetic_cycle_time"] = float(cyc) if cyc else None
+    else:
+        p["kinetic_count"]      = 1
+        p["kinetic_cycle_time"] = None
+
+    # ── 읽기 모드 ──
+    print("\n  [읽기 모드]")
+    p["read_mode"] = _ask("읽기 모드", "fvb", str, ["fvb", "single_track"])
+    p["hbin"]      = _ask("수평 비닝 [픽셀]", 1, int)
+
+    if p["read_mode"] == "single_track":
+        while True:
+            center = input("  single_track 중심 행 번호 (필수): ").strip()
+            if center:
+                try:
+                    p["single_track_center"] = int(center)
+                    break
+                except ValueError:
+                    print("    !! 정수를 입력하세요")
+            else:
+                print("    !! 필수 항목입니다")
+        p["single_track_width"] = _ask("트랙 폭 [픽셀]", 1, int)
+    else:
+        p["single_track_center"] = None
+        p["single_track_width"]  = 1
+
+    # ── 트리거 ──
+    print("\n  [트리거]")
+    p["trigger_mode"] = _ask(
+        "트리거 모드", "internal", str,
+        ["internal", "external", "external_start",
+         "external_exposure", "external_fvb_em", "software"],
+    )
+
+    # ── 출력 / 저장 ──
+    print("\n  [출력 / 저장]")
+    p["full"]    = _ask_yn("전체 픽셀 데이터 출력?", False)
+    p["plot"]    = _ask_yn("matplotlib 플롯?", False)
+    p["no_save"] = _ask_yn("CSV 저장 생략?", False)
+
+    # ── 요약 ──
+    print("\n" + "=" * 60)
+    print("  입력된 파라미터 요약")
+    print("=" * 60)
+    print(f"  exposure         : {p['exposure']} 초")
+    print(f"  power            : {p['power']} %")
+    print(f"  stabilize_sec    : {p['stabilize_sec']} 초")
+    print(f"  acq_mode         : {p['acq_mode']}")
+    if p["acq_mode"] in ("accumulate", "kinetic"):
+        print(f"  num_accumulations: {p['num_accumulations']}")
+    if p["acq_mode"] == "kinetic":
+        print(f"  kinetic_count    : {p['kinetic_count']}")
+        print(f"  kinetic_cycle    : {p['kinetic_cycle_time']} 초")
+    print(f"  read_mode        : {p['read_mode']}")
+    print(f"  hbin             : {p['hbin']}")
+    if p["read_mode"] == "single_track":
+        print(f"  track_center     : {p['single_track_center']}")
+        print(f"  track_width      : {p['single_track_width']}")
+    print(f"  trigger_mode     : {p['trigger_mode']}")
+
+    return p
+
+
+# ── 검증 ──────────────────────────────────────────────────────────────────────
+
+def validate(result: dict, acq_mode: str, kinetic_count: int) -> list:
+    if not result.get("ok"):
+        return [f"ok=False — {result.get('error', '원인 불명')}"]
+
+    errors = []
+    if acq_mode == "kinetic":
+        frames = result.get("frames", [])
+        if len(frames) != kinetic_count:
+            errors.append(f"프레임 수 불일치: 기대 {kinetic_count}, 실제 {len(frames)}")
+        for f in frames:
+            if not f.get("intensity"):
+                errors.append(f"frame[{f['frame_index']}] intensity 비어있음")
+            elif max(f["intensity"]) == 0:
+                errors.append(f"frame[{f['frame_index']}] 전체 강도 0 (레이저/셔터 확인)")
+    else:
+        data = result.get("data", [])
+        if not data:
+            errors.append("data 비어있음")
+        elif max(data) == 0:
+            errors.append("전체 강도 0 (레이저/셔터 확인)")
+        expected = result.get("length")
+        if expected is not None and expected != len(data):
+            errors.append(f"length 불일치: header={expected}, actual={len(data)}")
+
+    return errors
+
+
+# ── 콘솔 출력 ─────────────────────────────────────────────────────────────────
+
+def _sep(label: str = ""):
+    print(f"\n{'=' * 60}")
+    if label:
+        print(f"  {label}")
+        print("=" * 60)
+
+
+def _print_data(data: list, shifts, wavelengths, full: bool):
     if full:
-        # 전체 데이터 출력
-        print(f"\n  전체 데이터:")
-        if result.get("calibrated"):
-            print(f"  {'pixel':>6}  {'intensity':>10}  {'Δν (cm⁻¹)':>12}  {'λ (nm)':>12}")
-            print("  " + "-" * 50)
-            for i in range(len(data)):
-                print(f"  {i:>6}  {data[i]:>10}  "
-                      f"{result['raman_shift_cm-1'][i]:>10.2f}  "
-                      f"{result['wavelength_nm'][i]:>10.4f}")
+        if shifts and wavelengths:
+            print(f"  {'pixel':>6}  {'intensity':>10}  {'Δν (cm⁻¹)':>12}  {'λ (nm)':>10}")
+            print("  " + "-" * 46)
+            for i, v in enumerate(data):
+                print(f"  {i:>6}  {v:>10}  {shifts[i]:>12.2f}  {wavelengths[i]:>10.4f}")
         else:
             print(f"  {'pixel':>6}  {'intensity':>10}")
             print("  " + "-" * 20)
-            for px, cnt in enumerate(data):
-                print(f"  {px:>6}  {cnt:>10}")
+            for i, v in enumerate(data):
+                print(f"  {i:>6}  {v:>10}")
     else:
-        # 상위 5개 픽셀만
         top5 = sorted(enumerate(data), key=lambda x: x[1], reverse=True)[:5]
-        print("\n  상위 5개 픽셀:")
+        print("  상위 5 픽셀:")
         for px, cnt in top5:
-            extra = ""
-            if result.get("calibrated"):
-                extra = f"  Δν={result['raman_shift_cm-1'][px]:.1f} cm⁻¹"
+            extra = f"  Δν={shifts[px]:.1f} cm⁻¹" if shifts else ""
             print(f"    pixel {px:4d}  →  {cnt}{extra}")
 
-    print("=" * 60)
+
+def print_result(result: dict, full: bool):
+    if not result.get("ok"):
+        _sep("결과")
+        print(f"  [FAIL] {result.get('error')}")
+        return
+
+    mode = result.get("mode", "?")
+
+    if mode == "kinetic":
+        _sep(f"결과 — Kinetic ({result.get('num_frames')} frames)")
+        print(f"  노출시간    : {result.get('exposure_time')} 초")
+        print(f"  레이저 출력 : {result.get('laser_power_pct')} %")
+        for frame in result.get("frames", []):
+            data = frame["intensity"]
+            print(f"\n  ── Frame {frame['frame_index']:02d}  "
+                  f"max={frame['max_intensity']:.1f}  "
+                  f"sum={frame['sum_intensity']:.1f}  "
+                  f"pixels={frame['length']}  "
+                  f"cal={'예' if frame.get('calibrated') else '아니오'}")
+            _print_data(data, frame.get("raman_shift_cm-1"),
+                        frame.get("wavelength_nm"), full)
+    else:
+        _sep(f"결과 — {mode.capitalize()}")
+        print(f"  노출시간    : {result.get('exposure_time')} 초")
+        print(f"  레이저 출력 : {result.get('laser_power_pct')} %")
+        if result.get("num_accumulations"):
+            print(f"  누적 횟수   : {result['num_accumulations']}")
+        print(f"  픽셀 수     : {result.get('length')}")
+        print(f"  최대 강도   : {result.get('max_intensity', 0):.1f}")
+        print(f"  합산 강도   : {result.get('sum_intensity', 0):.1f}")
+        print(f"  캘리브레이션: {'예' if result.get('calibrated') else '아니오'}")
+        _print_data(result.get("data", []),
+                    result.get("raman_shift_cm-1"),
+                    result.get("wavelength_nm"), full)
 
 
-def save_csv(result: dict, exposure: float, power: int) -> str:
-    """타임스탬프 붙여서 CSV 저장. save_spectrum_csv 재사용."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+# ── CSV 저장 ──────────────────────────────────────────────────────────────────
+
+def save_csv(result: dict, p: dict) -> list:
     out_dir = Path(__file__).resolve().parent / "spectra"
     out_dir.mkdir(exist_ok=True)
-    filepath = out_dir / f"spectrum_{timestamp}_exp{exposure}s_pwr{power}pct.csv"
-    
-    if "pixel" not in result and "data" in result:
-        result["pixel"] = list(range(len(result["data"])))
-        result["intensity"] = result["data"]
+    ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tag = f"exp{p['exposure']}s_pwr{p['power']}pct_{p['acq_mode']}"
+    paths = []
 
-    save_spectrum_csv(result, filepath)
-    return str(filepath)
+    if result.get("mode") == "kinetic":
+        for frame in result.get("frames", []):
+            rec = {
+                "pixel":            list(range(len(frame["intensity"]))),
+                "intensity":        frame["intensity"],
+                "calibrated":       frame.get("calibrated", False),
+                "raman_shift_cm-1": frame.get("raman_shift_cm-1"),
+                "wavelength_nm":    frame.get("wavelength_nm"),
+            }
+            fp = out_dir / f"spectrum_{ts}_{tag}_f{frame['frame_index']:02d}.csv"
+            save_spectrum_csv(rec, fp)
+            paths.append(str(fp))
+    else:
+        data = result.get("data", [])
+        rec = {
+            "pixel":            list(range(len(data))),
+            "intensity":        data,
+            "calibrated":       result.get("calibrated", False),
+            "raman_shift_cm-1": result.get("raman_shift_cm-1"),
+            "wavelength_nm":    result.get("wavelength_nm"),
+        }
+        fp = out_dir / f"spectrum_{ts}_{tag}.csv"
+        save_spectrum_csv(rec, fp)
+        paths.append(str(fp))
 
+    return paths
+
+
+# ── 플롯 ──────────────────────────────────────────────────────────────────────
 
 def plot_spectrum(result: dict):
-    """matplotlib 으로 스펙트럼 플롯. calibrated 면 x축이 Raman shift."""
     try:
         import matplotlib.pyplot as plt
     except ImportError:
         print("[WARN] matplotlib 없음 — pip install matplotlib")
         return
 
-    data = result.get("data", [])
-    if not data:
-        return
-
     fig, ax = plt.subplots(figsize=(10, 4))
-    if result.get("calibrated"):
-        ax.plot(result["raman_shift_cm-1"], data, linewidth=0.8)
-        ax.set_xlabel("Raman shift (cm⁻¹)")
+
+    if result.get("mode") == "kinetic":
+        frames = result.get("frames", [])
+        calibrated = frames[0].get("calibrated") if frames else False
+        for frame in frames:
+            data = frame["intensity"]
+            x = frame.get("raman_shift_cm-1") or list(range(len(data)))
+            ax.plot(x, data, linewidth=0.8, label=f"frame {frame['frame_index']}")
+        ax.legend(fontsize=8)
+        ax.set_xlabel("Raman shift (cm⁻¹)" if calibrated else "Pixel")
     else:
-        ax.plot(data, linewidth=0.8)
-        ax.set_xlabel("Pixel")
+        data = result.get("data", [])
+        x = result.get("raman_shift_cm-1") or list(range(len(data)))
+        ax.plot(x, data, linewidth=0.8)
+        ax.set_xlabel("Raman shift (cm⁻¹)" if result.get("calibrated") else "Pixel")
+
     ax.set_ylabel("Intensity (counts)")
-    ax.set_title("Raman Spectrum")
+    ax.set_title(f"Raman Spectrum — {result.get('mode')}")
     ax.grid(alpha=0.3)
     plt.tight_layout()
     plt.show()
 
 
+# ── main ──────────────────────────────────────────────────────────────────────
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
-    args = parse_args()
+
+    p = prompt_params()
 
     hw = HardwareManager()
     try:
-        # 1. 전체 HW 초기화 (CCD -40°C + factory calibration 자동 적용)
         hw.startup()
 
-        # 2. 스펙트럼 측정
-        print(f"\n[TEST] acquire_spectrum("
-              f"exposure={args.exposure}, "
-              f"power={args.power}, "
-              f"stabilize_sec={args.stabilize})")
-
         result = raman_tools.acquire_spectrum(
-            exposure=args.exposure,
-            power=args.power,
-            stabilize_sec=args.stabilize,
+            exposure=p["exposure"],
+            power=p["power"],
+            stabilize_sec=p["stabilize_sec"],
+            acq_mode=p["acq_mode"],
+            num_accumulations=p["num_accumulations"],
+            kinetic_count=p["kinetic_count"],
+            kinetic_cycle_time=p["kinetic_cycle_time"],
+            read_mode=p["read_mode"],
+            hbin=p["hbin"],
+            single_track_center=p["single_track_center"],
+            single_track_width=p["single_track_width"],
+            trigger_mode=p["trigger_mode"],
         )
 
-        # 3. 결과 출력
-        print_result(result, args.exposure, args.power, full=args.full)
+        errors = validate(result, p["acq_mode"], p["kinetic_count"])
+        if errors:
+            print("\n[FAIL] 검증 오류:")
+            for e in errors:
+                print(f"  - {e}")
+        else:
+            print("\n[PASS] 데이터 검증 통과")
 
-        # 4. CSV 저장
-        if result["ok"]:
-            csv_path = save_csv(result, args.exposure, args.power)
-            print(f"\n  [CSV] 저장 완료: {csv_path}")
+        print_result(result, p["full"])
 
-        # 5. 플롯
-        plot_spectrum(result)
+        if result.get("ok") and not p["no_save"]:
+            for path in save_csv(result, p):
+                print(f"\n  [CSV] {path}")
+
+        if result.get("ok") and p["plot"]:
+            plot_spectrum(result)
 
     except KeyboardInterrupt:
-        print("\n[!] Ctrl+C — 종료 시퀀스 진입")
+        print("\n[!] Ctrl+C — 종료")
     except Exception as e:
         print(f"\n[ERROR] {e}")
         import traceback
         traceback.print_exc()
     finally:
-        # 6. 안전 종료 (CCD 온도 복구 블로킹)
         hw.shutdown()
 
 

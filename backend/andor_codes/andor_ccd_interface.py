@@ -169,7 +169,7 @@ class AndorCCD(object):
             (ret, name) = self.sdk.GetHeadModel()
         _check(ret, "GetHeadModel")
         self.headModel = name
-        print(self.headModel)
+        logger.debug("Head model: " + repr(self.headModel))
         if self.debug:
             logger.debug("Head model: " + repr(self.headModel))
         return self.headModel
@@ -318,9 +318,11 @@ class AndorCCD(object):
         elif self.aq_mode == 'kinetic':
             self.get_num_kinetics()
             self.buffer = np.zeros(shape=(self.num_kin, self.Ny_ro, self.Nx_ro), dtype=np.int32)
+        elif self.aq_mode == 'fast_kinetic':
+            self.buffer = np.zeros(shape=(self.num_fast_kin, self.Ny_ro, self.Nx_ro), dtype=np.int32)
         else:
             raise ValueError("Andor Unknown acq mode {}".format(self.aq_mode))
-        print(self.buffer.shape)
+        logger.debug("buffer shape: {}".format(self.buffer.shape))
         return self.buffer
 
 
@@ -395,6 +397,8 @@ class AndorCCD(object):
         with self.lock:
             (ret, bottom, gap) = self.sdk.SetMultiTrack(int(number), int(height), int(offset))
         _check(ret, "SetMultiTrack")
+        with self.lock:
+            _check(self.sdk.SetMultiTrackHBin(int(hbin)), "SetMultiTrackHBin")
         self.Nx_ro = int(self.Nx / hbin)
         self.Ny_ro = number
         self.ro_multi_track_number = number
@@ -418,7 +422,7 @@ class AndorCCD(object):
         flat = [v for pair in areas for v in pair]
         with self.lock:
             _check(self.sdk.SetRandomTracks(int(len(areas)), flat), "SetRandomTracks")
-        self.Nx_ro = int(self.Nx / hbin)
+        self.Nx_ro = self.Nx  # SDK는 RandomTrack 수평 빈닝 미지원
         self.Ny_ro = len(areas)
         self.create_buffer()
 
@@ -498,7 +502,7 @@ class AndorCCD(object):
         ----------
         mode : str  'single' | 'accumulate' | 'kinetic' | 'run_till_abort'
         """
-        print('set_aq_mode', mode)
+        logger.debug('set_aq_mode: %s', mode)
         assert mode in ('single', 'accumulate', 'kinetic', 'run_till_abort')
         if mode == 'single':
             return self.set_aq_single_scan()
@@ -569,12 +573,12 @@ class AndorCCD(object):
         if kin_time is not None:
             with self.lock:
                 _check(self.sdk.SetKineticCycleTime(float(kin_time)), "SetKineticCycleTime")
-        print('kinetic')
+        logger.debug('set_aq_kinetic_scan')
 
     def set_aq_run_till_abort_scan(self):
         """Run Till Abort 모드: abort_acquisition() 호출 전까지 연속 취득."""
         self.aq_mode = 'run_till_abort'
-        print('set_aq_run_till_abort_scan')
+        logger.debug('set_aq_run_till_abort_scan')
         with self.lock:
             _check(self.sdk.SetAcquisitionMode(int(consts.Acquisition_Mode.RUN_TILL_ABORT)),
                    "SetAcquisitionMode")
@@ -587,10 +591,11 @@ class AndorCCD(object):
             _check(self.sdk.SetAcquisitionMode(int(consts.Acquisition_Mode.FAST_KINETICS)),
                    "SetAcquisitionMode")
         if exp_time is not None and series is not None and mode is not None:
+            self.num_fast_kin = int(series)
             with self.lock:
                 _check(self.sdk.SetFastKinetics(int(self.Ny_ro), int(series),
                                                 float(exp_time), int(mode),
-                                                int(hbin), int(offset)), "SetFastKinetics")
+                                                int(hbin), int(vbin)), "SetFastKinetics")
 
 
     # ══════════════════════════════════════════════════════════════════
@@ -1048,6 +1053,13 @@ class AndorCCD(object):
             _check(ret, "GetImages")
             self.buffer = np.array(arr, dtype=np.int32).reshape(
                 self.num_kin, self.Ny_ro, self.Nx_ro)
+        elif self.aq_mode == 'fast_kinetic':
+            total = self.num_fast_kin * self.Ny_ro * self.Nx_ro
+            with self.lock:
+                (ret, arr) = self.sdk.GetAcquiredData(int(total))
+            _check(ret, "GetAcquiredData")
+            self.buffer = np.array(arr, dtype=np.int32).reshape(
+                self.num_fast_kin, self.Ny_ro, self.Nx_ro)
         else:
             size = self.Ny_ro * self.Nx_ro
             with self.lock:
@@ -1151,7 +1163,7 @@ class AndorCCD(object):
 
     def set_num_kinetics(self, num):
         """Kinetic Series 프레임 수 설정."""
-        print('set_num_kinetics', num)
+        logger.debug('set_num_kinetics: %s', num)
         with self.lock:
             _check(self.sdk.SetNumberKinetics(int(num)), "SetNumberKinetics")
         self.num_kin = int(num)

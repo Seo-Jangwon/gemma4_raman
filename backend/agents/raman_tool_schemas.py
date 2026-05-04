@@ -22,13 +22,6 @@ RAMAN_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "get_stage_speed",
-            "description": "현재 스테이지의 이동 속도(mm/s)를 읽어온다. 반환값은 x_speed_mm_s, y_speed_mm_s, z_speed_mm_s 필드가 포함된 객체이다. 단위: mm/s",
-        }
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "set_stage_speed",
             "description": (
                 "스테이지의 이동 속도를 설정한다. "
@@ -333,6 +326,35 @@ RAMAN_TOOLS = [
                 "required": ["mode"],
             },
         },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_mcp_gain",
+            "description": "iStar ICCD 카메라의 MCP(Micro-Channel Plate) 이득을 설정한다. 허용 범위는 get_mcp_gain_range()로 확인한다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "gain": {
+                        "type": "integer",
+                        "description": "설정할 MCP 이득값"
+                    }
+                },
+                "required": ["gain"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_mcp_gain_range",
+            "description": "iStar ICCD 카메라의 MCP 이득 허용 범위(min, max)를 반환한다.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
     },
     {
         "type": "function",

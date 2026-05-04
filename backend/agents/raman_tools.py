@@ -539,6 +539,31 @@ def set_ccd_em_gain(gain: int) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+def set_mcp_gain(gain: int) -> dict:
+    """
+    iStar ICCD 카메라의 MCP(Micro-Channel Plate) 이득을 설정한다.
+    허용 범위는 get_mcp_gain_range()로 확인.
+    """
+    if _ccd is None:
+        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+    try:
+        _ccd.set_mcp_gain(gain)
+        return {"ok": True, "mcp_gain": gain}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def get_mcp_gain_range() -> dict:
+    """iStar ICCD 카메라의 MCP 이득 허용 범위(min, max)를 반환한다."""
+    if _ccd is None:
+        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+    try:
+        low, high = _ccd.get_mcp_gain_range()
+        return {"ok": True, "min": low, "max": high}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def set_ccd_output_amp(amp: int) -> dict:
     """
     출력 앰프를 선택한다.
@@ -1171,6 +1196,8 @@ TOOL_DISPATCH = {
     "set_ccd_read_mode":        lambda a: set_ccd_read_mode(**a),
     "set_ccd_preamp_gain":      lambda a: set_ccd_preamp_gain(**a),
     "set_ccd_em_gain":          lambda a: set_ccd_em_gain(**a),
+    "set_mcp_gain":             lambda a: set_mcp_gain(**a),
+    "get_mcp_gain_range":       lambda a: get_mcp_gain_range(**a),
     "set_ccd_output_amp":       lambda a: set_ccd_output_amp(**a),
     "set_ccd_shift_speeds":     lambda a: set_ccd_shift_speeds(**a),
     "set_ccd_temperature":      lambda a: set_ccd_temperature(**a),
