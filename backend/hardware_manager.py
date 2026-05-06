@@ -85,6 +85,7 @@ DRV_TEMP_DRIFT          = 20040
 # 스테이지 초기화 속도 (mm/s)  — 일반 스캔보다 빠르게
 INIT_SPEED_MM_S = 10.0
 
+DEFAULT_OUTPUT_AMP      = 1
 
 class HardwareManager:
     """
@@ -178,6 +179,36 @@ class HardwareManager:
         # initialize_to_defaults=False: 냉각/셔터/gain 등을 여기서 직접 제어
         ccd = AndorCCD(initialize_to_defaults=False)
         ccd._calibrator = calibrator
+
+        # ── 취득 전 하드웨어 파라미터 명시 설정 ──
+        # initialize_to_defaults=False이면 SDK가 이전 세션 상태를 그대로 유지하므로
+        # 라만 측정에 적합한 값으로 명시적으로 초기화한다.
+        ccd.set_ad_channel(0)
+
+        # VS Speed: SDK 권장 안전 최대 속도 (전하 전송 비효율/스미어링 방지)
+        if ccd.numVSSpeeds > 0:
+            vs_idx, vs_spd = ccd.get_fastest_recommended_vs_speed()
+            ccd.set_vs_speed(vs_idx)
+            print(f"[CCD]   VS Speed 설정: index={vs_idx}, {vs_spd:.2f} µs/pixel")
+
+        # HS Speed: 가장 느린 속도(마지막 인덱스) = 최저 Read Noise (라만 필수)
+        if ccd.numHSSpeeds_Conventional and ccd.numHSSpeeds_Conventional[0] > 0:
+            slowest_idx = ccd.numHSSpeeds_Conventional[0] - 1
+            ccd.set_hs_speed_conventional(slowest_idx)
+            hs_spd = ccd.HSSpeeds_Conventional[0][slowest_idx]
+            print(f"[CCD]   HS Speed 설정: index={slowest_idx}, {hs_spd:.3f} MHz")
+
+        # PreAmp Gain: 인덱스 0 (최저 이득 → 동적 범위 최대)
+        ccd.set_preamp_gain(0)
+
+        # 출력 앰프: Conventional (0=EMCCD, 1=Conventional)
+        ccd.set_output_amp(DEFAULT_OUTPUT_AMP)
+
+        # 셔터: 닫힘 (촬영 직전까지 광원 차단)
+        ccd.set_shutter_close()
+
+        # 우주선(Cosmic Ray) 필터: accumulate 모드에서 연속 스캔 비교로 스파이크 제거
+        ccd.set_cosmic_ray_filter(True)
 
         # ── 냉각 시작 ──
         ccd.set_temperature(CCD_COOL_TARGET)

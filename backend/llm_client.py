@@ -12,9 +12,10 @@ from hardware_manager import OLLAMA_MODEL
 
 SYSTEM_PROMPT = """당신은 라만 분광기 제어 AI입니다.
 사용 가능한 tool을 순서대로 호출해 사용자의 요청을 수행하세요.
-- 스테이지 좌표 단위: mm (X: 0~75.3, Y: 0~50.2, Z: -1.0~1.0)
+- 스테이지 좌표 단위: mm (X: 0~75.3, Y: 0~50.2, Z: -1.0~1.0, 중심좌표는 x=37.8759, y=25.24805, z는 해당없음)
 - 레이저를 켜기 전에 반드시 안전 여부를 확인하세요.
-- 모든 작업이 끝나면 결과를 한국어로 요약해 주세요."""
+- 모든 작업이 끝나면 결과를 한국어로 요약해 주세요.
+- 스펙트럼 측정은 반드시 acquire_spectrum 단일 tool만 사용하세요. laser_on / laser_off / set_laser_power를 개별적으로 체이닝하면 레이저가 AI 추론 시간(수 초~수십 초) 동안 시편에 계속 조사되어 생체 시편 손상(광독성, 형광 표백)이 발생합니다."""
 
 # ── 클라이언트 (server.py lifespan에서 setup()으로 주입) ──
 _client: "ollama.Client | None" = None

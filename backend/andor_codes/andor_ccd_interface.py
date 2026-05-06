@@ -831,6 +831,12 @@ class AndorCCD(object):
             _check(self.sdk.SetShutter(0, int(consts.Shutter_Mode.PERMANENTLY_CLOSED), 0, 0),
                    "SetShutter")
 
+    def set_cosmic_ray_filter(self, enabled: bool = True):
+        """우주선(Cosmic Ray) 필터 모드 설정. accumulate 모드에서만 유효."""
+        mode = 2 if enabled else 0
+        with self.lock:
+            _check(self.sdk.SetFilterMode(mode), "SetFilterMode")
+
     def get_shutter_min_times(self):
         """셔터 최소 개폐 시간 반환 (closing_ms, opening_ms)."""
         with self.lock:
@@ -1052,12 +1058,16 @@ class AndorCCD(object):
             FVB/Single: (Ny_ro, Nx_ro) | Kinetic: (num_kin, Ny_ro, Nx_ro)
         """
         if self.aq_mode == 'kinetic':
-            total = self.num_kin * self.Ny_ro * self.Nx_ro
             with self.lock:
-                (ret, arr, *_) = self.sdk.GetImages(1, int(self.num_kin), int(total))
+                (ret_idx, first, last) = self.sdk.GetNumberNewImages()
+            _check(ret_idx, "GetNumberNewImages")
+            count = last - first + 1
+            total = count * self.Ny_ro * self.Nx_ro
+            with self.lock:
+                (ret, arr, *_) = self.sdk.GetImages(int(first), int(last), int(total))
             _check(ret, "GetImages")
             self.buffer = np.array(arr, dtype=np.int32).reshape(
-                self.num_kin, self.Ny_ro, self.Nx_ro)
+                count, self.Ny_ro, self.Nx_ro)
         elif self.aq_mode == 'fast_kinetic':
             total = self.num_fast_kin * self.Ny_ro * self.Nx_ro
             with self.lock:
@@ -1361,34 +1371,41 @@ class AndorCCD(object):
     # raman_tools 호환 고수준 API
     # ══════════════════════════════════════════════════════════════════
 
-    def setup_acquisition(self, read_mode: int, exposure_time: float, trigger_mode: int):
-        """raman_tools.acquire_spectrum() 호환 설정 API."""
-        self.set_aq_single_scan()
-        if read_mode == 0:
-            self.set_ro_full_vertical_binning()
-        _trig_str = {v: k for k, v in self.trigger_modes.items()}.get(trigger_mode, 'internal')
-        self.set_trigger_mode(_trig_str)
-        self.set_exposure_time(exposure_time)
-
-    def start_acquisition_cycle(self) -> dict:
+    def start_acquisition_cycle(self, trigger_mode_str: str = 'internal') -> dict:
         """
         단일 촬영 사이클 실행 후 raman_tools 호환 dict 반환.
 
-        흐름: PrepareAcquisition → StartAcquisition → WaitForAcquisition (이벤트 기반)
-              → GetMostRecentImage → 캘리브레이션 적용
+        흐름: PrepareAcquisition → StartAcquisition → [SendSoftwareTrigger]
+              → WaitForAcquisition (이벤트 기반) → GetMostRecentImage → 캘리브레이션 적용
+
+        Parameters
+        ----------
+        trigger_mode_str : str
+            현재 트리거 모드 문자열. 'software'이면 SendSoftwareTrigger() 자동 호출.
 
         Returns
         -------
         dict
             intensity        : list[int]   픽셀별 강도 (1D).
             calibrated       : bool
+            error            : str         취득 실패 시에만 포함.
             raman_shift_cm-1 : list[float] (_calibrator 주입 시)
             wavelength_nm    : list[float] (_calibrator 주입 시)
             laser_nm         : float       (_calibrator 주입 시)
         """
         self.prepare_acquisition()
         self.start_acquisition()
-        self.wait_for_acquisition()
+
+        if trigger_mode_str == 'software':
+            self.send_software_trigger()
+
+        success = self.wait_for_acquisition()
+        if not success:
+            return {
+                "intensity": [],
+                "calibrated": False,
+                "error": "WaitForAcquisition 실패 (타임아웃 또는 트리거 없음)",
+            }
 
         raw = self.get_acquired_data()
         intensity = raw.flatten().tolist()

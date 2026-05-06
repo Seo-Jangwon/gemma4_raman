@@ -270,19 +270,40 @@ def acquire_spectrum(
                 hbin=hbin,
             )
 
-        # 3-c. 트리거 모드 설정
+        # 3-c. 트리거 및 셔터 모드 설정
         _ccd.set_trigger_mode(trigger_mode)
+        _ccd.set_shutter_auto()   # 초기화 시 close로 닫힌 셔터를 취득 전 Auto로 복원
+
+        # 3-d. 이전 취득 버퍼 해제 (파라미터 변경 시 SDK 내부 메모리 단편화 방지)
+        _ccd.free_internal_memory()
 
         # 4. 촬영
         if acq_mode == 'kinetic':
             # Kinetic: 버퍼가 3D (num_kin, Ny_ro, Nx_ro) — start_acquisition_cycle() 직접 사용 불가
+            _ccd.prepare_acquisition()        # 메모리 사전 할당 + 타이밍 초기화 (첫 프레임 지연 방지)
             _ccd.start_acquisition()
+            if trigger_mode == 'software':    # software 트리거 발송 (없으면 ACQUIRING 상태에서 무한 대기)
+                _ccd.send_software_trigger()
+
+            # 외부 트리거 미도달 / 하드웨어 장애 시 무한 대기 방지
+            _cyc = kinetic_cycle_time if kinetic_cycle_time else (exposure + 0.1)
+            _timeout_s = _cyc * kinetic_count * max(num_accumulations, 1) * 2 + 15.0
+            _deadline = time.time() + _timeout_s
             while _ccd.get_status() != 'IDLE':
+                if time.time() > _deadline:
+                    try:
+                        _ccd.abort_acquisition()
+                    except Exception:
+                        pass
+                    raise TimeoutError(
+                        f"kinetic 취득 타임아웃: {_timeout_s:.1f}초 초과 "
+                        f"(trigger={trigger_mode}, frames={kinetic_count})"
+                    )
                 time.sleep(0.05)
             raw = _ccd.get_acquired_data()
         else:
-            # Single / Accumulate: 버퍼가 2D (Ny_ro, Nx_ro) — start_acquisition_cycle() 그대로 사용
-            raw = _ccd.start_acquisition_cycle()
+            # Single / Accumulate: trigger_mode를 전달하여 software trigger 지원
+            raw = _ccd.start_acquisition_cycle(trigger_mode_str=trigger_mode)
 
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -333,13 +354,15 @@ def acquire_spectrum(
     else:
         # Single / Accumulate: start_acquisition_cycle()이 calibration dict 반환
         data = raw
+        if data.get("error"):
+            return {"ok": False, "error": data["error"]}
         intensity = data["intensity"]
         result = {
             "ok": True,
             "mode": acq_mode,
             "length": len(intensity),
-            "max_intensity": float(max(intensity)),
-            "sum_intensity": float(sum(intensity)),
+            "max_intensity": float(max(intensity)) if intensity else 0.0,
+            "sum_intensity": float(sum(intensity)) if intensity else 0.0,
             "data": intensity,
             "calibrated": data.get("calibrated", False),
             "exposure_time": exposure,
