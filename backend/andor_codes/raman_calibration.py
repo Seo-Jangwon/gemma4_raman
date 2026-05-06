@@ -41,7 +41,10 @@ class RamanCalibrator:
         return self._lut[np.asarray(px, dtype=int)]
 
     @classmethod
-    def from_factory_calibration(cls, config_path=None) -> "RamanCalibrator":
+    def from_factory_calibration(cls, config_path=None,
+                                  raman_center_cm1: float = 1300.0,
+                                  laser_nm: float | None = None,
+                                  f_mm: float | None = None) -> "RamanCalibrator":
         path = Path(config_path) if config_path else _DEFAULT_CONFIG
 
         cp = configparser.ConfigParser(strict=False)
@@ -55,20 +58,24 @@ class RamanCalibrator:
         pixel_width_um = float(auto.get("PixelWidth", "23.8902"))
         x_pixel_mm = pixel_width_um / 1000.0
 
-        rayleigh_key = f"RayleighWaveLength{selected_rayleigh + 1}"
-        laser_nm = float(auto.get(rayleigh_key, "532.021"))
+        if laser_nm is None:
+            rayleigh_key = f"RayleighWaveLength{selected_rayleigh + 1}"
+            laser_nm = float(auto.get(rayleigh_key, "532.021"))
 
         type_section = f"TYPE-{selected_type}"
         t = cp[type_section]
 
         groove = float(t["Groove"])
         d_grating_mm = 1.0 / groove
-        n0 = float(t.get("Center0", "512"))
+        n0 = pixel_count // 2  # 센서 실제 중앙 픽셀
         gamma = math.radians(float(t.get("dV", "14.755")))
         delta = math.radians(float(t.get("TiltAngle", "0")))
-        f_mm = float(t["FocalLength"])
+        if f_mm is None:
+            f_mm = float(t["FocalLength"])
 
-        wl_center_mm = laser_nm * 1e-6  # nm → mm
+        # wl_center = 격자가 현재 조준하는 중심 파장 (레이저 파장 ≠ 격자 중심 파장)
+        grating_center_nm = 1.0 / (1.0 / laser_nm - raman_center_cm1 / 1e7)
+        wl_center_mm = grating_center_nm * 1e-6  # nm → mm
 
         pixels = np.arange(pixel_count, dtype=float)
         wl_mm = wl_p_calib(
@@ -93,7 +100,7 @@ class RamanCalibrator:
 
 
 if __name__ == "__main__":
-    cal = RamanCalibrator.from_factory_calibration()
+    cal = RamanCalibrator.from_factory_calibration(laser_nm=532.021, f_mm=580.0)
     print(f"laser     : {cal.laser_nm} nm")
     print(f"wl range  : {cal._wl_nm.min():.1f} ~ {cal._wl_nm.max():.1f} nm")
     print(f"raman range: {cal._lut.min():.0f} ~ {cal._lut.max():.0f} cm-1")

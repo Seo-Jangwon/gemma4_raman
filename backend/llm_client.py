@@ -2,6 +2,8 @@ import ollama
 import json
 import sys
 import atexit
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 # hardware_manager 경로 확보
@@ -45,7 +47,7 @@ def chat(messages: list) -> str:
 
 
 def run_agent(user_message: str, tools: list, tool_dispatch: dict,
-              max_steps: int = 20, verbose: bool = True) -> str:
+              max_steps: int = 20, verbose: bool = True) -> tuple[str, list[dict]]:
     """
     Tool calling agent loop.
 
@@ -59,13 +61,15 @@ def run_agent(user_message: str, tools: list, tool_dispatch: dict,
 
     Returns
     -------
-    LLM의 최종 텍스트 응답
+    (LLM 최종 텍스트 응답, tool_trace 리스트)
+    tool_trace 항목: {step, tool, args, result, duration_ms, timestamp}
     """
     client = _get_client()
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user",   "content": user_message},
     ]
+    tool_trace: list[dict] = []
 
     for step in range(max_steps):
         response = client.chat(
@@ -77,7 +81,7 @@ def run_agent(user_message: str, tools: list, tool_dispatch: dict,
 
         # tool call이 없으면 → 최종 답변
         if not msg.tool_calls:
-            return msg.content
+            return msg.content, tool_trace
 
         # tool call 처리
         messages.append(msg)  # assistant 메시지(tool_calls 포함) 추가
@@ -89,20 +93,31 @@ def run_agent(user_message: str, tools: list, tool_dispatch: dict,
             if verbose:
                 print(f"[step {step+1}] tool: {fn_name}  args: {fn_args}")
 
+            t0 = time.time()
             if fn_name not in tool_dispatch:
                 result = {"ok": False, "error": f"알 수 없는 tool: {fn_name}"}
             else:
                 result = tool_dispatch[fn_name](fn_args)
+            duration_ms = round((time.time() - t0) * 1000)
 
             if verbose:
                 print(f"         result: {result}")
+
+            tool_trace.append({
+                "step": step + 1,
+                "tool": fn_name,
+                "args": dict(fn_args),
+                "result": result,
+                "duration_ms": duration_ms,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
 
             messages.append({
                 "role": "tool",
                 "content": json.dumps(result, ensure_ascii=False),
             })
 
-    return "최대 step 수에 도달했습니다. 작업이 완료되지 않았을 수 있습니다."
+    return "최대 step 수에 도달했습니다. 작업이 완료되지 않았을 수 있습니다.", tool_trace
 
 
 if __name__ == "__main__":
@@ -128,7 +143,7 @@ if __name__ == "__main__":
             break
         if not user_input or user_input.lower() in {"exit", "quit", "종료"}:
             break
-        result = run_agent(
+        result, _trace = run_agent(
             user_message=user_input,
             tools=RAMAN_TOOLS,
             tool_dispatch=TOOL_DISPATCH,

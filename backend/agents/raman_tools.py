@@ -547,6 +547,9 @@ def set_mcp_gain(gain: int) -> dict:
     if _ccd is None:
         return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
     try:
+        low, high = _ccd.get_mcp_gain_range()
+        if not (low <= gain <= high):
+            return {"ok": False, "error": f"MCP 이득 범위 초과: {gain} (허용: {low}~{high})"}
         _ccd.set_mcp_gain(gain)
         return {"ok": True, "mcp_gain": gain}
     except Exception as e:

@@ -338,7 +338,7 @@ async def hardware_command(body: HardwareCommandRequest, request: Request):
     _require_llm(state)
     loop = asyncio.get_event_loop()
     try:
-        result = await loop.run_in_executor(
+        llm_response, tool_trace = await loop.run_in_executor(
             state.executor,
             lambda: llm_client.run_agent(
                 user_message=body.command,
@@ -348,7 +348,7 @@ async def hardware_command(body: HardwareCommandRequest, request: Request):
                 verbose=True,
             ),
         )
-        return {"message": result}
+        return {"message": llm_response, "tool_trace": tool_trace}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -359,7 +359,7 @@ async def chat(body: ChatRequest, request: Request):
     _require_llm(state)
     loop = asyncio.get_event_loop()
     try:
-        result = await loop.run_in_executor(
+        llm_response, tool_trace = await loop.run_in_executor(
             state.executor,
             lambda: llm_client.run_agent(
                 user_message=body.message,
@@ -369,7 +369,7 @@ async def chat(body: ChatRequest, request: Request):
                 verbose=True,
             ),
         )
-        return {"message": result, "data": None}
+        return {"message": llm_response, "data": None}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -387,7 +387,7 @@ async def autofocus(body: AutoFocusRequest, request: Request):
         f"스테이지를 각 Z 위치로 이동하며 최적 초점을 찾아주세요."
     )
     try:
-        result = await loop.run_in_executor(
+        llm_response, _tool_trace = await loop.run_in_executor(
             state.executor,
             lambda: llm_client.run_agent(
                 user_message=prompt,
@@ -408,7 +408,7 @@ async def autofocus(body: AutoFocusRequest, request: Request):
             "best_score": 0.0,
             "z_positions": z_positions,
             "focus_scores": [0.0] * len(z_positions),
-            "message": result,
+            "message": llm_response,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
