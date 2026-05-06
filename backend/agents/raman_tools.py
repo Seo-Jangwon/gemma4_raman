@@ -303,7 +303,15 @@ def acquire_spectrum(
             raw = _ccd.get_acquired_data()
         else:
             # Single / Accumulate: trigger_mode를 전달하여 software trigger 지원
-            raw = _ccd.start_acquisition_cycle(trigger_mode_str=trigger_mode)
+            # internal 트리거면 무한 대기 허용, 외부/소프트웨어면 deadline 부여
+            _timeout_ms = (
+                None if trigger_mode == 'internal'
+                else int((exposure * max(num_accumulations, 1) * 2 + 15) * 1000)
+            )
+            raw = _ccd.start_acquisition_cycle(
+                trigger_mode_str=trigger_mode,
+                timeout_ms=_timeout_ms,
+            )
 
     except Exception as e:
         return {"ok": False, "error": str(e)}

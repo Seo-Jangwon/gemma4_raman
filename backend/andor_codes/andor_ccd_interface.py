@@ -1371,7 +1371,8 @@ class AndorCCD(object):
     # raman_tools 호환 고수준 API
     # ══════════════════════════════════════════════════════════════════
 
-    def start_acquisition_cycle(self, trigger_mode_str: str = 'internal') -> dict:
+    def start_acquisition_cycle(self, trigger_mode_str: str = 'internal',
+                                timeout_ms: int | None = None) -> dict:
         """
         단일 촬영 사이클 실행 후 raman_tools 호환 dict 반환.
 
@@ -1382,6 +1383,9 @@ class AndorCCD(object):
         ----------
         trigger_mode_str : str
             현재 트리거 모드 문자열. 'software'이면 SendSoftwareTrigger() 자동 호출.
+        timeout_ms : int | None
+            WaitForAcquisition 타임아웃 [밀리초]. None = 무한 대기 (internal 트리거에 적합).
+            external/software 트리거 사용 시 반드시 설정하여 트리거 미도달 시 무한 블로킹 방지.
 
         Returns
         -------
@@ -1399,8 +1403,9 @@ class AndorCCD(object):
         if trigger_mode_str == 'software':
             self.send_software_trigger()
 
-        success = self.wait_for_acquisition()
+        success = self.wait_for_acquisition(timeout_ms=timeout_ms)
         if not success:
+            self.sdk.AbortAcquisition()
             return {
                 "intensity": [],
                 "calibrated": False,
