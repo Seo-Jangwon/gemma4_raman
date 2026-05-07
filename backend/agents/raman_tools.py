@@ -23,6 +23,18 @@ _laser = None
 _ccd   = None
 _camera = None
 
+# ── 배경 제거 세션 상태 ──────────────────────────────────────────────────────
+_last_spectrum: dict | None = None     # 가장 최근 acquire_spectrum() 결과 캐시
+_bg_versions:   dict        = {}       # version_label → 처리 결과
+
+
+def _cache_and_return(result: dict) -> dict:
+    """acquire_spectrum() 결과를 변경하지 않고 _last_spectrum에 캐시 후 그대로 반환."""
+    global _last_spectrum
+    if result.get("ok") and "data" in result:
+        _last_spectrum = result
+    return result
+
 
 def init_hardware(stage=None, laser=None, ccd=None, camera=None):
     """하드웨어 객체를 주입. run_scan.py 등에서 초기화 후 호출."""
@@ -990,6 +1002,200 @@ def run_autofocus(
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
 
+# ──────────────────────────────────────────
+# 배경 제거 (IPBSA)
+# ──────────────────────────────────────────
+
+def _ipbsa(intensity, poly_order=5, max_iterations=100, threshold=0.001):
+    import numpy as np
+    y = np.array(intensity, dtype=np.float64)
+    n = len(y)
+    x = np.linspace(0.0, 1.0, n)
+    working = y.copy()
+    prev_bg = np.zeros(n, dtype=np.float64)
+    converged = False
+    for i in range(max_iterations):
+        coeffs = np.polyfit(x, working, deg=poly_order)
+        bg = np.polyval(coeffs, x)
+        working = np.minimum(y, bg)
+        denom = np.linalg.norm(prev_bg)
+        if denom > 0 and np.linalg.norm(bg - prev_bg) / denom < threshold:
+            converged = True
+            break
+        prev_bg = bg.copy()
+    corrected = np.clip(y - bg, 0.0, None)
+    return corrected.tolist(), bg.tolist(), i + 1, converged
+
+
+def apply_background_subtraction(
+    poly_order: int = 5,
+    max_iterations: int = 100,
+    threshold: float = 0.001,
+    source: str = "last",
+    version_label: str = "default",
+    save_result: bool = False,
+) -> dict:
+    """IPBSA(반복 다항식 배경 제거)를 수행하고 결과를 _bg_versions에 저장한다."""
+    global _bg_versions
+
+    if not (2 <= poly_order <= 10):
+        return {"ok": False, "error": f"poly_order는 2~10이어야 합니다 (입력: {poly_order})"}
+    if not (10 <= max_iterations <= 500):
+        return {"ok": False, "error": f"max_iterations는 10~500이어야 합니다 (입력: {max_iterations})"}
+    if not (0.001 <= threshold <= 1.0):
+        return {"ok": False, "error": f"threshold는 0.001~1.0이어야 합니다 (입력: {threshold})"}
+
+    intensity: list = []
+    raman_shift = None
+
+    if source == "last":
+        if _last_spectrum is None:
+            return {
+                "ok": False,
+                "error": "저장된 스펙트럼이 없습니다. 먼저 acquire_spectrum()을 호출하세요.",
+            }
+        if "data" not in _last_spectrum:
+            return {
+                "ok": False,
+                "error": "마지막 스펙트럼이 Kinetic 모드입니다. Single/Accumulate 스펙트럼에만 적용 가능합니다.",
+            }
+        intensity = _last_spectrum["data"]
+        raman_shift = _last_spectrum.get("raman_shift_cm-1")
+    else:
+        filepath = Path(source)
+        if not filepath.is_absolute():
+            filepath = _DATA_DIR / source
+        if not filepath.exists():
+            return {"ok": False, "error": f"파일을 찾을 수 없습니다: {filepath}"}
+        try:
+            if filepath.suffix.lower() == ".json":
+                with open(filepath, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                if "data" in loaded:
+                    intensity = loaded["data"]
+                elif "corrected_data" in loaded:
+                    intensity = loaded["corrected_data"]
+                else:
+                    return {"ok": False, "error": "JSON 파일에 'data' 또는 'corrected_data' 키가 없습니다."}
+                raman_shift = loaded.get("raman_shift_cm-1")
+            elif filepath.suffix.lower() == ".csv":
+                with open(filepath, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    rows = list(reader)
+                if not rows:
+                    return {"ok": False, "error": "CSV 파일이 비어 있습니다."}
+                if "corrected_intensity" in rows[0]:
+                    intensity = [float(r["corrected_intensity"]) for r in rows]
+                elif "intensity" in rows[0]:
+                    intensity = [float(r["intensity"]) for r in rows]
+                else:
+                    return {"ok": False, "error": "CSV에 'intensity' 컬럼이 없습니다."}
+                if "raman_shift_cm-1" in rows[0]:
+                    raman_shift = [float(r["raman_shift_cm-1"]) for r in rows]
+            else:
+                return {"ok": False, "error": "지원되지 않는 파일 형식입니다 (JSON 또는 CSV만 허용)."}
+        except Exception as e:
+            return {"ok": False, "error": f"파일 로드 오류: {e}"}
+
+    if not intensity:
+        return {"ok": False, "error": "스펙트럼 강도 배열이 비어 있습니다."}
+    if len(intensity) < poly_order + 1:
+        return {
+            "ok": False,
+            "error": (
+                f"스펙트럼 길이({len(intensity)})가 poly_order+1({poly_order + 1})보다 작습니다. "
+                "다항식 차수를 낮추세요."
+            ),
+        }
+
+    try:
+        corrected, background, iterations_run, converged = _ipbsa(
+            intensity=intensity,
+            poly_order=poly_order,
+            max_iterations=max_iterations,
+            threshold=threshold,
+        )
+    except Exception as e:
+        return {"ok": False, "error": f"IPBSA 알고리즘 오류: {e}"}
+
+    saved_path = None
+    if save_result:
+        try:
+            _DATA_DIR.mkdir(parents=True, exist_ok=True)
+            save_filepath = _DATA_DIR / f"bg_corrected_{version_label}.csv"
+            with open(save_filepath, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                if raman_shift is not None:
+                    writer.writerow(["pixel_index", "raman_shift_cm-1", "corrected_intensity", "background_intensity"])
+                    for idx, (rs, ci, bi) in enumerate(zip(raman_shift, corrected, background)):
+                        writer.writerow([idx, rs, ci, bi])
+                else:
+                    writer.writerow(["pixel_index", "corrected_intensity", "background_intensity"])
+                    for idx, (ci, bi) in enumerate(zip(corrected, background)):
+                        writer.writerow([idx, ci, bi])
+            saved_path = str(save_filepath)
+        except Exception:
+            pass
+
+    result = {
+        "ok": True,
+        "version_label": version_label,
+        "poly_order": poly_order,
+        "max_iterations": max_iterations,
+        "threshold": threshold,
+        "iterations_run": iterations_run,
+        "converged": converged,
+        "max_corrected_intensity": float(max(corrected)) if corrected else 0.0,
+        "max_background_intensity": float(max(background)) if background else 0.0,
+        "corrected_data": corrected,
+        "background_data": background,
+    }
+    if raman_shift is not None:
+        result["raman_shift_cm-1"] = raman_shift
+    if saved_path is not None:
+        result["saved_path"] = saved_path
+
+    _bg_versions[version_label] = result.copy()
+    return result
+
+
+def list_bg_versions() -> dict:
+    """저장된 모든 배경 제거 결과 버전의 목록과 주요 통계를 반환한다."""
+    if not _bg_versions:
+        return {
+            "ok": True,
+            "count": 0,
+            "versions": [],
+            "message": "저장된 버전이 없습니다. apply_background_subtraction()을 먼저 호출하세요.",
+        }
+    summaries = []
+    for label, v in _bg_versions.items():
+        summaries.append({
+            "version_label":            label,
+            "poly_order":               v.get("poly_order"),
+            "max_iterations":           v.get("max_iterations"),
+            "threshold":                v.get("threshold"),
+            "iterations_run":           v.get("iterations_run"),
+            "converged":                v.get("converged"),
+            "max_corrected_intensity":  v.get("max_corrected_intensity"),
+            "max_background_intensity": v.get("max_background_intensity"),
+            "has_raman_shift":          "raman_shift_cm-1" in v,
+            "data_length":              len(v.get("corrected_data", [])),
+        })
+    return {"ok": True, "count": len(summaries), "versions": summaries}
+
+
+def get_bg_version(version_label: str) -> dict:
+    """특정 버전의 배경 제거 결과 전체 데이터를 반환한다."""
+    if version_label not in _bg_versions:
+        return {
+            "ok": False,
+            "error": f"버전 '{version_label}'을 찾을 수 없습니다.",
+            "available_versions": list(_bg_versions.keys()),
+        }
+    return {"ok": True, **_bg_versions[version_label]}
+
+
 def save_spectrum(
     data: list,
     filename: str,
@@ -1213,7 +1419,7 @@ TOOL_DISPATCH = {
     "set_laser_power":          lambda a: set_laser_power(**a),
     "set_guide_beam_mode":      lambda a: set_guide_beam_mode(),
     # ── 스펙트럼 수집 ────────────────────────────────────────────────────────
-    "acquire_spectrum":         lambda a: acquire_spectrum(**a),
+    "acquire_spectrum":         lambda a: _cache_and_return(acquire_spectrum(**a)),
     # ── 카메라 ──────────────────────────────────────────────────────────────
     "start_camera_stream":      lambda a: start_camera_stream(),
     "stop_camera_stream":       lambda a: stop_camera_stream(),
@@ -1244,4 +1450,8 @@ TOOL_DISPATCH = {
     # ── 세션 관리 ────────────────────────────────────────────────────────────
     "create_session":           lambda a: create_session(**a),
     "save_point_data":          lambda a: save_point_data(**a),
+    # ── 배경 제거 (IPBSA) ────────────────────────────────────────────────────
+    "apply_background_subtraction": lambda a: apply_background_subtraction(**a),
+    "list_bg_versions":             lambda a: list_bg_versions(),
+    "get_bg_version":               lambda a: get_bg_version(**a),
 }

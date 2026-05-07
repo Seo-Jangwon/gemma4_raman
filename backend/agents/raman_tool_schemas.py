@@ -763,4 +763,97 @@ RAMAN_TOOLS = [
             },
         },
     },
+    # ── 배경 제거 (IPBSA) ────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_background_subtraction",
+            "description": (
+                "IPBSA(반복 다항식 배경 제거 알고리즘)로 라만 스펙트럼의 형광 배경을 제거한다. "
+                "가장 최근에 수집한 스펙트럼(source='last') 또는 저장된 파일 경로를 소스로 사용한다. "
+                "결과는 version_label로 저장되며 list_bg_versions()로 여러 버전을 비교할 수 있다. "
+                "poly_order를 높이면 더 복잡한 배경을 제거할 수 있지만 과적합 위험이 있다. "
+                "사용자가 다항식 차수를 지정하지 않으면 기본값 5를 사용하라."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "poly_order": {
+                        "type": "integer",
+                        "description": "다항식 차수 (2~10). 기본값 5. 낮을수록 부드러운 배경, 높을수록 복잡한 배경 추정.",
+                        "minimum": 2,
+                        "maximum": 10,
+                    },
+                    "max_iterations": {
+                        "type": "integer",
+                        "description": "최대 반복 횟수 (10~500). 기본값 100.",
+                        "minimum": 10,
+                        "maximum": 500,
+                    },
+                    "threshold": {
+                        "type": "number",
+                        "description": "수렴 기준 — 반복 간 배경 곡선 상대 L2 변화량 (0.001~1.0). 기본값 0.001. 작을수록 엄격한 수렴.",
+                        "minimum": 0.001,
+                        "maximum": 1.0,
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": (
+                            "배경 제거할 스펙트럼 소스. "
+                            "'last': 가장 최근 acquire_spectrum() 결과 사용 (기본). "
+                            "그 외: 파일 경로 (JSON 또는 CSV, data/ 기준 상대경로 허용)."
+                        ),
+                    },
+                    "version_label": {
+                        "type": "string",
+                        "description": (
+                            "이 결과에 붙일 버전 이름. 예: 'v1_poly5', 'v2_poly7'. "
+                            "같은 이름으로 다시 호출하면 덮어쓴다. 기본값 'default'."
+                        ),
+                    },
+                    "save_result": {
+                        "type": "boolean",
+                        "description": "True이면 보정 스펙트럼을 data/ 디렉토리에 CSV로 저장한다. 기본값 false.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_bg_versions",
+            "description": (
+                "저장된 모든 배경 제거 결과 버전의 목록과 파라미터, 주요 통계를 반환한다. "
+                "데이터 배열은 포함되지 않는다. 전체 데이터는 get_bg_version()을 사용하라. "
+                "apply_background_subtraction()을 여러 번 호출해 비교할 때 사용한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_bg_version",
+            "description": (
+                "특정 버전의 배경 제거 결과 전체 데이터(보정 스펙트럼, 배경 곡선, 라만 시프트 축)를 반환한다. "
+                "version_label은 list_bg_versions()에서 확인한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "version_label": {
+                        "type": "string",
+                        "description": "조회할 버전 이름. 예: 'v1_poly5'",
+                    },
+                },
+                "required": ["version_label"],
+            },
+        },
+    },
 ]
