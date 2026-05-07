@@ -171,7 +171,7 @@ class HardwareManager:
         # ── 캘리브레이터 생성 (외부 파일 불필요) ──
         calibrator = None
         if RamanCalibrator is not None:
-            calibrator = RamanCalibrator.from_factory_calibration(laser_nm=532.021, f_mm=580.0)
+            calibrator = RamanCalibrator.from_factory_calibration(laser_nm=532.021, f_mm=580.0, raman_center_cm1=1250.0)
             print(f"[CCD]   Factory calibration 적용: "
                   f"{calibrator._lut.min():.0f}~{calibrator._lut.max():.0f} cm⁻¹")
 
@@ -210,6 +210,9 @@ class HardwareManager:
 
         # 우주선(Cosmic Ray) 필터: 기본 OFF (Accumulate 모드에서만 유효, Single에서 켜면 DRV_INVALID_FILTER)
         ccd.set_cosmic_ray_filter(False)
+
+        # 수평 반전: Config.ini [ANDOR_IDUS] Reverse=True — 이 카메라는 pixel 0이 고파장쪽에 맺힘
+        ccd.set_image_flip(hflip=True, vflip=False)
 
         # ── 냉각 시작 ──
         ccd.set_temperature(CCD_COOL_TARGET)
