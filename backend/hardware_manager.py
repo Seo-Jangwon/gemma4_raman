@@ -201,14 +201,15 @@ class HardwareManager:
         # PreAmp Gain: 인덱스 0 (최저 이득 → 동적 범위 최대)
         ccd.set_preamp_gain(0)
 
-        # 출력 앰프: Conventional (0=EMCCD, 1=Conventional)
-        ccd.set_output_amp(DEFAULT_OUTPUT_AMP)
+        # 출력 앰프: EMCCD만 설정 (일반 CCD는 앰프 1개뿐이라 SetOutputAmplifier 불필요)
+        if ccd.em_mode:
+            ccd.set_output_amp(DEFAULT_OUTPUT_AMP)  # 1 = Conventional (EM 잡음 방지)
 
         # 셔터: 닫힘 (촬영 직전까지 광원 차단)
         ccd.set_shutter_close()
 
-        # 우주선(Cosmic Ray) 필터: accumulate 모드에서 연속 스캔 비교로 스파이크 제거
-        ccd.set_cosmic_ray_filter(True)
+        # 우주선(Cosmic Ray) 필터: 기본 OFF (Accumulate 모드에서만 유효, Single에서 켜면 DRV_INVALID_FILTER)
+        ccd.set_cosmic_ray_filter(False)
 
         # ── 냉각 시작 ──
         ccd.set_temperature(CCD_COOL_TARGET)
