@@ -10,15 +10,18 @@ import os
 import cv2
 import time
 import numpy as np
+from pathlib import Path
+
+_BACKEND = Path(__file__).resolve().parent.parent
+if str(_BACKEND) not in sys.path:
+    sys.path.insert(0, str(_BACKEND))
 
 # 같은 디렉터리의 모듈 임포트
 sys.path.append(os.path.dirname(__file__))
 from USE_laser_with_power import LaserController
 from USE_camera_stream import StreamingTUCam
 from USE_stage_test import TangoController
-
-STREAM_WIDTH  = 1060
-STREAM_HEIGHT = 800
+from config import CAMERA_WIDTH as STREAM_WIDTH, CAMERA_HEIGHT as STREAM_HEIGHT  # noqa: E402
 
 COARSE_STEP  = 0.010   # mm (10µm)
 COARSE_RANGE = 0.050   # mm (±50µm, 총 11포인트)

@@ -49,6 +49,11 @@ from backend.agents.USE_stage_test       import TangoController   # noqa: E402
 from backend.agents.USE_laser_with_power import LaserController    # noqa: E402
 from backend.agents                      import raman_tools         # noqa: E402
 from backend.andor_codes                 import AndorCCD            # noqa: E402
+from backend.config import (                                        # noqa: E402
+    STAGE_MAX_X, STAGE_MAX_Y, STAGE_CENTER_X, STAGE_CENTER_Y,
+    LASER_NM, FOCAL_LENGTH_MM, RAMAN_CENTER_CM1,
+    PIXEL_COUNT, PIXEL_WIDTH_UM, GROOVE_PER_MM, TILT_ANGLE_DEG, SI_PEAK_OFFSET,
+)
 # StreamingTUCam 은 _init_camera() 안에서 lazy import
 # → TUCam.py 가 import 시점에 TUCam.dll 을 바로 로드하기 때문에
 #   DLL 이 없는 환경에서 모듈 import 자체가 실패하는 것을 방지
@@ -63,12 +68,6 @@ STAGE_DLL_PATH   = str(_BACKEND / "agents" / "Tango_DLL.dll")
 LASER_PORT       = "COM4"
 OLLAMA_HOST      = "http://192.168.1.16:11434"
 OLLAMA_MODEL     = "gemma4:31b"
-
-# 스테이지 한계 (mm)
-STAGE_MAX_X    = 75.7518    # Config.ini [STAGE_INFO] MaxX
-STAGE_MAX_Y    = 50.4961    # Config.ini [STAGE_INFO] MaxY
-STAGE_CENTER_X = 37.8759    # Config.ini [STAGE_INFO] CenterX (교정된 중점)
-STAGE_CENTER_Y = 25.24805   # Config.ini [STAGE_INFO] CenterY (교정된 중점)
 
 # CCD 온도 목표 (°C)
 CCD_COOL_TARGET = -40   # 냉각 목표 — 안정화될 때까지 블로킹
@@ -85,7 +84,7 @@ DRV_TEMP_DRIFT          = 20040
 # 스테이지 초기화 속도 (mm/s)  — 일반 스캔보다 빠르게
 INIT_SPEED_MM_S = 10.0
 
-DEFAULT_OUTPUT_AMP      = 1
+DEFAULT_OUTPUT_AMP = 1
 
 class HardwareManager:
     """
@@ -171,7 +170,16 @@ class HardwareManager:
         # ── 캘리브레이터 생성 (외부 파일 불필요) ──
         calibrator = None
         if RamanCalibrator is not None:
-            calibrator = RamanCalibrator.from_factory_calibration(laser_nm=532.021, f_mm=214.628559635107, raman_center_cm1=1200.0)
+            calibrator = RamanCalibrator.from_factory_calibration(
+                laser_nm=LASER_NM,
+                f_mm=FOCAL_LENGTH_MM,
+                raman_center_cm1=RAMAN_CENTER_CM1,
+                pixel_count=PIXEL_COUNT,
+                pixel_width_um=PIXEL_WIDTH_UM,
+                groove=GROOVE_PER_MM,
+                tilt_angle_deg=TILT_ANGLE_DEG,
+                si_peak_offset=SI_PEAK_OFFSET,
+            )
             print(f"[CCD]   Factory calibration 적용: "
                   f"{calibrator._lut.min():.0f}~{calibrator._lut.max():.0f} cm⁻¹")
 

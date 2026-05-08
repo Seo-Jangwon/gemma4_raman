@@ -12,9 +12,8 @@ import json
 import csv
 from pathlib import Path
 
+from backend.config import STAGE_MAX_X, STAGE_MAX_Y
 
-STAGE_MAX_X =  75.3169
-STAGE_MAX_Y =  50.1879
 STAGE_MIN_Z =  -1.0
 STAGE_MAX_Z =   1.0
 

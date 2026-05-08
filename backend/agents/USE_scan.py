@@ -2,22 +2,23 @@ import sys
 import os
 import cv2
 import numpy as np
+from pathlib import Path
+
+_BACKEND = Path(__file__).resolve().parent.parent
+if str(_BACKEND) not in sys.path:
+    sys.path.insert(0, str(_BACKEND))
 
 sys.path.append(os.path.dirname(__file__))
 from USE_camera_stream import StreamingTUCam
 from USE_stage_test import TangoController
-
-# ── 카메라 해상도 ──────────────────────────────
-STREAM_WIDTH  = 1060
-STREAM_HEIGHT = 800
-
-# ── 스테이지 한계 ──────────────────────────────
-STAGE_MAX_X = 75.3169
-STAGE_MAX_Y = 50.1879
-
-# ── 20x 렌즈 시야각(um) ───────────────────────
-LENS_WIDTH  = 305   # um  (config [LENS_1] MPLFLN20x Width=305)
-LENS_HEIGHT = 230   # um  (config [LENS_1] MPLFLN20x Height=230)
+from config import (  # noqa: E402
+    CAMERA_WIDTH  as STREAM_WIDTH,
+    CAMERA_HEIGHT as STREAM_HEIGHT,
+    STAGE_MAX_X,
+    STAGE_MAX_Y,
+    LENS_WIDTH_UM  as LENS_WIDTH,
+    LENS_HEIGHT_UM as LENS_HEIGHT,
+)
 
 # ── 축 부호 ───────────────────────────────────
 # pixel +X(right) -> stage -X  (stage +X 이동시 이미지는 -X로 이동)

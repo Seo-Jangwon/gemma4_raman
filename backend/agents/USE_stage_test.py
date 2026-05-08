@@ -9,15 +9,17 @@ import ctypes
 import sys
 import re
 from ctypes import *
+from pathlib import Path
 
-STAGE_MAX_X = 75.3169   # mm
-STAGE_MAX_Y = 50.1879   # mm
+# backend/ 경로를 추가하여 config 모듈을 찾을 수 있도록 설정
+_BACKEND = Path(__file__).resolve().parent.parent
+if str(_BACKEND) not in sys.path:
+    sys.path.insert(0, str(_BACKEND))
+
+from config import STAGE_MAX_X, STAGE_MAX_Y, STAGE_CENTER_X, STAGE_CENTER_Y  # noqa: E402
 
 STAGE_MIN_Z = -1.0      # mm  (= -1000 μm)
 STAGE_MAX_Z =  1.0      # mm  (=  1000 μm)
-
-STAGE_CENTER_X = 37.8755
-STAGE_CENTER_Y = 25.248
 
 
 def _clip(value: float, lo: float, hi: float) -> float:

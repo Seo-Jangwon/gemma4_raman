@@ -37,6 +37,7 @@ from pydantic import BaseModel
 # ── 백엔드 모듈 ────────────────────────────────────────────────────────────────
 from backend.hardware_manager import HardwareManager
 import backend.llm_client as llm_client
+from backend.config import CAMERA_WIDTH, CAMERA_HEIGHT, LENS_WIDTH_UM, LENS_HEIGHT_UM
 from backend.agents.raman_tool_schemas import RAMAN_TOOLS
 from backend.agents.raman_tools import TOOL_DISPATCH, init_hardware as rt_init_hardware
 
@@ -195,8 +196,8 @@ class TroubleshootRequest(BaseModel):
 class MovePixelRequest(BaseModel):
     px: float
     py: float
-    stream_width: int = 1060
-    stream_height: int = 800
+    stream_width: int = CAMERA_WIDTH
+    stream_height: int = CAMERA_HEIGHT
 
 class AcquireSpectrumRequest(BaseModel):
     exposure: float = 0.2
@@ -542,7 +543,7 @@ async def stage_move_pixel(body: MovePixelRequest, request: Request):
     USE_scan.py의 보정 상수를 그대로 사용한다."""
     from backend.agents.raman_tools import move_stage_relative
 
-    LENS_W_UM, LENS_H_UM = 305.0, 230.0
+    LENS_W_UM, LENS_H_UM = LENS_WIDTH_UM, LENS_HEIGHT_UM
     CALIB_X,   CALIB_Y   = 1.4, 1.285
     SIGN_X,    SIGN_Y     = -1, 1
 

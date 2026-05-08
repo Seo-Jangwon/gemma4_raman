@@ -42,9 +42,14 @@ class RamanCalibrator:
 
     @classmethod
     def from_factory_calibration(cls, config_path=None,
-                                  raman_center_cm1: float = 1200.0,
+                                  raman_center_cm1: float | None = None,
                                   laser_nm: float | None = None,
-                                  f_mm: float | None = None) -> "RamanCalibrator":
+                                  f_mm: float | None = None,
+                                  pixel_count: int | None = None,
+                                  pixel_width_um: float | None = None,
+                                  groove: float | None = None,
+                                  tilt_angle_deg: float | None = None,
+                                  si_peak_offset: float | None = None) -> "RamanCalibrator":
         path = Path(config_path) if config_path else _DEFAULT_CONFIG
 
         cp = configparser.ConfigParser(strict=False)
@@ -54,8 +59,11 @@ class RamanCalibrator:
         auto = cp["AUTO_CALIBRATION"]
         selected_type = int(auto.get("SelectedType", "0"))
         selected_rayleigh = int(auto.get("SelectedRayleigh", "0"))
-        pixel_count = int(auto.get("PixelCount", "1024"))
-        pixel_width_um = float(auto.get("PixelWidth", "23.8902"))
+
+        if pixel_count is None:
+            pixel_count = int(auto.get("PixelCount", "1024"))
+        if pixel_width_um is None:
+            pixel_width_um = float(auto.get("PixelWidth", "23.8902"))
         x_pixel_mm = pixel_width_um / 1000.0
 
         if laser_nm is None:
@@ -65,13 +73,18 @@ class RamanCalibrator:
         type_section = f"TYPE-{selected_type}"
         t = cp[type_section]
 
-        groove = float(t["Groove"])
+        if groove is None:
+            groove = float(t["Groove"])
         d_grating_mm = 1.0 / groove
         n0 = pixel_count // 2  # 센서 실제 중앙 픽셀
         gamma = math.radians(float(t.get("dV", "14.755")))
-        delta = math.radians(float(t.get("TiltAngle", "0")))
+        if tilt_angle_deg is None:
+            tilt_angle_deg = float(t.get("TiltAngle", "0"))
+        delta = math.radians(tilt_angle_deg)
         if f_mm is None:
             f_mm = float(t["FocalLength"])
+        if si_peak_offset is None:
+            si_peak_offset = 0.0
 
         # wl_center = 격자가 현재 조준하는 중심 파장 (레이저 파장 ≠ 격자 중심 파장)
         grating_center_nm = 1.0 / (1.0 / laser_nm - raman_center_cm1 / 1e7)
@@ -81,7 +94,7 @@ class RamanCalibrator:
         wl_mm = wl_p_calib(
             pixels,
             n0=n0,
-            offset_adjust=0.0,
+            offset_adjust=si_peak_offset,
             wl_center=wl_center_mm,
             m_order=1,
             d_grating=d_grating_mm,
