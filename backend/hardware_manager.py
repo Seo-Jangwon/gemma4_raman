@@ -171,7 +171,7 @@ class HardwareManager:
         # ── 캘리브레이터 생성 (외부 파일 불필요) ──
         calibrator = None
         if RamanCalibrator is not None:
-            calibrator = RamanCalibrator.from_factory_calibration(laser_nm=532.021, f_mm=580.0, raman_center_cm1=1250.0)
+            calibrator = RamanCalibrator.from_factory_calibration(laser_nm=532.021, f_mm=580.0, raman_center_cm1=1200.0)
             print(f"[CCD]   Factory calibration 적용: "
                   f"{calibrator._lut.min():.0f}~{calibrator._lut.max():.0f} cm⁻¹")
 

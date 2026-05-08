@@ -259,6 +259,7 @@ def save_csv(result: dict, p: dict) -> list:
                 "calibrated":       frame.get("calibrated", False),
                 "raman_shift_cm-1": frame.get("raman_shift_cm-1"),
                 "wavelength_nm":    frame.get("wavelength_nm"),
+                "laser_nm":         frame.get("laser_nm") or result.get("laser_nm"),
             }
             fp = out_dir / f"spectrum_{ts}_{tag}_f{frame['frame_index']:02d}.csv"
             save_spectrum_csv(rec, fp)
@@ -271,6 +272,7 @@ def save_csv(result: dict, p: dict) -> list:
             "calibrated":       result.get("calibrated", False),
             "raman_shift_cm-1": result.get("raman_shift_cm-1"),
             "wavelength_nm":    result.get("wavelength_nm"),
+            "laser_nm":         result.get("laser_nm"),
         }
         fp = out_dir / f"spectrum_{ts}_{tag}.csv"
         save_spectrum_csv(rec, fp)

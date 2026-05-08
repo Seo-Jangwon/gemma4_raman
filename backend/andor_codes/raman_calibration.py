@@ -42,7 +42,7 @@ class RamanCalibrator:
 
     @classmethod
     def from_factory_calibration(cls, config_path=None,
-                                  raman_center_cm1: float = 1300.0,
+                                  raman_center_cm1: float = 1200.0,
                                   laser_nm: float | None = None,
                                   f_mm: float | None = None) -> "RamanCalibrator":
         path = Path(config_path) if config_path else _DEFAULT_CONFIG

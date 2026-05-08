@@ -20,7 +20,7 @@ def save_spectrum_csv(result: dict, path: str | Path):
         w = csv.writer(f)
         if result.get("calibrated"):
             # 메타 정보를 주석으로
-            f.write(f"# laser_nm,{result['laser_nm']}\n")
+            f.write(f"# laser_nm,{result.get('laser_nm', '')}\n")
             f.write(f"# calibration,factory_polynomial\n")
             if "exposure_time" in result:
                 f.write(f"# exposure_time,{result['exposure_time']}\n")
