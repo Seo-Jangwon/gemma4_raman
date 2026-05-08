@@ -53,7 +53,7 @@ class RamanCalibrator:
         path = Path(config_path) if config_path else _DEFAULT_CONFIG
 
         cp = configparser.ConfigParser(strict=False)
-        with open(path, encoding="utf-8", errors="ignore") as fh:
+        with open(path, encoding="cp949", errors="ignore") as fh:
             cp.read_file(fh)
 
         auto = cp["AUTO_CALIBRATION"]
