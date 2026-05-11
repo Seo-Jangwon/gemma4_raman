@@ -84,15 +84,16 @@
     "category": "A",
     "complexity": "Basic",
     "skill": "하드웨어 제어",
-    "description": "레이저를 켜라.",
+    "description": "레이저 출력을 20%로 맞춘 후 레이저를 켜고 1초 뒤 꺼라.",
     "auto_evaluable": true,
     "skip": false,
     "skip_reason": null,
-    "requires_human_review": true,
-    "expected_tools": ["laser_on"],
+    "requires_human_review": false,
+    "expected_tools": ["set_laser_power", "laser_on", "laser_off"],
     "verifiers": [
-      {"type": "tool_called", "tools": ["laser_on"]},
-      {"type": "laser_state", "expected_on": true}
+      {"type": "tool_sequence", "tools_in_order": ["set_laser_power", "laser_on", "laser_off"]},
+      {"type": "tool_args", "tool": "set_laser_power", "field": "percent", "expected": 20, "tolerance": 0},
+      {"type": "laser_state", "expected_on": false}
     ]
   },
   {
@@ -243,14 +244,16 @@
     "id": "Q016",
     "category": "A",
     "complexity": "Basic",
-    "skill": "basic",
-    "description": "CCD MCP Gain(Intensifier) 설정 가능 범위와 값을 조회하라.",
-    "auto_evaluable": false,
+    "skill": "상태 조회",
+    "description": "CCD MCP Gain(Intensifier) 설정 가능 범위와 현재 값을 조회하라.",
+    "auto_evaluable": true,
     "skip": false,
     "skip_reason": null,
     "requires_human_review": false,
-    "expected_tools": ["set_ccd_em_gain"],
+    "expected_tools": ["get_ccd_info"],
     "verifiers": [
+      {"type": "tool_called", "tools": ["get_ccd_info"]},
+      {"type": "tool_result_ok", "tool": "get_ccd_info"}
     ]
   },
   {
@@ -265,6 +268,7 @@
     "requires_human_review": false,
     "expected_tools": ["set_ccd_temperature", "set_ccd_cooler"],
     "verifiers": [
+      {"type": "tool_sequence", "tools_in_order": ["set_ccd_temperature", "set_ccd_cooler"]},
       {"type": "tool_called", "tools": ["set_ccd_temperature", "set_ccd_cooler"]},
       {"type": "tool_args", "tool": "set_ccd_temperature", "field": "temperature", "expected": -35, "tolerance": 0.5},
       {"type": "tool_args", "tool": "set_ccd_cooler", "field": "on", "expected": true, "tolerance": null}
@@ -307,13 +311,15 @@
     "category": "A",
     "complexity": "Basic",
     "skill": "반복 제어",
-    "description": "레이저 출력을 100%에서 20%까지 20% 단위로 순차 변경하며 각 단계의 설정값을 보고하라.",
+    "description": "레이저가 꺼진 상태로 레이저 출력을 100%에서 20%까지 20% 단위로 순차 변경하며 각 단계의 설정값을 보고하라.",
     "auto_evaluable": true,
     "skip": false,
     "skip_reason": null,
-    "requires_human_review": true,
+    "requires_human_review": false,
     "expected_tools": ["set_laser_power"],
     "verifiers": [
+      {"type": "laser_state", "expected_on": false},
+      {"type": "tool_call_count", "tool": "laser_on", "min_count": 0, "max_count": 0},
       {"type": "tool_call_count", "tool": "set_laser_power", "min_count": 5},
       {"type": "tool_args_sequence", "tool": "set_laser_power", "field": "percent", "expected_sequence": [100, 80, 60, 40, 20], "tolerance": 0}
     ]
@@ -331,7 +337,7 @@
     "expected_tools": ["move_stage"],
     "verifiers": [
       {"type": "tool_called", "tools": ["move_stage"]},
-      {"type": "stage_position", "expected": {"x": 37.8755, "y": 25.248}, "tolerance": 0.0}
+      {"type": "stage_position", "expected": {"x": 37.8755, "y": 25.248}, "tolerance": 0.001}
     ]
   },
   {
@@ -373,17 +379,15 @@
     "category": "A",
     "complexity": "Adv",
     "skill": "조건부 대기",
-    "description": "CCD 쿨러를 끄고, 현재 온도가 -20°C 이상이 될 때까지 대기한 뒤 상태를 보고하라.",
+    "description": "CCD 쿨러의 현재 온도가 -35°C 이하가 될 때까지 대기한 뒤 상태를 보고하라.",
     "auto_evaluable": true,
     "skip": false,
     "skip_reason": null,
     "requires_human_review": false,
-    "expected_tools": ["set_ccd_cooler", "get_ccd_info"],
+    "expected_tools": ["get_ccd_info"],
     "verifiers": [
-      {"type": "tool_called", "tools": ["set_ccd_cooler"]},
-      {"type": "tool_args", "tool": "set_ccd_cooler", "field": "on", "expected": false, "tolerance": null},
-      {"type": "tool_call_count", "tool": "get_ccd_info", "min_count": 1},
-      {"type": "human_only", "note": "온도 -20°C 도달 대기 로직이 실제로 동작했는지 확인"}
+      {"type": "tool_call_count", "tool": "get_ccd_info", "min_count": 2},
+      {"type": "ccd_temperature", "expected": -35, "tolerance": 2}
     ]
   },
   {
@@ -399,7 +403,7 @@
     "expected_tools": ["move_stage", "get_stage_position"],
     "verifiers": [
       {"type": "tool_sequence", "tools_in_order": ["move_stage", "get_stage_position"]},
-      {"type": "stage_position", "expected": {"x": 38.8755, "y": 26.248, "z": 0.0}, "tolerance": 0.0}
+      {"type": "stage_position", "expected": {"x": 38.8755, "y": 26.248}, "tolerance": 0.001}
     ]
   },
   {
@@ -414,9 +418,11 @@
     "requires_human_review": true,
     "expected_tools": ["laser_on", "set_ccd_exposure", "acquire_spectrum", "laser_off"],
     "verifiers": [
-      {"type": "tool_sequence", "tools_in_order": ["laser_on", "laser_off"]},
-      {"type": "tool_called", "tools": ["acquire_spectrum"]},
-      {"type": "spectrum_valid", "tool": "acquire_spectrum"}
+      {"type": "tool_sequence", "tools_in_order": ["laser_on", "acquire_spectrum", "laser_off"]},
+      {"type": "tool_called", "tools": ["set_ccd_exposure", "acquire_spectrum"]},
+      {"type": "ccd_exposure", "expected": 1.0, "tolerance": 0.01},
+      {"type": "spectrum_valid", "tool": "acquire_spectrum"},
+      {"type": "laser_state", "expected_on": false}
     ]
   },
   {
@@ -449,7 +455,7 @@
     "expected_tools": ["acquire_spectrum"],
     "verifiers": [
       {"type": "tool_call_count", "tool": "acquire_spectrum", "min_count": 3},
-      {"type": "tool_args_sequence", "tool": "acquire_spectrum", "field": "exposure", "expected_sequence": [0.5, 1.0, 2.0]}
+      {"type": "tool_args_sequence", "tool": "acquire_spectrum", "field": "exposure", "expected_sequence": [0.5, 1.0, 2.0], "tolerance": 0.001}
     ]
   },
   {
@@ -464,6 +470,9 @@
     "requires_human_review": true,
     "expected_tools": ["acquire_spectrum", "save_spectrum"],
     "verifiers": [
+      {"type": "tool_call_count", "tool": "set_laser_power", "min_count": 3},
+      {"type": "tool_args_sequence", "tool": "set_laser_power", "field": "percent", "expected_sequence": [20, 40, 60], "tolerance": 0},
+      {"type": "tool_call_count", "tool": "acquire_spectrum", "min_count": 3},
       {"type": "human_only", "note": "파일 저장 로직 구현 후 테스트"}
     ]
   },
@@ -511,8 +520,8 @@
     "requires_human_review": true,
     "expected_tools": ["move_stage", "run_autofocus", "capture_camera_frame", "acquire_spectrum", "save_point_data"],
     "verifiers": [
-      {"type": "stage_position", "expected": {"x": 38.8755, "y": 26.248}, "tolerance": 0.0},
-      {"type": "human_only", "note": "저장 로직 구현 후 테스트"}     
+      {"type": "stage_position", "expected": {"x": 37.8755, "y": 25.248}, "tolerance": 0.001},
+      {"type": "human_only", "note": "저장 로직 구현 후 테스트"}
     ]
   },
   {
@@ -527,6 +536,7 @@
     "requires_human_review": true,
     "expected_tools": ["move_stage", "acquire_spectrum"],
     "verifiers": [
+      {"type": "tool_call_count", "tool": "move_stage", "min_count": 9},
       {"type": "tool_call_count", "tool": "acquire_spectrum", "min_count": 9},
       {"type": "human_only", "note": "저장 로직 구현 후 테스트"}
     ]
@@ -536,15 +546,15 @@
     "category": "B",
     "complexity": "Adv",
     "skill": "라인 스캔",
-    "description": "라인 스캔을 수행하라: (X=37.8755, Y=25.248)에서 (X=38.8755, Y=25.248)까지 0.2mm 간격으로 5개 포인트, 각 포인트에서 스펙트럼 수집.",
+    "description": "라인 스캔을 수행하라: (X=37.8755, Y=25.248)에서 (X=38.8755, Y=25.248)까지 0.2mm 간격으로 6개 포인트, 각 포인트에서 스펙트럼 수집.",
     "auto_evaluable": true,
     "skip": false,
     "skip_reason": null,
     "requires_human_review": false,
     "expected_tools": ["move_stage", "acquire_spectrum"],
     "verifiers": [
-      {"type": "tool_call_count", "tool": "move_stage", "min_count": 5},
-      {"type": "tool_call_count", "tool": "acquire_spectrum", "min_count": 5}
+      {"type": "tool_call_count", "tool": "move_stage", "min_count": 6},
+      {"type": "tool_call_count", "tool": "acquire_spectrum", "min_count": 6}
     ]
   },
   {
@@ -568,15 +578,16 @@
     "category": "B",
     "complexity": "Adv",
     "skill": "맵핑+AF",
-    "description": "현 화면의 픽셀 가운데서 5×5 그리드 맵핑을 수행하되, 각 포인트에서 오토포커스 후 스펙트럼을 수집하라.",
+    "description": "현 화면의 픽셀 가운데서 5×5 그리드 맵핑(포인트 간격 0.1mm)을 수행하되, 각 포인트에서 오토포커스 후 스펙트럼을 수집하라.",
     "auto_evaluable": true,
     "skip": false,
     "skip_reason": null,
     "requires_human_review": false,
     "expected_tools": ["move_stage", "run_autofocus", "acquire_spectrum"],
     "verifiers": [
-      {"type": "tool_call_count", "tool": "acquire_spectrum", "min_count": 25},
-      {"type": "tool_call_count", "tool": "run_autofocus", "min_count": 25}
+      {"type": "tool_call_count", "tool": "move_stage", "min_count": 25},
+      {"type": "tool_call_count", "tool": "run_autofocus", "min_count": 25},
+      {"type": "tool_call_count", "tool": "acquire_spectrum", "min_count": 25}
     ]
   },
   {

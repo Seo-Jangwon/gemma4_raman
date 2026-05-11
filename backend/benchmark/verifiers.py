@@ -137,20 +137,19 @@ def _tool_args(v: dict, tool_trace: list[dict]) -> VerifyResult:
 def _tool_sequence(v: dict, tool_trace: list[dict]) -> VerifyResult:
     ordered = v["tools_in_order"]
     tool_names = [t["tool"] for t in tool_trace]
-    positions = []
+    last_pos = -1
     for tool in ordered:
-        try:
-            pos = tool_names.index(tool)
-            positions.append((tool, pos))
-        except ValueError:
-            return VerifyResult(passed=False, verifier_type="tool_sequence",
-                                detail=f"'{tool}'이 tool_trace에 없음")
-    for i in range(len(positions) - 1):
-        if positions[i][1] >= positions[i + 1][1]:
+        found = False
+        for i in range(last_pos + 1, len(tool_names)):
+            if tool_names[i] == tool:
+                last_pos = i
+                found = True
+                break
+        if not found:
             return VerifyResult(
                 passed=False,
                 verifier_type="tool_sequence",
-                detail=f"순서 오류: '{positions[i][0]}'(step {positions[i][1]+1})가 '{positions[i+1][0]}'(step {positions[i+1][1]+1}) 이후여야 함",
+                detail=f"'{tool}'이 이전 단계 이후 tool_trace에 없음",
             )
     return VerifyResult(passed=True, verifier_type="tool_sequence",
                         detail=f"순서 정확: {ordered}")
@@ -177,13 +176,23 @@ def _tool_args_sequence(v: dict, tool_trace: list[dict]) -> VerifyResult:
                             detail=f"{v['tool']} 호출 없음")
     field = v["field"]
     expected_seq = v["expected_sequence"]
+    tolerance = v.get("tolerance")
     actual_seq = [c["args"].get(field) for c in calls]
 
     # 순서가 포함(subsequence)되는지 체크 (exact match 아님)
     matched = 0
     for val in actual_seq:
-        if matched < len(expected_seq) and val == expected_seq[matched]:
-            matched += 1
+        if matched < len(expected_seq):
+            exp = expected_seq[matched]
+            if tolerance is not None:
+                try:
+                    if abs(float(val) - float(exp)) <= float(tolerance):
+                        matched += 1
+                except (TypeError, ValueError):
+                    pass
+            else:
+                if val == exp:
+                    matched += 1
     if matched == len(expected_seq):
         return VerifyResult(passed=True, verifier_type="tool_args_sequence",
                             detail=f"{v['tool']}.{field} 시퀀스 확인: {actual_seq}")
@@ -329,10 +338,11 @@ def _spectrum_valid(v: dict, tool_trace: list[dict]) -> VerifyResult:
             intensity = result["intensity"]
             if isinstance(intensity, list) and len(intensity) > 0:
                 max_val = result.get("max_intensity", max(intensity))
-                return VerifyResult(
-                    passed=True,
-                    verifier_type="spectrum_valid",
-                    detail=f"스펙트럼 유효: {len(intensity)}픽셀, max={max_val:.1f}",
-                )
+                if max_val > 0:
+                    return VerifyResult(
+                        passed=True,
+                        verifier_type="spectrum_valid",
+                        detail=f"스펙트럼 유효: {len(intensity)}픽셀, max={max_val:.1f}",
+                    )
     return VerifyResult(passed=False, verifier_type="spectrum_valid",
-                        detail="유효한 스펙트럼 데이터 없음 (intensity 배열 비어있거나 ok=False)")
+                        detail="유효한 스펙트럼 데이터 없음 (intensity 배열 비어있거나 ok=False 또는 신호 없음)")
