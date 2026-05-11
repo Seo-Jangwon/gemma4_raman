@@ -158,6 +158,7 @@ def set_laser_power(percent: int) -> dict:
         return {"ok": False, "error": f"유효한 출력값: {valid}"}
     try:
         _laser.set_power(percent)
+        time.sleep(0.15)  # ND 필터 광학 settling (모터 정지 후 잔류 진동)
         return {"ok": True, "power_percent": percent}
     except Exception as e:
         return {"ok": False, "error": str(e)}

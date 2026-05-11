@@ -580,6 +580,7 @@ class LaserController:
             success = self._execute_command("02", "SMMA", target_pos, timeout=15.0)
             if success:
                 self._power_set = True
+                time.sleep(0.1) # 모터 안정화
                 print("   -> 파워 설정 완료!")
             else:
                 print("   -> 파워 설정 실패 (응답 없음)")
@@ -596,6 +597,7 @@ class LaserController:
         print("🔦 가이드빔 모드로 전환 중...")
         self._execute_command("04", "SMMA", "-0612828", timeout=10.0)
         self._execute_command("02", "SMMA", "-0602895", timeout=15.0)
+        time.sleep(0.1)  # 모터 안정화
         print("   -> 🔦 가이드빔 전환 완료!")
 
     # ==============================================================

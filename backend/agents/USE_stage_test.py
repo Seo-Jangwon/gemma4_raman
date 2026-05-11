@@ -8,6 +8,7 @@ Tango 스테이지 컨트롤러 테스트 스크립트
 import ctypes
 import sys
 import re
+import time
 from ctypes import *
 from pathlib import Path
 
@@ -194,7 +195,7 @@ class TangoController:
                   f"X {x:.4f}→{cx:.4f}  Y {y:.4f}→{cy:.4f}  Z {z:.4f}→{cz:.4f}")
 
         error = self.dll.LSX_MoveAbs(self.LSID, c_double(cx), c_double(cy), c_double(cz), c_double(a), wait)
-
+        time.sleep(0.1)  # 기계적 진동 감쇠
         if error > 0:
             print(f"[ERROR] 이동 실패, 에러코드: {error}")
             return False
