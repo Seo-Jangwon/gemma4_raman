@@ -608,6 +608,53 @@ RAMAN_TOOLS = [
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_microscope_image",
+            "description": (
+                "TuCam 광학현미경 카메라의 현재 화면을 캡처해 이미지로 전달한다. "
+                "샘플 위치 확인, 타겟 식별, 이물질 탐지 등 시각적 판단이 필요할 때 사용해라. "
+                "스트리밍이 활성화된 상태여야 한다."
+                "반환 시 픽셀 좌표도 함께 반환하게 되며, 이는 스테이지의 좌표가 아니므로 해당 위치로 이동이 필요할 시 move_to_pixel 도구로 변환해 이동해야 한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "이미지에서 확인하고 싶은 내용 (선택). 예: '샘플의 위치와 밝기를 설명해줘'",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "move_to_pixel",
+            "description": (
+                "카메라 이미지 내 픽셀 좌표(pixel_x, pixel_y)를 스테이지 mm 좌표로 변환해 이동한다. "
+                "이미지 중심이 현재 스테이지 위치에 대응한다. "
+                "analyze_microscope_image로 타겟 픽셀 좌표를 확인한 뒤 이 tool로 이동하세요."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pixel_x": {
+                        "type": "integer",
+                        "description": "이미지 X 픽셀 좌표 (0 ~ 1060)",
+                    },
+                    "pixel_y": {
+                        "type": "integer",
+                        "description": "이미지 Y 픽셀 좌표 (0 ~ 800)",
+                    },
+                },
+                "required": ["pixel_x", "pixel_y"],
+            },
+        },
+    },
     # ── 오토포커스 ────────────────────────────────────────────────────────────
     {
         "type": "function",

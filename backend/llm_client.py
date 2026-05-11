@@ -113,10 +113,20 @@ def run_agent(user_message: str, tools: list, tool_dispatch: dict,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
 
+            img_b64  = result.pop("image_base64", None)
+            question = result.pop("question", "현미경 카메라 이미지:")
+
             messages.append({
                 "role": "tool",
                 "content": json.dumps(result, ensure_ascii=False),
             })
+
+            if img_b64:
+                messages.append({
+                    "role": "user",
+                    "content": question,
+                    "images": [img_b64],
+                })
 
     return "최대 step 수에 도달했습니다. 작업이 완료되지 않았을 수 있습니다.", tool_trace
 

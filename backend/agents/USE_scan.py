@@ -12,12 +12,14 @@ sys.path.append(os.path.dirname(__file__))
 from USE_camera_stream import StreamingTUCam
 from USE_stage_test import TangoController
 from config import (  # noqa: E402
-    CAMERA_WIDTH  as STREAM_WIDTH,
-    CAMERA_HEIGHT as STREAM_HEIGHT,
+    CAMERA_WIDTH,
+    CAMERA_HEIGHT,
     STAGE_MAX_X,
     STAGE_MAX_Y,
     LENS_WIDTH_UM  as LENS_WIDTH,
     LENS_HEIGHT_UM as LENS_HEIGHT,
+    CALIB_FACTOR_X,
+    CALIB_FACTOR_Y,
 )
 
 # ── 축 부호 ───────────────────────────────────
@@ -27,8 +29,8 @@ SIGN_X = -1
 SIGN_Y = +1
 
 # um/px 스케일  (StartPosX=250, StartPosY=135은 카메라 ROI 시작점 — 좌표 계산에 불필요)
-UM_PER_PX_X = LENS_WIDTH  / STREAM_WIDTH    # 305/1060 = 0.2877 um/px
-UM_PER_PX_Y = LENS_HEIGHT / STREAM_HEIGHT   # 230/800  = 0.2875 um/px
+UM_PER_PX_X = LENS_WIDTH  / CAMERA_WIDTH    # 305/1060 = 0.2877 um/px
+UM_PER_PX_Y = LENS_HEIGHT / CAMERA_HEIGHT   # 230/800  = 0.2875 um/px
 
 def main():
     camera = StreamingTUCam()
@@ -63,11 +65,11 @@ def main():
             if len(disp.shape) == 2:
                 disp = cv2.cvtColor(disp, cv2.COLOR_GRAY2BGR)
 
-            if disp.shape[:2] != (STREAM_HEIGHT, STREAM_WIDTH):
-                disp = cv2.resize(disp, (STREAM_WIDTH, STREAM_HEIGHT))
+            if disp.shape[:2] != (CAMERA_HEIGHT, CAMERA_WIDTH):
+                disp = cv2.resize(disp, (CAMERA_WIDTH, CAMERA_HEIGHT))
 
             # 중심 십자선
-            cx, cy = STREAM_WIDTH // 2, STREAM_HEIGHT // 2
+            cx, cy = CAMERA_WIDTH // 2, CAMERA_HEIGHT // 2
             cv2.line(disp, (cx - 20, cy), (cx + 20, cy), (0, 255, 0), 1)
             cv2.line(disp, (cx, cy - 20), (cx, cy + 20), (0, 255, 0), 1)
 
@@ -82,11 +84,9 @@ def main():
                 pending_click[0] = None
                 pos = stage.get_position()
                 if pos is not None:
-                    dx_px = px - STREAM_WIDTH  / 2.0
-                    dy_px = py - STREAM_HEIGHT / 2.0
+                    dx_px = px - CAMERA_WIDTH  / 2.0
+                    dy_px = py - CAMERA_HEIGHT / 2.0
                     
-                    CALIB_FACTOR_X = 1.4
-                    CALIB_FACTOR_Y = 1.285
                     abs_x = pos[0] + (dx_px * UM_PER_PX_X * CALIB_FACTOR_X) / 1000.0 * SIGN_X
                     abs_y = pos[1] + (dy_px * UM_PER_PX_Y * CALIB_FACTOR_Y) / 1000.0 * SIGN_Y
                     print(f"[CLICK] pixel=({px}, {py})  stage X={abs_x:.4f}  Y={abs_y:.4f} mm")

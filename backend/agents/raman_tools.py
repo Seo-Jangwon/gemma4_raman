@@ -12,7 +12,12 @@ import json
 import csv
 from pathlib import Path
 
-from backend.config import STAGE_MAX_X, STAGE_MAX_Y
+from backend.config import (
+    STAGE_MAX_X, STAGE_MAX_Y,
+    CAMERA_WIDTH, CAMERA_HEIGHT,
+    LENS_WIDTH_UM, LENS_HEIGHT_UM,
+    CALIB_FACTOR_X, CALIB_FACTOR_Y,
+)
 
 STAGE_MIN_Z =  -1.0
 STAGE_MAX_Z =   1.0
@@ -1401,6 +1406,76 @@ def save_point_data(
         return {"ok": False, "error": str(e)}
 
 
+def analyze_microscope_image(question: str = "샘플의 특정 물체(예: 세포)를 찾고 중심점 픽셀 좌표를 알려주세요.") -> dict:
+    """
+    TuCam 현미경 카메라 화면을 무손실 PNG (Base64)로 캡처하여 반환.
+    """
+    if _camera is None:
+        return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
+    try:
+        import base64
+        import numpy as np
+        import cv2
+        frame = _camera.get_latest_frame()
+        if frame is None:
+            return {"ok": False, "error": "프레임 획득 실패 (스트리밍 중인지 확인)"}
+
+        if frame.dtype == np.uint16:
+            frame = (frame >> 8).astype(np.uint8)
+        
+        if frame.ndim == 2:
+            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        else:
+            frame_bgr = frame.copy()
+
+        # PNG(무손실 원본)
+        height, width = frame_bgr.shape[:2]
+        ret, buf = cv2.imencode('.png', frame_bgr)
+        enhanced_question = f"{question}\n\n[현재 첨부된 이미지의 원본 해상도는 가로 {width}px, 세로 {height}px 입니다. 픽셀 좌표를 반환할 때 이 해상도를 기준으로 정확한 픽셀 값을 제시하세요.][주의: 당신은 픽셀 좌표를 반환하게 되며, 이는 스테이지 좌표가 아닙니다. 스테이지를 해당 위치로 이동하려면, move_to_pixel(pixel_x, pixel_y) 함수를 사용해야 합니다.]"
+        
+        if not ret:
+            return {"ok": False, "error": "PNG 인코딩 실패"}
+        img_b64 = base64.b64encode(buf).decode('utf-8')
+
+        return {
+            "ok": True,
+            "image_base64": img_b64,
+            "question": enhanced_question,
+            "width": frame_bgr.shape[1],
+            "height": frame_bgr.shape[0],
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+_UM_PER_PX_X = LENS_WIDTH_UM  / CAMERA_WIDTH   # µm/px  (305/1060)
+_UM_PER_PX_Y = LENS_HEIGHT_UM / CAMERA_HEIGHT  # µm/px  (230/800)
+_SIGN_X = -1  # pixel +X(right) → stage -X
+_SIGN_Y = +1  # pixel +Y(down)  → stage +Y
+
+
+def move_to_pixel(pixel_x: int, pixel_y: int) -> dict:
+    """
+    카메라 이미지의 픽셀 좌표를 스테이지 mm 좌표로 변환해 이동한다.
+    이미지 중심(CAMERA_WIDTH/2, CAMERA_HEIGHT/2)이 현재 스테이지 위치에 대응한다.
+    """
+    if _stage is None:
+        return {"ok": False, "error": "스테이지가 초기화되지 않았습니다."}
+    try:
+        pos = _stage.get_position()
+        if pos is None:
+            return {"ok": False, "error": "스테이지 위치 조회 실패"}
+        
+        dx_px = pixel_x - (CAMERA_WIDTH  / 2.0)
+        dy_px = pixel_y - (CAMERA_HEIGHT / 2.0)
+        dx_mm = dx_px * _UM_PER_PX_X * CALIB_FACTOR_X / 1000.0 * _SIGN_X
+        dy_mm = dy_px * _UM_PER_PX_Y * CALIB_FACTOR_Y / 1000.0 * _SIGN_Y
+        return move_stage(x=round(pos[0] + dx_mm, 4),
+                          y=round(pos[1] + dy_mm, 4))
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ─────────────────────────────────────────
 # tool dispatch 테이블 (agent loop에서 사용)
 # ──────────────────────────────────────────
@@ -1425,6 +1500,8 @@ TOOL_DISPATCH = {
     "set_camera_exposure":      lambda a: set_camera_exposure(**a),
     "set_camera_auto_exposure": lambda a: set_camera_auto_exposure(**a),
     "capture_camera_frame":     lambda a: capture_camera_frame(),
+    "analyze_microscope_image": lambda a: analyze_microscope_image(**a),
+    "move_to_pixel":            lambda a: move_to_pixel(**a),
     # ── 오토포커스 ───────────────────────────────────────────────────────────
     "run_autofocus":            lambda a: run_autofocus(**a),
     # ── CCD 설정 ─────────────────────────────────────────────────────────────

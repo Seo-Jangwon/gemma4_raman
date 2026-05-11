@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Terminal, Send, Loader2, CheckCircle, XCircle } from 'lucide-react'
 import axios from 'axios'
+import ReactMarkdown from 'react-markdown'
 
 interface CommandHistory {
   command: string
@@ -151,11 +152,11 @@ export default function HardwareControlPanel() {
                     <p className="text-sm font-medium text-gray-900 mb-1">
                       $ {item.command}
                     </p>
-                    <p className={`text-sm ${
+                    <div className={`text-sm prose prose-sm max-w-none ${
                       item.success ? 'text-green-800' : 'text-red-800'
                     }`}>
-                      {item.response}
-                    </p>
+                      <ReactMarkdown>{item.response}</ReactMarkdown>
+                    </div>
                     <p className="text-xs text-gray-500 mt-1">
                       {item.timestamp.toLocaleTimeString()}
                     </p>

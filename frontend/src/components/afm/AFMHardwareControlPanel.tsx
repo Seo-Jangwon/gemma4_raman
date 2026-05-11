@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Send, Loader2, CheckCircle, XCircle } from 'lucide-react'
 import axios from 'axios'
+import ReactMarkdown from 'react-markdown'
 import CameraView from '../raman/CameraView'
 import ParameterPanel, { type SpectrumParams } from '../raman/ParameterPanel'
 
@@ -240,9 +241,9 @@ export default function AFMHardwareControlPanel() {
                   )}
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-gray-900 break-words">$ {item.command}</p>
-                    <p className={`text-xs mt-1 break-words ${item.success ? 'text-green-800' : 'text-red-800'}`}>
-                      {item.response}
-                    </p>
+                    <div className={`text-xs mt-1 break-words prose prose-sm max-w-none ${item.success ? 'text-green-800' : 'text-red-800'}`}>
+                      <ReactMarkdown>{item.response}</ReactMarkdown>
+                    </div>
                     <p className="text-xs text-gray-400 mt-1">
                       {item.timestamp.toLocaleTimeString()}
                     </p>

@@ -25,6 +25,10 @@ CAMERA_HEIGHT  = _cfg.getint("TUCSEN", "Height")
 LENS_WIDTH_UM  = _cfg.getfloat("LENS_1", "Width")
 LENS_HEIGHT_UM = _cfg.getfloat("LENS_1", "Height")
 
+# ── 픽셀→스테이지 좌표 변환 보정계수 ─ [LENS_1] ──────────────────────────────
+CALIB_FACTOR_X = 1.4
+CALIB_FACTOR_Y = 1.285
+
 # ── 라만 교정 ─ [AUTO_CALIBRATION] & [TYPE-{N}] ───────────────────────────────
 _sel_rayleigh   = _cfg.getint("AUTO_CALIBRATION", "SelectedRayleigh", fallback=0)
 LASER_NM        = _cfg.getfloat("AUTO_CALIBRATION", f"RayleighWaveLength{_sel_rayleigh + 1}")
@@ -61,6 +65,8 @@ if __name__ == "__main__":
     print("── 렌즈 [LENS_1] ───────────────────────────────────")
     print(f"  LENS_WIDTH_UM  = {LENS_WIDTH_UM}")
     print(f"  LENS_HEIGHT_UM = {LENS_HEIGHT_UM}")
+    print(f"  CALIB_FACTOR_X = {CALIB_FACTOR_X}")
+    print(f"  CALIB_FACTOR_Y = {CALIB_FACTOR_Y}")
     print()
     print(f"── 라만 교정 (SelectedRayleigh={_sel_rayleigh}, SelectedType={_sel_type}) ──")
     print(f"  LASER_NM        = {LASER_NM}")
