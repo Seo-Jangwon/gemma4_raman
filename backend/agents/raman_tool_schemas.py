@@ -316,7 +316,7 @@ RAMAN_TOOLS = [
                     },
                     "center": {
                         "type": "integer",
-                        "description": "single_track 모드에서 읽을 행의 중심 번호 (1-based)",
+                        "description": "single_track 모드에서 읽을 행의 중심 번호 (1-based). single_track 모드 사용 시 반드시 지정 필요. 예: 256",
                     },
                     "width": {
                         "type": "integer",

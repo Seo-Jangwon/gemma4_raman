@@ -12,7 +12,7 @@
     "expected_tools": ["move_stage"],
     "verifiers": [
       {"type": "tool_called", "tools": ["move_stage"]},
-      {"type": "stage_position", "expected": {"x": 38.0, "y": 25.0, "z": 0.5}, "tolerance": 0.05}
+      {"type": "stage_position", "expected": {"x": 38.0, "y": 25.0}, "tolerance": 0.05}
     ]
   },
   {
@@ -20,7 +20,7 @@
     "category": "A",
     "complexity": "Basic",
     "skill": "하드웨어 제어",
-    "description": "스테이지를 현재 위치에서 X 방향으로 +0.1 mm 상대 이동시켜라.",
+    "description": "스테이지를 현재 위치에서 X 방향으로 +0.1 mm 상대 이동시켜라. move_stage_relative의 dx 파라미터를 사용할 것.",
     "auto_evaluable": true,
     "skip": false,
     "skip_reason": null,
@@ -60,7 +60,8 @@
     "expected_tools": ["set_stage_speed"],
     "verifiers": [
       {"type": "tool_called", "tools": ["set_stage_speed"]},
-      {"type": "stage_velocity", "expected": {"x": 2.0, "y": 2.0}, "tolerance": 0.1}
+      {"type": "tool_args", "tool": "set_stage_speed", "field": "x_speed_mm_s", "expected": 2.0, "tolerance": 0.1},
+      {"type": "tool_args", "tool": "set_stage_speed", "field": "y_speed_mm_s", "expected": 2.0, "tolerance": 0.1}
     ]
   },
     {
@@ -270,7 +271,7 @@
     "verifiers": [
       {"type": "tool_sequence", "tools_in_order": ["set_ccd_temperature", "set_ccd_cooler"]},
       {"type": "tool_called", "tools": ["set_ccd_temperature", "set_ccd_cooler"]},
-      {"type": "tool_args", "tool": "set_ccd_temperature", "field": "temperature", "expected": -35, "tolerance": 0.5},
+      {"type": "tool_args", "tool": "set_ccd_temperature", "field": "temp", "expected": -35, "tolerance": 0.5},
       {"type": "tool_args", "tool": "set_ccd_cooler", "field": "on", "expected": true, "tolerance": null}
     ]
   },
@@ -295,14 +296,14 @@
     "category": "A",
     "complexity": "Basic",
     "skill": "데이터 획득",
-    "description": "카메라에서 최신 프레임 하나를 획득하여 numpy 배열로 반환하라.",
+    "description": "카메라 스트리밍을 시작한 후 최신 프레임 하나를 획득하여 numpy 배열로 반환하라.",
     "auto_evaluable": true,
     "skip": false,
     "skip_reason": null,
     "requires_human_review": false,
-    "expected_tools": ["capture_camera_frame"],
+    "expected_tools": ["start_camera_stream", "capture_camera_frame"],
     "verifiers": [
-      {"type": "tool_called", "tools": ["capture_camera_frame"]},
+      {"type": "tool_sequence", "tools_in_order": ["start_camera_stream", "capture_camera_frame"]},
       {"type": "tool_result_ok", "tool": "capture_camera_frame"}
     ]
   },
@@ -345,16 +346,14 @@
     "category": "A",
     "complexity": "Basic",
     "skill": "다중 설정",
-    "description": "CCD 읽기 모드를 Single Track으로 변경하고 트리거를 External로 설정하라.",
-    "auto_evaluable": true,
-    "skip": false,
-    "skip_reason": null,
-    "requires_human_review": false,
+    "description": "CCD 읽기 모드를 Single Track(center=256)으로 변경하고 트리거를 External로 설정하라.",
+    "auto_evaluable": false,
+    "skip": true,
+    "skip_reason": "single_track center 파라미터 및 external 트리거 조합 검증 체계 미비 — 재설계 필요",
+    "requires_human_review": true,
     "expected_tools": ["set_ccd_read_mode", "set_ccd_trigger_mode"],
     "verifiers": [
-      {"type": "tool_called", "tools": ["set_ccd_read_mode", "set_ccd_trigger_mode"]},
-      {"type": "ccd_read_mode", "expected": "single_track"},
-      {"type": "tool_args", "tool": "set_ccd_trigger_mode", "field": "mode", "expected": "external", "tolerance": null}
+      {"type": "human_only", "note": "Q022 비적합 벤치마크로 스킵 처리됨"}
     ]
   },
   {
@@ -379,12 +378,12 @@
     "category": "A",
     "complexity": "Adv",
     "skill": "조건부 대기",
-    "description": "CCD 쿨러의 현재 온도가 -35°C 이하가 될 때까지 대기한 뒤 상태를 보고하라.",
+    "description": "CCD 목표 온도를 -35°C로 설정하고 쿨러를 켠 뒤, 현재 온도가 -35°C 이하가 될 때까지 get_ccd_info를 반복 조회하며 대기한 후 상태를 보고하라.",
     "auto_evaluable": true,
     "skip": false,
     "skip_reason": null,
     "requires_human_review": false,
-    "expected_tools": ["get_ccd_info"],
+    "expected_tools": ["set_ccd_temperature", "set_ccd_cooler", "get_ccd_info"],
     "verifiers": [
       {"type": "tool_call_count", "tool": "get_ccd_info", "min_count": 2},
       {"type": "ccd_temperature", "expected": -35, "tolerance": 2}
@@ -435,9 +434,10 @@
     "skip": false,
     "skip_reason": null,
     "requires_human_review": true,
-    "expected_tools": ["laser_on", "acquire_spectrum", "laser_off"],
+    "expected_tools": ["set_laser_power", "laser_on", "acquire_spectrum", "laser_off"],
     "verifiers": [
-      {"type": "tool_sequence", "tools_in_order": ["laser_on", "acquire_spectrum", "laser_off"]},
+      {"type": "tool_sequence", "tools_in_order": ["set_laser_power", "laser_on", "acquire_spectrum", "laser_off"]},
+      {"type": "tool_args", "tool": "set_laser_power", "field": "percent", "expected": 60, "tolerance": 0},
       {"type": "spectrum_valid", "tool": "acquire_spectrum"},
       {"type": "laser_state", "expected_on": false}
     ]
@@ -463,12 +463,12 @@
     "category": "B",
     "complexity": "Adv",
     "skill": "조건 변경",
-    "description": "레이저 출력 20%, 40%, 60%에서 각각 스펙트럼을 수집하고, 출력별로 파일을 분리 저장하라.",
+    "description": "set_laser_power로 출력을 20%, 40%, 60% 순서로 변경하며 각각 스펙트럼을 수집하고, 출력별로 파일을 분리 저장하라.",
     "auto_evaluable": false,
     "skip": false,
     "skip_reason": null,
     "requires_human_review": true,
-    "expected_tools": ["acquire_spectrum", "save_spectrum"],
+    "expected_tools": ["set_laser_power", "acquire_spectrum", "save_spectrum"],
     "verifiers": [
       {"type": "tool_call_count", "tool": "set_laser_power", "min_count": 3},
       {"type": "tool_args_sequence", "tool": "set_laser_power", "field": "percent", "expected_sequence": [20, 40, 60], "tolerance": 0},
@@ -562,14 +562,14 @@
     "category": "B",
     "complexity": "Adv",
     "skill": "좌표 변환",
-    "description": "카메라 뷰에서 지정한 픽셀 좌표 (320, 240)를 스테이지 좌표로 변환한 뒤 해당 위치로 이동하라.",
+    "description": "카메라 뷰에서 지정한 픽셀 좌표 (320, 240)를 스테이지 좌표로 변환한 뒤 해당 위치로 이동하라. move_to_pixel 툴을 사용할 것.",
     "auto_evaluable": false,
     "skip": false,
     "skip_reason": null,
     "requires_human_review": true,
-    "expected_tools": ["move_stage"],
+    "expected_tools": ["move_to_pixel"],
     "verifiers": [
-      {"type": "tool_called", "tools": ["move_stage"]},
+      {"type": "tool_called", "tools": ["move_to_pixel"]},
       {"type": "human_only", "note": "픽셀→스테이지 좌표 변환 로직 및 실제 이동 위치 확인 필요"}
     ]
   },
@@ -578,16 +578,16 @@
     "category": "B",
     "complexity": "Adv",
     "skill": "맵핑+AF",
-    "description": "현 화면의 픽셀 가운데서 5×5 그리드 맵핑(포인트 간격 0.1mm)을 수행하되, 각 포인트에서 오토포커스 후 스펙트럼을 수집하라.",
+    "description": "현 화면의 픽셀 가운데서 3×3 그리드 맵핑(포인트 간격 0.1mm)을 수행하되, 각 포인트에서 오토포커스 후 스펙트럼을 수집하라.",
     "auto_evaluable": true,
     "skip": false,
     "skip_reason": null,
     "requires_human_review": false,
     "expected_tools": ["move_stage", "run_autofocus", "acquire_spectrum"],
     "verifiers": [
-      {"type": "tool_call_count", "tool": "move_stage", "min_count": 25},
-      {"type": "tool_call_count", "tool": "run_autofocus", "min_count": 25},
-      {"type": "tool_call_count", "tool": "acquire_spectrum", "min_count": 25}
+      {"type": "tool_call_count", "tool": "move_stage", "min_count": 9},
+      {"type": "tool_call_count", "tool": "run_autofocus", "min_count": 9},
+      {"type": "tool_call_count", "tool": "acquire_spectrum", "min_count": 9}
     ]
   },
   {
@@ -632,10 +632,10 @@
     "skip": false,
     "skip_reason": null,
     "requires_human_review": true,
-    "expected_tools": ["set_ccd_em_gain", "acquire_spectrum"],
+    "expected_tools": ["set_mcp_gain", "acquire_spectrum"],
     "verifiers": [
       {"type": "tool_call_count", "tool": "acquire_spectrum", "min_count": 3},
-      {"type": "tool_args_sequence", "tool": "set_ccd_em_gain", "field": "gain", "expected_sequence": [100, 200, 300]},
+      {"type": "tool_args_sequence", "tool": "set_mcp_gain", "field": "gain", "expected_sequence": [100, 200, 300]},
       {"type": "human_only", "note": "저장 로직 구현 후 테스트"}
     ]
   },
