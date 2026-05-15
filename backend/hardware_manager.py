@@ -426,10 +426,10 @@ class HardwareManager:
         if self.ccd is None:
             return
 
-        print(f"[CCD]   냉각기 OFF → {CCD_WARM_TARGET}°C 이상 복구까지 대기")
+        print(f"[CCD]   {CCD_WARM_TARGET}°C까지 제어 워밍업 후 냉각기 OFF")
         print("        (이 단계가 끝나기 전에는 절대 종료되지 않습니다)")
 
-        # 취득 중이면 먼저 중단 (DRV_ACQUIRING 상태에서는 CoolerOFF 불가)
+        # 취득 중이면 먼저 중단 (DRV_ACQUIRING 상태에서는 온도 설정 불가)
         try:
             if self.ccd.get_status() == 'ACQUIRING':
                 self.ccd.sdk.AbortAcquisition()
@@ -437,10 +437,11 @@ class HardwareManager:
         except Exception:
             pass
 
+        # 냉각기 ON 유지 + 목표 온도를 -5°C로 재설정 → 제어된 워밍업
         try:
-            self.ccd.set_cooler(False)
+            self.ccd.set_temperature(CCD_WARM_TARGET)
         except Exception as e:
-            print(f"[CCD]   [WARN] CoolerOFF 예외: {e}")
+            print(f"[CCD]   [WARN] 온도 목표 설정 예외: {e}")
 
         # 온도가 목표 이상 오를 때까지 폴링
         _LABELS = {
@@ -466,6 +467,12 @@ class HardwareManager:
                 print(f"\n[CCD]   [WARN] 온도 조회 오류: {e} — 재시도...")
 
             time.sleep(5)
+
+        # -5°C 도달 후 냉각기 OFF
+        try:
+            self.ccd.set_cooler(False)
+        except Exception as e:
+            print(f"[CCD]   [WARN] CoolerOFF 예외: {e}")
 
         try:
             self.ccd.close()

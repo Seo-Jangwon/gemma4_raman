@@ -6,7 +6,8 @@
 import configparser
 from pathlib import Path
 
-_CONFIG_PATH = Path(__file__).parent / "Config.ini"
+# _CONFIG_PATH = Path(__file__).parent / "Config.ini"
+_CONFIG_PATH = r"C:\WEVE\Rays-ON_20260115\Config.ini"
 
 _cfg = configparser.ConfigParser(strict=False)
 _cfg.read(_CONFIG_PATH, encoding="cp949")
@@ -48,7 +49,7 @@ STAGE_MAX_Z =  1.0          # Z축 최댓값 — Config.ini 항목 없음
 
 
 if __name__ == "__main__":
-    print(f"Config.ini 경로: {_CONFIG_PATH.resolve()}")
+    print(f"Config.ini 경로: {Path(_CONFIG_PATH).resolve()}")
     print()
     print("── Stage [STAGE_INFO] ──────────────────────────────")
     print(f"  STAGE_MAX_X    = {STAGE_MAX_X}")
