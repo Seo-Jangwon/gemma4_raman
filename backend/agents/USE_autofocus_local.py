@@ -89,7 +89,7 @@ class AutoFocusLocal:
         laser_frame = np.mean(laser_frames, axis=0).astype(np.uint8) if laser_frames else None
 
         if ref is None or laser_frame is None:
-            return None, None, None, None
+            return None, None, None, None, 0
 
         # 3-A. absdiff 버전: 양방향 절댓값 차이
         diff_absdiff = cv2.absdiff(laser_frame, ref)
@@ -143,8 +143,8 @@ class AutoFocusLocal:
         # 🎯 적응형 힐클라이밍 + 역대 최솟값 추적기
         # ==========================================
         MAX_STEPS   = 100
-        step_size   = 0.030    # [초기 보폭] 50µm (Coarse)
-        min_step    = 0.001    # [최소 보폭] 5µm (Fine)
+        step_size   = 0.030    # [초기 보폭] (Coarse)
+        min_step    = 0.001    # [최소 보폭] (Fine)
         
         sweep_state = 'init'   
         
@@ -266,152 +266,6 @@ class AutoFocusLocal:
                 elif key in (ord('d'), ord('D')):
                     self._exposure_ms = max(1.0, self._exposure_ms - 5.0)
                     self.camera.set_exposure(self._exposure_ms)
-                elif key in (ord('l'), ord('L')):
-                    print("⚡ 수동 레이저 격발!")
-                    self.laser.laser_on()
-
-        except KeyboardInterrupt:
-            pass
-        finally:
-            self.close()
-
-
-        """Stage 1: 스테이지 연결 확인 및 현재 Z 위치 출력"""
-        pos = self.stage.get_position()
-        if pos is None:
-            print("[ERROR] 스테이지 위치 조회 실패")
-            return
-        x, y, z, a = pos
-        print(f"[Stage] 현재 위치 - X={x:.4f} mm, Y={y:.4f} mm, Z={z:.4f} mm, A={a:.4f}")
-
-        print(f"스트리밍 해상도: {STREAM_WIDTH}x{STREAM_HEIGHT}")
-        print("ESC: 종료 | E: 노출 증가 | D: 노출 감소")
-
-        # 1. 가이드빔 필터 세팅
-        print("가이드빔 필터 세팅 중...")
-        self.laser.set_guide_beam()
-
-        # 2. 카메라 스트리밍 시작
-        self.camera.start_stream()
-
-        # ==========================================
-        # Hill-climbing
-        # ==========================================
-        MAX_STEPS   = 50
-        step_size   = 0.020    # [초기 보폭] 50µm (Coarse)
-        min_step    = 0.001    # [최소 보폭] 5µm (Fine - 이 이하면 탐색 종료)
-        
-        sweep_state = 'init'   # init -> move -> check -> done
-        best_z      = z
-        best_area   = float('inf')
-        direction   = 1        # 1: 위로, -1: 아래로
-        reversal_count = 0     # 방향을 몇 번 바꿨는지 기록
-        step_count  = 0
-        phase       = 'sweep'
-
-        diff_clip_disp = None
-
-        print(f"\n[오토포커스] 적응형 탐색 시작 (초기 스텝: {step_size*1000:.0f}µm)")
-        
-        try:
-            while True:
-                # ── 1. 화면 업데이트 (항상 실행) ──
-                frame = self.camera.get_latest_frame()
-                if frame is not None:
-                    disp = frame.copy()
-                    if disp.dtype == np.uint16:
-                        disp = (disp / 256).astype(np.uint8)
-                    if len(disp.shape) == 2:
-                        disp = cv2.cvtColor(disp, cv2.COLOR_GRAY2BGR)
-                    disp = cv2.resize(disp, (STREAM_WIDTH, STREAM_HEIGHT))
-
-                    phase_label = f"[AF/{sweep_state}]" if phase == 'sweep' else "[Stream]"
-                    pos_disp = self.stage.get_position()
-                    cur_z = pos_disp[2] if pos_disp else best_z
-                    
-                    cv2.putText(disp, f"{phase_label} Z={cur_z:.4f}mm | Exp:{self._exposure_ms:.1f}ms",
-                                (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                    cv2.imshow("AutoFocus Local - Guide Beam Stream", disp)
-
-                # ── 2. 오토포커스 (Sweep) 로직 ──
-                if phase == 'sweep':
-                    # 사진 찍고 레이저 면적 계산
-                    _, _, _, diff_clip, spot_area = self._capture_diff()
-                    print(f"  [{sweep_state}] Z={cur_z:.4f} mm | 면적={spot_area} px | 보폭={step_size*1000:.0f}µm")
-
-                    if diff_clip is not None:
-                        diff_clip_disp = cv2.resize(cv2.cvtColor(diff_clip, cv2.COLOR_GRAY2BGR),
-                                                    (STREAM_WIDTH, STREAM_HEIGHT))
-                        cv2.putText(diff_clip_disp, f"Area: {spot_area} px",
-                                    (10, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
-
-                    # 상태 머신 시작
-                    if sweep_state == 'init':
-                        best_area = spot_area
-                        best_z = cur_z
-                        # 일단 위(+방향)로 한 걸음 가봅니다.
-                        self.stage.move_absolute(x, y, best_z + (direction * step_size), a)
-                        sweep_state = 'check'
-
-                    elif sweep_state == 'check':
-                        step_count += 1
-                        
-                        if spot_area < best_area:
-                            # 🎯 좋아졌다! (골짜기를 향해 잘 가고 있음)
-                            best_area = spot_area
-                            best_z = cur_z
-                            reversal_count = 0 # 연속 성공이므로 반전 카운트 초기화
-                            
-                            # 같은 방향으로 한 걸음 더 전진
-                            self.stage.move_absolute(x, y, best_z + (direction * step_size), a)
-                            
-                        else:
-                            # ❌ 나빠졌다! (골짜기를 지났거나, 애초에 반대 방향임)
-                            print(f"    -> 면적 증가! (방향 전환 및 보폭 축소)")
-                            direction *= -1       # 방향 반대로
-                            reversal_count += 1
-                            
-                            # 보폭(Step)을 절반으로 줄입니다. (미세 탐색 돌입)
-                            step_size /= 2.0
-                            
-                            if step_size < min_step or step_count >= MAX_STEPS:
-                                # 보폭이 한계치보다 작아지면 탐색을 종료합니다.
-                                sweep_state = 'done'
-                            else:
-                                # 나빠지기 전의 가장 좋았던 위치(best_z)로 돌아간 뒤, 
-                                # 줄어든 보폭으로 반대 방향으로 이동합니다.
-                                next_z = best_z + (direction * step_size)
-                                self.stage.move_absolute(x, y, next_z, a)
-
-                    elif sweep_state == 'done':
-                        print(f"\n[오토포커스 완료] 최적 Z={best_z:.4f} mm (면적: {best_area}px)")
-                        self.stage.move_absolute(x, y, best_z, a) # 최고 위치로 최종 이동
-                        phase = 'stream'
-                        print("[Stream] 라이브 스트림 유지 중. (수동 측정: F 키)")
-
-                # ── 3. 화면 업데이트 (차분 이미지) ──
-                if diff_clip_disp is not None:
-                    cv2.imshow("Diff - clip", diff_clip_disp)
-
-                # ── 4. 키보드 입력 처리 ──
-                key = cv2.waitKey(1) & 0xFF
-                if key == 27:   # ESC
-                    break
-                elif key in (ord('f'), ord('F')) and phase == 'stream':
-                    _, _, _, diff_clip, spot_area = self._capture_diff()
-                    if diff_clip is not None:
-                        diff_clip_disp = cv2.resize(cv2.cvtColor(diff_clip, cv2.COLOR_GRAY2BGR),
-                                                    (STREAM_WIDTH, STREAM_HEIGHT))
-                        cv2.putText(diff_clip_disp, f"Manual Check | Area: {spot_area} px",
-                                    (10, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
-                        print(f"[Manual] spot_area = {spot_area} px")
-                elif key in (ord('e'), ord('E')):
-                    self._exposure_ms += 5.0
-                    self.camera.set_exposure(self._exposure_ms)
-                elif key in (ord('d'), ord('D')):
-                    self._exposure_ms = max(1.0, self._exposure_ms - 5.0)
-                    self.camera.set_exposure(self._exposure_ms)
-                # 레이저 수동 격발 (카메라 화면 보면서)
                 elif key in (ord('l'), ord('L')):
                     print("⚡ 수동 레이저 격발!")
                     self.laser.laser_on()

@@ -306,9 +306,10 @@ def _ccd_temperature_reported(tool_trace: list[dict]) -> VerifyResult:
                             detail="get_ccd_info 호출 없음")
     for call in calls:
         result = call.get("result", {})
-        if result.get("ok") and result.get("temperature") is not None:
+        temp = result.get("temperature") if result.get("temperature") is not None else result.get("temperature_C")
+        if result.get("ok") and temp is not None:
             return VerifyResult(passed=True, verifier_type="ccd_temperature_reported",
-                                detail=f"온도 보고됨: {result['temperature']}°C")
+                                detail=f"온도 보고됨: {temp}°C")
     return VerifyResult(passed=False, verifier_type="ccd_temperature_reported",
                         detail="get_ccd_info 결과에 temperature 값 없음")
 
@@ -320,7 +321,7 @@ def _laser_state(v: dict, post_state: dict) -> VerifyResult:
                             detail="post_state에 laser 정보 없음")
     actual = laser.get("is_on")
     expected = v["expected_on"]
-    if actual == expected:
+    if bool(actual) == bool(expected):
         return VerifyResult(passed=True, verifier_type="laser_state",
                             detail=f"레이저 상태: {'ON' if actual else 'OFF'}")
     return VerifyResult(passed=False, verifier_type="laser_state",

@@ -16,10 +16,40 @@ def save_json(results: list[dict], output_dir: Path) -> Path:
     return path
 
 
+def save_checkpoint(result: dict, checkpoint_path: Path) -> None:
+    """단일 태스크 결과를 JSONL 파일에 원자적으로 append."""
+    line = json.dumps(result, ensure_ascii=False) + "\n"
+    with checkpoint_path.open("a", encoding="utf-8") as f:
+        f.write(line)
+
+
+def load_checkpoint(checkpoint_path: Path) -> list[dict]:
+    """JSONL 파일에서 완전한 줄만 읽어 결과 리스트 반환 (불완전 마지막 줄 무시)."""
+    results = []
+    for line in checkpoint_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            results.append(json.loads(line))
+        except json.JSONDecodeError:
+            pass  # 크래시로 잘린 마지막 줄
+    return results
+
+
+def find_checkpoint_files(output_dir: Path) -> list[Path]:
+    """수정시간 기준 최신순 정렬된 checkpoint_*.jsonl 파일 목록."""
+    return sorted(
+        output_dir.glob("checkpoint_*.jsonl"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+
 def generate_html(results: list[dict], output_dir: Path) -> Path:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = output_dir / f"benchmark_report_{ts}.html"
-    html = _build_html(results)
+    html = _build_html(results, report_filename=path.name)
     path.write_text(html, encoding="utf-8")
     print(f"[HTML] {path}")
     return path
@@ -72,7 +102,8 @@ def _build_summary_rows(results: list[dict]) -> str:
             f"<td class='score {css}'>{score}</td>"
             f"<td>{elapsed}</td>"
             f"<td>{human_flag}</td>"
-            f"<td class='human-score-cell'><input type='number' min='0' max='10' placeholder='—' class='score-input'> / 10</td>"
+            f"<td class='human-score-cell'><input type='number' min='0' max='10' placeholder='—' "
+            f"class='score-input' data-task-id='{task['id']}' data-field='score'> / 10</td>"
             f"</tr>"
         )
     return "\n".join(rows)
@@ -179,8 +210,10 @@ def _build_detail_sections(results: list[dict]) -> str:
             f"<details open><summary>자동 검증 결과</summary>{verify_html}</details>"
             f"<details><summary>LLM 응답</summary><pre class='llm-resp'>{llm_resp}</pre></details>"
             f"<div class='human-score-box'>"
-            f"<label>인간 채점: <input type='number' min='0' max='10' placeholder='0~10'> / 10점</label>"
-            f"<textarea placeholder='메모 (선택사항)'></textarea>"
+            f"<label>인간 채점: <input type='number' min='0' max='10' placeholder='0~10' "
+            f"data-task-id='{task['id']}' data-field='score'> / 10점</label>"
+            f"<textarea data-task-id='{task['id']}' data-field='note' "
+            f"placeholder='메모 (선택사항)'></textarea>"
             f"</div>"
             f"</section>"
         )
@@ -197,11 +230,13 @@ def _stats(results: list[dict]) -> dict:
     return {"total": total, "run": run, "passed": passed, "failed": failed, "human": human, "skipped": skipped}
 
 
-def _build_html(results: list[dict]) -> str:
+def _build_html(results: list[dict], report_filename: str = "") -> str:
     stats = _stats(results)
     run_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     summary_rows = _build_summary_rows(results)
     detail_sections = _build_detail_sections(results)
+    results_json = json.dumps(results, ensure_ascii=False)
+    report_ns = report_filename.replace(".", "_").replace("-", "_")
 
     return f"""<!DOCTYPE html>
 <html lang="ko">
@@ -301,5 +336,71 @@ def _build_html(results: list[dict]) -> str:
 
   {detail_sections}
 </div>
+<script type="application/json" id="results-data">{results_json}</script>
+<button onclick="exportScores()" style="position:fixed;bottom:20px;right:20px;z-index:999;background:#1a237e;color:#fff;border:none;border-radius:6px;padding:10px 18px;font-size:14px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.3)">채점 내보내기</button>
+<script>
+(function(){{
+  var NS='bm_scores__{report_ns}';
+  var results=JSON.parse(document.getElementById('results-data').textContent);
+
+  function loadScores(){{
+    var saved=JSON.parse(localStorage.getItem(NS)||'{{}}');
+    document.querySelectorAll('[data-task-id]').forEach(function(el){{
+      var key=el.dataset.taskId+'.'+el.dataset.field;
+      if(saved[key]!==undefined) el.value=saved[key];
+    }});
+  }}
+
+  function saveScore(e){{
+    var el=e.target;
+    if(!el.dataset||!el.dataset.taskId) return;
+    var key=el.dataset.taskId+'.'+el.dataset.field;
+    var saved=JSON.parse(localStorage.getItem(NS)||'{{}}');
+    saved[key]=el.value;
+    localStorage.setItem(NS,JSON.stringify(saved));
+    document.querySelectorAll('[data-task-id="'+el.dataset.taskId+'"][data-field="'+el.dataset.field+'"]').forEach(function(o){{
+      if(o!==el) o.value=el.value;
+    }});
+  }}
+
+  function autoScore(r){{
+    if(r.skipped) return 'SKIP';
+    var v=r.auto_results||[];
+    if(!v.length) return 'N/A';
+    var nh=v.filter(function(x){{return !x.is_human_only;}});
+    if(!nh.length) return 'HUMAN';
+    return nh.every(function(x){{return x.passed;}})?'PASS':'FAIL';
+  }}
+
+  window.exportScores=function(){{
+    var saved=JSON.parse(localStorage.getItem(NS)||'{{}}');
+    var data=results.map(function(r){{
+      var t=r.task;
+      var scoreVal=saved[t.id+'.score'];
+      return {{
+        task_id:t.id, category:t.category, complexity:t.complexity,
+        skill:t.skill, description:t.description,
+        auto_score:autoScore(r),
+        tool_trace_summary:(r.tool_trace||[]).map(function(x){{return {{step:x.step,tool:x.tool,duration_ms:x.duration_ms}};}}),
+        human_score:(scoreVal!==undefined&&scoreVal!=='')?Number(scoreVal):null,
+        note:saved[t.id+'.note']||''
+      }};
+    }});
+    var ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+    var blob=new Blob([JSON.stringify(data,null,2)],{{type:'application/json'}});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='scores_'+ts+'.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }};
+
+  document.addEventListener('DOMContentLoaded',function(){{
+    loadScores();
+    document.addEventListener('input',saveScore);
+    document.addEventListener('change',saveScore);
+  }});
+}})();
+</script>
 </body>
 </html>"""

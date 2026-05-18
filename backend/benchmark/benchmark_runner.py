@@ -13,8 +13,10 @@
 from __future__ import annotations
 import argparse
 import json
+import signal
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -24,7 +26,10 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 
 from verifiers import run_verifiers, VerifyResult
-from report_generator import save_json, generate_html
+from report_generator import (
+    save_json, generate_html,
+    save_checkpoint, load_checkpoint, find_checkpoint_files,
+)
 
 TASKS_FILE = _HERE / "benchmark_tasks.json"
 SERVER_BASE = "http://localhost:8000"
@@ -163,6 +168,29 @@ def _short(result: dict) -> str:
 
 # ── 메인 ─────────────────────────────────────────────────────────────────────
 
+def _finalize(results: list[dict], output_dir: Path) -> None:
+    run = [r for r in results if not r.get("skipped")]
+    auto_pass = sum(1 for r in run if all(
+        v["passed"] or v["is_human_only"]
+        for v in r.get("auto_results", [])
+    ))
+    auto_fail = len(run) - auto_pass
+
+    print(f"\n{'='*60}")
+    print(f"벤치마크 완료 ({len(results)}개 결과)")
+    print(f"  실행: {len(run)} / {len(results)} (스킵: {len(results)-len(run)})")
+    print(f"  자동PASS: {auto_pass}  자동FAIL: {auto_fail}")
+    print(f"{'='*60}")
+
+    json_path = save_json(results, output_dir)
+    html_path = generate_html(results, output_dir)
+
+    print(f"\n보고서:")
+    print(f"  JSON: {json_path}")
+    print(f"  HTML: {html_path}")
+    print("\n브라우저에서 HTML 파일을 열어 인간 채점을 진행하세요.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="라만 분광기 벤치마크 러너")
     parser.add_argument("--tasks", help="실행할 태스크 ID (쉼표 구분, 예: Q001,Q003)")
@@ -199,32 +227,50 @@ def main():
 
     print(f"\n총 {len(tasks)}개 태스크 (필터 적용 후)")
 
-    results = []
+    # ── 세션 체크포인트 경로 ─────────────────────────────────────────────────
+    session_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    checkpoint_path = output_dir / f"checkpoint_{session_ts}.jsonl"
+
+    # ── 이전 체크포인트 재개 감지 ────────────────────────────────────────────
+    results: list[dict] = []
+    completed_ids: set[str] = set()
+    candidates = find_checkpoint_files(output_dir)
+    if candidates:
+        prev_ckpt = candidates[0]
+        prior = load_checkpoint(prev_ckpt)
+        prior_ids = {r["task"]["id"] for r in prior}
+        task_ids = {t["id"] for t in tasks}
+        overlap = prior_ids & task_ids
+        if overlap:
+            print(f"\n이전 체크포인트 발견: {prev_ckpt.name}")
+            print(f"  완료된 태스크: {sorted(overlap)}")
+            remaining_preview = [t["id"] for t in tasks if t["id"] not in prior_ids]
+            print(f"  남은 태스크: {remaining_preview}")
+            ans = input("\n이어서 실행하시겠습니까? [y/N] ").strip().lower()
+            if ans == "y":
+                results = prior
+                completed_ids = prior_ids
+                checkpoint_path = prev_ckpt
+                tasks = [t for t in tasks if t["id"] not in completed_ids]
+                print(f"  {len(results)}개 결과 복원, {len(tasks)}개 태스크 남음")
+
+    # ── Ctrl+C 시 부분 결과 저장 ─────────────────────────────────────────────
+    def _handle_interrupt(_signum, _frame):
+        print("\n\n[중단] Ctrl+C 감지 — 지금까지의 결과를 저장합니다...")
+        if results:
+            _finalize(results, output_dir)
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _handle_interrupt)
+
+    # ── 메인 루프 ────────────────────────────────────────────────────────────
     for task in tasks:
         result = run_task(task, delay=args.delay)
         results.append(result)
+        save_checkpoint(result, checkpoint_path)
+        print(f"  [체크포인트] {task['id']} 저장됨")
 
-    # 최종 집계
-    run = [r for r in results if not r.get("skipped")]
-    auto_pass = sum(1 for r in run if all(
-        v["passed"] or v["is_human_only"]
-        for v in r.get("auto_results", [])
-    ))
-    auto_fail = len(run) - auto_pass
-
-    print(f"\n{'='*60}")
-    print(f"벤치마크 완료")
-    print(f"  실행: {len(run)} / {len(results)} (스킵: {len(results)-len(run)})")
-    print(f"  자동PASS: {auto_pass}  자동FAIL: {auto_fail}")
-    print(f"{'='*60}")
-
-    json_path = save_json(results, output_dir)
-    html_path = generate_html(results, output_dir)
-
-    print(f"\n보고서:")
-    print(f"  JSON: {json_path}")
-    print(f"  HTML: {html_path}")
-    print("\n브라우저에서 HTML 파일을 열어 인간 채점을 진행하세요.")
+    _finalize(results, output_dir)
 
 
 if __name__ == "__main__":

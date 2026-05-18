@@ -803,7 +803,7 @@ def capture_camera_frame() -> dict:
         gray = (frame.astype(np.float32)
                 if frame.ndim == 2
                 else cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32))
-        sharpness = float(np.var(cv2.Laplacian(gray, cv2.CV_64F)))
+        sharpness = float(np.var(cv2.Laplacian(gray, cv2.CV_32F)))
 
         return {
             "ok": True,
