@@ -717,7 +717,7 @@ def set_ccd_image_flip(hflip: bool, vflip: bool) -> dict:
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
-
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 def start_camera_stream() -> dict:
     """
     카메라 실시간 스트리밍을 시작합니다.

@@ -45,9 +45,9 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 # ── 하드웨어 모듈 import (Pylance가 추적 가능한 절대 경로) ────────────────────
-from backend.agents.USE_stage_test       import TangoController   # noqa: E402
-from backend.agents.USE_laser_with_power import LaserController    # noqa: E402
-from backend.agents                      import raman_tools         # noqa: E402
+from backend.hw_tools.USE_stage_test       import TangoController   # noqa: E402
+from backend.hw_tools.USE_laser_with_power import LaserController    # noqa: E402
+from backend.hw_tools                      import raman_tools         # noqa: E402
 from backend.andor_codes                 import AndorCCD            # noqa: E402
 from backend.config import (                                        # noqa: E402
     STAGE_MAX_X, STAGE_MAX_Y, STAGE_CENTER_X, STAGE_CENTER_Y,
@@ -254,7 +254,7 @@ class HardwareManager:
 
     def _init_camera(self):
         """TUCam 카메라 연결 + 스트리밍 시작."""
-        from backend.agents.USE_camera_stream import StreamingTUCam  # lazy: DLL 로드
+        from backend.hw_tools.USE_camera_stream import StreamingTUCam  # lazy: DLL 로드
         print("\n[CAM]   TUCam 카메라 연결 중...")
         cam = StreamingTUCam(exposure_ms=50.0)
         cam.start_stream()

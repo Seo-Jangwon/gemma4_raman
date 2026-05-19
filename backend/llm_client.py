@@ -143,8 +143,8 @@ if __name__ == "__main__":
     atexit.register(_hw.shutdown)
     setup(_hw.ollama)
 
-    from backend.agents.raman_tool_schemas import RAMAN_TOOLS
-    from backend.agents.raman_tools import TOOL_DISPATCH
+    from backend.hw_tools.raman_tool_schemas import RAMAN_TOOLS
+    from backend.hw_tools.raman_tools import TOOL_DISPATCH
 
     print("라만 분광기 AI 에이전트 시작 (종료: 'exit' 또는 Ctrl+C)")
     while True:

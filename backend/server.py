@@ -38,8 +38,8 @@ from pydantic import BaseModel
 from backend.hardware_manager import HardwareManager
 import backend.llm_client as llm_client
 from backend.config import CAMERA_WIDTH, CAMERA_HEIGHT, LENS_WIDTH_UM, LENS_HEIGHT_UM
-from backend.agents.raman_tool_schemas import RAMAN_TOOLS
-from backend.agents.raman_tools import TOOL_DISPATCH, init_hardware as rt_init_hardware
+from backend.hw_tools.raman_tool_schemas import RAMAN_TOOLS
+from backend.hw_tools.raman_tools import TOOL_DISPATCH, init_hardware as rt_init_hardware
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -217,6 +217,10 @@ class StageSpeedRequest(BaseModel):
     y: float = 5.0
     z: float = 5.0
 
+class ExperimentRequest(BaseModel):
+    message: str
+    session_id: Optional[str] = None
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 장비 초기화 엔드포인트
@@ -231,7 +235,7 @@ async def camera_connect(body: CameraConnectRequest, request: Request):
     loop = asyncio.get_event_loop()
     try:
         def _connect():
-            from backend.agents.USE_camera_stream import StreamingTUCam
+            from backend.hw_tools.USE_camera_stream import StreamingTUCam
             cam = StreamingTUCam(exposure_ms=body.exposure_ms)
             cam.start_stream()
             hw.camera = cam
@@ -266,7 +270,7 @@ async def laser_connect(body: LaserConnectRequest, request: Request):
     loop = asyncio.get_event_loop()
     try:
         def _connect():
-            from backend.agents.USE_laser_with_power import LaserController
+            from backend.hw_tools.USE_laser_with_power import LaserController
             laser = LaserController(port=body.port)
             if not (laser.ser and laser.ser.is_open):
                 raise RuntimeError(f"레이저 포트 연결 실패 ({body.port})")
@@ -331,6 +335,35 @@ async def ccd_connect(body: CCDConnectRequest, request: Request):
 def _require_llm(state: AppState):
     if state.hw.ollama is None:
         raise HTTPException(status_code=503, detail="LLM이 연결되지 않았습니다.")
+
+
+@app.post("/api/experiment/run")
+async def experiment_run(body: ExperimentRequest, request: Request):
+    """7-agent LangGraph 멀티에이전트 실험 파이프라인."""
+    from backend.agents.orchestrator import run_experiment
+    state = _state(request)
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            state.executor,
+            lambda: run_experiment(body.message, body.session_id or ""),
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/agents/health")
+async def agents_health():
+    """멀티에이전트 시스템 상태 확인."""
+    return {
+        "status": "ok",
+        "agents": [
+            "translator", "planner", "critic",
+            "hw_manager", "spectrum_specialist", "domain_specialist",
+            "rag_searcher", "roi_detector", "debate",
+        ],
+    }
 
 
 @app.post("/api/hardware-command")
@@ -541,7 +574,7 @@ async def camera_stream(request: Request):
 async def stage_move_pixel(body: MovePixelRequest, request: Request):
     """카메라 뷰 클릭 픽셀 좌표 → 스테이지 상대 이동.
     USE_scan.py의 보정 상수를 그대로 사용한다."""
-    from backend.agents.raman_tools import move_stage_relative
+    from backend.hw_tools.raman_tools import move_stage_relative
 
     LENS_W_UM, LENS_H_UM = LENS_WIDTH_UM, LENS_HEIGHT_UM
     CALIB_X,   CALIB_Y   = 1.4, 1.285
@@ -611,7 +644,7 @@ async def hardware_state(request: Request):
 @app.post("/api/stage/speed")
 async def stage_set_speed(body: StageSpeedRequest, request: Request):
     """스테이지 이동 속도 직접 설정 — 파라미터 패널 수동 변경용."""
-    from backend.agents.raman_tools import set_stage_speed
+    from backend.hw_tools.raman_tools import set_stage_speed
 
     state = _state(request)
     loop  = asyncio.get_event_loop()
@@ -625,7 +658,7 @@ async def stage_set_speed(body: StageSpeedRequest, request: Request):
 @app.post("/api/spectrum/acquire")
 async def spectrum_acquire(body: AcquireSpectrumRequest, request: Request):
     """파라미터 패널 수동 측정 버튼용 — LLM 없이 acquire_spectrum() 직접 호출."""
-    from backend.agents.raman_tools import acquire_spectrum
+    from backend.hw_tools.raman_tools import acquire_spectrum
 
     state = _state(request)
     loop  = asyncio.get_event_loop()
