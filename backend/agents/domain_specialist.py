@@ -111,7 +111,17 @@ def domain_specialist_node(state: ExperimentState) -> dict:
             **_advance_plan(state),
         }
 
-    persona = _select_persona(sample_type)
+    # plan step params에 persona가 명시된 경우 우선 사용 (Planner 제어)
+    plan = state.get("plan", [])
+    idx = state.get("current_step_idx", 0)
+    step_params = plan[idx].get("params", {}) if idx < len(plan) else {}
+    forced_persona = step_params.get("persona", "")
+
+    if forced_persona and forced_persona in _PERSONA_PROMPTS:
+        persona = forced_persona
+    else:
+        persona = _select_persona(sample_type)
+
     system_prompt = _PERSONA_PROMPTS[persona]
 
     prompt = (

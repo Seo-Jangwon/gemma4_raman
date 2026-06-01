@@ -1,6 +1,7 @@
 import serial
 import time
 import sys
+import math
 
 
 class LaserController:
@@ -15,12 +16,17 @@ class LaserController:
       - [수정] SMSE 인자 없이 전송 (ASCII 래퍼는 이진 프로토콜과 달리 ARG 불필요)
       - [수정] 초기화 순서를 Rays-ON.exe 캡처와 정확히 동기화
 
+    v3 → v3.1:
+      - [수정] set_power를 ND 필터 캘리브레이션(config [ND_FILTER] Mode=1) 기반
+               연속 제어로 교체. 임의 투과율(%)을 log-선형 보간하여 펄스 위치로 변환.
+
     근거 자료:
       - 20260421패킷분석.xlsx: Device Monitoring Studio COM4 캡처 (10055행)
       - MOTION_EziSERVO_DEFINE.h: EZISERVO_AXISSTATUS (FFLAG 32-bit 비트필드)
       - FM_EZISERVO_PARAM: FAS_SetParameter 파라미터 번호 enum
       - CommInterface.c/.h: FAS_* API 구현 (이진 프로토콜)
       - Config.txt: 모터 매핑 및 속도값
+      - Config [ND_FILTER] Mode=1: 투과율(%) ↔ 펄스 위치 캘리브레이션 곡선
     """
 
     # ── 모터 축 정의 (Config.txt에서 확인) ──
@@ -69,6 +75,18 @@ class LaserController:
     GMMS_ORIGIN_OK = 0x010000
     GMMS_MOVING    = 0x002000
     GMMS_BUSY      = 0x003000  # HOMING | MOVING
+
+    # ── ND 필터 투과율 캘리브레이션 (config [ND_FILTER] Mode=1) ──
+    #    (transmittance_percent, pulse)  — % 내림차순 / 위치 오름차순
+    #    위치는 30000 펄스 균등 간격, 마지막 602895만 빔 차단점.
+    ND_CAL = [
+        (100.0, 47944), (46.272, 77944), (21.93, 107944), (11.206, 137944),
+        (6.316, 167944), (3.509, 197944), (1.943, 227944), (1.118, 257944),
+        (0.596, 287944), (0.371, 317944), (0.219, 347944), (0.125, 377944),
+        (0.07, 407944), (0.042, 437944), (0.026, 467944), (0.018, 497944),
+        (0.013, 527944), (0.009, 557944), (0.007, 587944), (0.004, 602895),
+    ]
+    ND_MIN_PCT, ND_MAX_PCT = 0.004, 100.0
 
     def __init__(self, port='COM4', baud=115200):
         self.port = port
@@ -210,7 +228,7 @@ class LaserController:
 
     def _alarm_reset_quick(self, target_id):
         """알람 리셋 (재시도 로직 내부용, 로그 최소화)
-        
+
         ercd 응답이 항상 "00"(브로드캐스트)에서 오므로,
         "00" + 해당 축 모두에 ERCL 전송.
         """
@@ -546,7 +564,7 @@ class LaserController:
     def laser_on(self):
         """
         레이저 발사 (SSPW 1).
-        
+
         주의: 먼저 set_power()로 파워를 설정해야 합니다.
         가이드빔 상태(ND 필터 극한 위치)에서는 빔이 차단됩니다.
         """
@@ -564,28 +582,70 @@ class LaserController:
         self._power_set = False
         self.set_guide_beam()
 
-    def set_power(self, power_level):
-        """모터 좌표를 이동시켜 레이저 출력 조절 (Target 02, SMMA)"""
-        power_map = {
-            20: "-0113343",
-            40: "-0085674",
-            60: "-0070279",
-            80: "-0059111",
-            100: "-0047944"
-        }
+    # ==============================================================
+    # ND 필터 투과율 ↔ 펄스 위치 변환 (config [ND_FILTER] Mode=1 보간)
+    # ==============================================================
+    def _percent_to_pulse(self, percent):
+        """
+        목표 투과율(%) → ND 필터 펄스 위치.
+        log10(%) 기준 선형 보간 (OD가 위치에 대해 거의 선형이라 정확도 높음).
+        """
+        percent = max(self.ND_MIN_PCT, min(self.ND_MAX_PCT, float(percent)))
+        lt = math.log10(percent)
+        cal = self.ND_CAL  # % 내림차순 → log10(%)도 내림차순
+        for i in range(len(cal) - 1):
+            t_hi, p_hi = cal[i]       # 더 밝은(투과율 높은) 점
+            t_lo, p_lo = cal[i + 1]   # 더 어두운(투과율 낮은) 점
+            lhi, llo = math.log10(t_hi), math.log10(t_lo)
+            if llo <= lt <= lhi:
+                frac = (lt - lhi) / (llo - lhi)
+                return int(round(p_hi + frac * (p_lo - p_hi)))
+        # 표 범위 밖(클램프 후엔 도달 안 함) → 경계값
+        return cal[0][1] if lt >= math.log10(cal[0][0]) else cal[-1][1]
 
-        if power_level in power_map:
-            target_pos = power_map[power_level]
-            print(f"⚙️ 메인 레이저 파워 {power_level}% 설정 중... (모터 이동 대기)")
-            success = self._execute_command("02", "SMMA", target_pos, timeout=15.0)
-            if success:
-                self._power_set = True
-                time.sleep(0.1) # 모터 안정화
-                print("   -> 파워 설정 완료!")
-            else:
-                print("   -> 파워 설정 실패 (응답 없음)")
+    def pulse_to_percent(self, pulse):
+        """펄스 위치 → 예상 투과율(%). 진단/로깅용 역변환."""
+        cal = self.ND_CAL
+        for i in range(len(cal) - 1):
+            p_hi, p_lo = cal[i][1], cal[i + 1][1]
+            if p_hi <= pulse <= p_lo:
+                lhi, llo = math.log10(cal[i][0]), math.log10(cal[i + 1][0])
+                frac = (pulse - p_hi) / (p_lo - p_hi)
+                return 10 ** (lhi + frac * (llo - lhi))
+        return cal[0][0] if pulse <= cal[0][1] else cal[-1][0]
+
+    def set_power(self, percent):
+        """
+        메인 레이저 출력 연속 조절 (ND 필터, 축02 SMMA).
+
+        percent: 투과율 % (0.004 ~ 100, 실수 허용). 예) 1, 2.5, 37, 100.
+
+        config 캘리브레이션(ND_CAL)을 log-선형 보간하여 임의 %를 펄스
+        위치로 변환한다. 기존 이산 power_map(20/40/60/80/100)을 대체하며,
+        해당 값들도 그대로 동작한다(하위호환).
+        """
+        if not isinstance(percent, (int, float)):
+            print("⚠️ percent는 숫자여야 합니다.")
+            return False
+
+        clamped = max(self.ND_MIN_PCT, min(self.ND_MAX_PCT, float(percent)))
+        if clamped != float(percent):
+            print(f"⚠️ {percent}% → 허용 범위로 보정: {clamped}% "
+                  f"(허용 {self.ND_MIN_PCT}~{self.ND_MAX_PCT})")
+
+        pulse = self._percent_to_pulse(clamped)
+        target_pos = f"-{pulse:07d}"
+
+        print(f"⚙️ 메인 레이저 파워 {clamped}% 설정 중... "
+              f"(ND 위치 {target_pos}, 모터 이동 대기)")
+        success = self._execute_command("02", "SMMA", target_pos, timeout=15.0)
+        if success:
+            self._power_set = True
+            time.sleep(0.1)  # 모터 안정화
+            print(f"   -> 파워 설정 완료! (≈{clamped}% 투과)")
         else:
-            print("⚠️ 지원하지 않는 파워 레벨입니다. (20, 40, 60, 80, 100 중 선택)")
+            print("   -> 파워 설정 실패 (응답 없음)")
+        return success
 
     def set_guide_beam(self):
         """
@@ -631,6 +691,7 @@ def main():
     print("   Raman Laser Control Terminal")
     print("      Rays-ON.exe 패킷 캡처 + Fastech SDK 헤더 기반")
     print("      GMMS 폴링 / ercd 자동감지 / GMCP 위치검증")
+    print("      ND 필터 연속 파워 제어 (0.004 ~ 100 %)")
     print("=" * 55)
 
     port_input = input("연결할 COM 포트를 입력하세요 (기본값: COM4): ").strip()
@@ -645,7 +706,7 @@ def main():
         print("-" * 50)
         print("1. ⚡ 레이저 켜기 (ON)")
         print("2. 🛑 레이저 끄기 (OFF)")
-        print("3. ⚙️ 파워 설정 (20 / 40 / 60 / 80 / 100)")
+        print("3. ⚙️ 파워 설정 (0.004 ~ 100 %, 실수 허용)")
         print("4. 🔦 가이드빔 켜기")
         print("Q. 🚪 프로그램 종료")
         print("-" * 50)
@@ -657,10 +718,10 @@ def main():
         elif choice == '2':
             laser.laser_off()
         elif choice == '3':
-            val = input("파워를 입력하세요 (20, 40, 60, 80, 100): ").strip()
-            if val.isdigit():
-                laser.set_power(int(val))
-            else:
+            val = input("파워(%)를 입력하세요 (0.004 ~ 100, 예: 1, 2.5, 40): ").strip()
+            try:
+                laser.set_power(float(val))
+            except ValueError:
                 print("⚠️ 숫자로 입력해주세요.")
         elif choice == '4':
             laser.set_guide_beam()

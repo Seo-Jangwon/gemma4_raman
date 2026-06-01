@@ -58,6 +58,7 @@ class ExperimentState(TypedDict):
 
     # ── 하드웨어 상태 ─────────────────────────────────────────────────────────
     cumulative_dose_mj: float
+    cumulative_dose_map: dict       # {"x.x_y.y": float_mJ} 위치별 누적 dose
     stage_position: Optional[dict]
 
     # ── Specialist 출력 ───────────────────────────────────────────────────────
@@ -89,6 +90,7 @@ def initial_state(user_message: str, session_id: str = "") -> ExperimentState:
         observations=[],
         critic_log=[],
         cumulative_dose_mj=0.0,
+        cumulative_dose_map={},
         stage_position=None,
         spectrum_analysis=None,
         domain_interpretation=None,

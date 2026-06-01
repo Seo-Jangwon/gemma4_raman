@@ -91,14 +91,15 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_laser_power",
-            "description": "레이저 출력을 설정한다. 20, 40, 60, 80, 100 중 하나.",
+            "description": "레이저 출력(ND 필터 투과율)을 설정한다. 0.004~100 % 범위의 임의 실수.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "percent": {
-                        "type": "integer",
-                        "description": "출력 퍼센트 (20/40/60/80/100)",
-                        "enum": [20, 40, 60, 80, 100],
+                        "type": "number",
+                        "description": "출력 퍼센트 (투과율 %). 0.004~100 범위의 실수. 예: 1, 2.5, 40, 100.",
+                        "minimum": 0.004,
+                        "maximum": 100,
                     }
                 },
                 "required": ["percent"],
@@ -124,9 +125,10 @@ RAMAN_TOOLS = [
                         "description": "CCD 노출 시간 (초). 기본값 0.2",
                     },
                     "power": {
-                        "type": "integer",
-                        "description": "레이저 출력 (%). 기본값 40",
-                        "enum": [20, 40, 60, 80, 100],
+                        "type": "number",
+                        "description": "레이저 출력 (투과율 %). 0.004~100 범위의 실수. 기본값 40.",
+                        "minimum": 0.004,
+                        "maximum": 100,
                     },
                     "stabilize_sec": {
                         "type": "number",

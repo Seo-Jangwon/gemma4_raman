@@ -1,18 +1,20 @@
 """
 SpecialistDebateSession — Spectrum-specialist ↔ Domain-specialist 3-round 토론.
 
-MVP: debate_node는 graph에 등록되지만 Planner가 라우팅하지 않음.
-V1: Planner가 debate 노드를 plan step으로 포함.
+V1: Planner가 debate 노드를 plan step으로 포함해 실제 호출.
 
 토론 프로토콜:
-  Round 1: spectrum_specialist가 스펙트럼 분석
+  Round 1: spectrum_specialist 분석 (기존 state.spectrum_analysis 재사용)
   Round 2: domain_specialist가 이의 제기 (challenge)
   Round 3: spectrum_specialist가 반론 (rebuttal)
-  수렴: token overlap ratio > 0.5 → commit
+  수렴 판정: LLM judge가 rebuttal이 challenge에 합의했는지 판단
   미수렴: domain_specialist 결론 채택 + uncertainty_flag=True
 """
 
 from __future__ import annotations
+
+import json
+import re
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -31,15 +33,29 @@ def _advance_plan(state: ExperimentState) -> dict:
 
 _llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0.2)
 
-_CONVERGENCE_THRESHOLD = 0.5
+_JUDGE_SYSTEM = """\
+두 전문가의 토론 결과를 보고 최종 합의 여부를 판단하세요.
+합의(agreed=true)의 기준: 반론이 이의 제기를 수용하거나, 양측 결론이 실질적으로 같은 내용을 지지하는 경우.
+불일치(agreed=false)의 기준: 반론이 이의를 명확히 반박하고, 두 결론이 서로 충돌하는 경우.
+JSON으로만 답변하세요: {"agreed": true/false, "reason": "판단 근거"}"""
 
 
-def _token_overlap(text1: str, text2: str) -> float:
-    words1 = set(text1.lower().split())
-    words2 = set(text2.lower().split())
-    if not words1 or not words2:
-        return 0.0
-    return len(words1 & words2) / len(words1 | words2)
+def _check_convergence(challenge: str, rebuttal: str) -> bool:
+    """LLM judge로 합의 여부 판정. True = 수렴, False = 불일치."""
+    try:
+        resp = _llm.invoke([
+            SystemMessage(content=_JUDGE_SYSTEM),
+            HumanMessage(content=(
+                f"도메인 전문가 이의 제기:\n{challenge[:600]}\n\n"
+                f"스펙트럼 전문가 반론:\n{rebuttal[:600]}\n\n"
+                "반론이 이의를 수용해 합의에 이르렀습니까, 아니면 반박했습니까?"
+            )),
+        ])
+        cleaned = re.sub(r"```(?:json)?", "", resp.content).strip().rstrip("`").strip()
+        parsed = json.loads(cleaned)
+        return bool(parsed.get("agreed", False))
+    except Exception:
+        return False  # 파싱 실패 → 불일치로 처리 (보수적)
 
 
 def _run_debate(
@@ -75,21 +91,20 @@ def _run_debate(
     ])
     rebuttal = r3.content
 
-    overlap = _token_overlap(challenge, rebuttal)
-    uncertainty = overlap < _CONVERGENCE_THRESHOLD
+    # LLM judge로 수렴 판정
+    converged = _check_convergence(challenge, rebuttal)
+    uncertainty = not converged
 
     if uncertainty:
-        # 미수렴 → domain_specialist 결론 우선
         result = (
-            f"[토론 결과 — 불일치 (overlap={overlap:.2f}, uncertainty_flag=True)]\n\n"
+            f"[토론 결과 — 불일치 (uncertainty_flag=True)]\n\n"
             f"## Domain-specialist 결론 (채택)\n{domain_interpretation}\n\n"
             f"## 이의 제기\n{challenge}\n\n"
             f"## Spectrum-specialist 반론\n{rebuttal}"
         )
     else:
-        # 수렴 → rebuttal(spectrum) 결론 채택
         result = (
-            f"[토론 결과 — 수렴 (overlap={overlap:.2f})]\n\n"
+            f"[토론 결과 — 수렴]\n\n"
             f"## 최종 결론\n{rebuttal}\n\n"
             f"## 도메인 관점 보완\n{challenge}"
         )
@@ -98,7 +113,7 @@ def _run_debate(
 
 
 def debate_node(state: ExperimentState) -> dict:
-    """V1에서 Planner가 라우팅. MVP에서는 호출되지 않음."""
+    """Planner가 plan step으로 포함해 호출."""
     spectrum_analysis   = state.get("spectrum_analysis", "")
     domain_interpretation = state.get("domain_interpretation", "")
     intent = state.get("intent") or {}

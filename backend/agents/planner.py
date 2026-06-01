@@ -37,7 +37,10 @@ _PLAN_SYSTEM = """\
 다음 에이전트들을 사용할 수 있습니다:
 - hw_manager: 하드웨어 제어 (스테이지 이동, 레이저 설정, 스펙트럼 획득)
 - spectrum_specialist: 스펙트럼 물리 분석
-- domain_specialist: 도메인 전문 해석
+- domain_specialist: 도메인 전문 해석. params에 "persona" 키로 전문가 직접 지정 가능
+  (biologist|materials_engineer|electrochemist|pharma_chemist|polymer_scientist|food_scientist|forensic_chemist)
+- debate: spectrum_specialist와 domain_specialist 결론이 불확실하거나 교차 검증이 필요할 때 사용
+  반드시 spectrum_specialist → domain_specialist 이후에 배치
 - roi_detector: 다음 측정 위치 결정
 
 실험 계획을 JSON 배열로 출력하세요:
@@ -45,7 +48,9 @@ _PLAN_SYSTEM = """\
   {"step_id": "1", "agent": "hw_manager", "action": "레이저 ON 후 스펙트럼 획득",
    "params": {"power_pct": 30, "exposure_s": 1.0}},
   {"step_id": "2", "agent": "spectrum_specialist", "action": "획득된 스펙트럼 분석", "params": {}},
-  {"step_id": "3", "agent": "domain_specialist", "action": "도메인 관점 해석", "params": {}}
+  {"step_id": "3", "agent": "domain_specialist", "action": "도메인 관점 해석",
+   "params": {"persona": "materials_engineer"}},
+  {"step_id": "4", "agent": "debate", "action": "해석 교차 검증", "params": {}}
 ]
 
 JSON 배열만 출력하세요. 코드블록 없이."""
@@ -102,6 +107,12 @@ def planner_node(state: ExperimentState) -> dict:
     if state.get("abort_reason"):
         return {"next_node": "__end__"}
 
+    critic_log = state.get("critic_log") or []
+
+    # C5 완료 후 복귀 → 최종 종료
+    if any(e["checkpoint"] == "C5" for e in critic_log) and state.get("final_report"):
+        return {"next_node": "__end__"}
+
     plan = state.get("plan", [])
     idx  = state.get("current_step_idx", 0)
 
@@ -136,7 +147,6 @@ def planner_node(state: ExperimentState) -> dict:
         }
 
     # ── 단계 B: C1 체크 직후 (plan 있고 idx==0이고 critic_log에 C1 있음) ─────
-    critic_log = state.get("critic_log", [])
     c1_entries = [e for e in critic_log if e["checkpoint"] == "C1"]
     if c1_entries and c1_entries[-1]["verdict"] == "ABORT":
         replan = state.get("replan_count", 0)
@@ -159,14 +169,27 @@ def planner_node(state: ExperimentState) -> dict:
             updated_plan[idx] = {**current_step, "status": "running"}
             return {"plan": updated_plan, "next_node": current_step["agent"]}
 
-        # step이 완료/실패 → 다음 step으로
+        # step이 완료/실패 → 다음 step을 즉시 결정해 next_node 누수 방지
         next_idx = idx + 1
         if next_idx < len(plan):
-            return {"current_step_idx": next_idx}
-        # 모든 step 완료
+            next_step = plan[next_idx]
+            updated_plan = list(plan)
+            updated_plan[next_idx] = {**next_step, "status": "running"}
+            return {
+                "plan": updated_plan,
+                "current_step_idx": next_idx,
+                "next_node": next_step["agent"],
+            }
+        # 모든 step 완료 → C4 체크 후 report_generator
+        c4_done = any(e["checkpoint"] == "C4" for e in critic_log)
+        if not c4_done:
+            return {"critic_checkpoint": "C4", "next_node": "critic"}
         return {"next_node": "report_generator"}
 
-    # ── 단계 D: 모든 step 완료 ───────────────────────────────────────────────
+    # ── 단계 D: idx >= len(plan), 모든 step 완료 ────────────────────────────
+    c4_done = any(e["checkpoint"] == "C4" for e in critic_log)
+    if not c4_done:
+        return {"critic_checkpoint": "C4", "next_node": "critic"}
     return {"next_node": "report_generator"}
 
 
@@ -205,5 +228,6 @@ def report_generator_node(state: ExperimentState) -> dict:
 
     return {
         "final_report": response.content,
-        "next_node": "__end__",
+        "critic_checkpoint": "C5",
+        "next_node": "critic",
     }

@@ -149,13 +149,18 @@ def laser_off() -> dict:
         return {"ok": False, "error": str(e)}
 
 
-def set_laser_power(percent: int) -> dict:
-    """레이저 출력 설정. percent: 20, 40, 60, 80, 100 중 하나."""
+def set_laser_power(percent: float) -> dict:
+    """레이저 출력 설정. percent: ND 필터 투과율 0.004~100 (실수 허용)."""
     if _laser is None:
         return {"ok": False, "error": "레이저가 초기화되지 않았습니다."}
-    valid = {20, 40, 60, 80, 100}
-    if percent not in valid:
-        return {"ok": False, "error": f"유효한 출력값: {valid}"}
+    try:
+        percent = float(percent)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "percent는 숫자여야 합니다."}
+    lo = getattr(_laser, "ND_MIN_PCT", 0.004)
+    hi = getattr(_laser, "ND_MAX_PCT", 100.0)
+    if not (lo <= percent <= hi):
+        return {"ok": False, "error": f"유효 범위: {lo}~{hi} %"}
     try:
         _laser.set_power(percent)
         time.sleep(0.15)  # ND 필터 광학 settling (모터 정지 후 잔류 진동)
@@ -170,7 +175,7 @@ def set_laser_power(percent: int) -> dict:
 
 def acquire_spectrum(
     exposure: float = 0.2,
-    power: int = 40,
+    power: float = 40,
     stabilize_sec: float = 0.5,
     acq_mode: str = 'single',
     num_accumulations: int = 1,

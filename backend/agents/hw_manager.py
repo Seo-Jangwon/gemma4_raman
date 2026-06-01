@@ -142,6 +142,7 @@ def hw_manager_node(state: ExperimentState) -> dict:
 
     observations = []
     new_dose = state.get("cumulative_dose_mj", 0.0)
+    dose_map = dict(state.get("cumulative_dose_map", {}))
     last_position = state.get("stage_position")
 
     max_turns = 8
@@ -175,7 +176,12 @@ def hw_manager_node(state: ExperimentState) -> dict:
                 args = tc["args"]
                 p = float(args.get("power", power_pct))
                 e = float(args.get("exposure", exposure_s))
-                new_dose += p * e * 0.01
+                dose_inc = p * e * 0.01
+                new_dose += dose_inc
+                # 위치별 dose map 업데이트
+                cur_pos = last_position or state.get("stage_position") or {}
+                pos_key = f"{cur_pos.get('x', 0):.1f}_{cur_pos.get('y', 0):.1f}"
+                dose_map[pos_key] = dose_map.get(pos_key, 0.0) + dose_inc
 
             # 스테이지 위치 갱신
             if tc["name"] in ("move_stage", "move_stage_relative"):
@@ -198,6 +204,7 @@ def hw_manager_node(state: ExperimentState) -> dict:
         "observations": observations,
         "plan": updated_plan,
         "cumulative_dose_mj": new_dose,
+        "cumulative_dose_map": dose_map,
         "current_step_idx": idx + 1,
     }
     if last_position:
