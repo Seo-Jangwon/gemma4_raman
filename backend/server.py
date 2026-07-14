@@ -353,6 +353,61 @@ async def experiment_run(body: ExperimentRequest, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/experiment/stream")
+async def experiment_stream(body: ExperimentRequest, request: Request):
+    """멀티에이전트 실험 파이프라인 — SSE 스트리밍 (clarification + 진행상황).
+
+    프론트엔드는 fetch로 이 엔드포인트를 열고 ReadableStream을 파싱한다.
+    이벤트 형식(표준 SSE):
+        event: <type>\\n
+        data:  <json>\\n\\n
+    type ∈ {intent, clarification, node, done, error}. (orchestrator.stream_experiment 참고)
+
+    [동기 제너레이터를 async SSE로 잇는 방법]
+    stream_experiment는 내부에서 LangGraph를 블로킹 실행하는 "동기" 제너레이터다.
+    이를 이벤트 루프에서 직접 돌리면 서버가 멈추므로, ThreadPoolExecutor 워커에서
+    돌리고 각 이벤트를 asyncio.Queue로 넘겨 async 쪽에서 흘려보낸다.
+    """
+    from backend.agents.orchestrator import stream_experiment
+
+    state = _state(request)
+    loop = asyncio.get_event_loop()
+    q: asyncio.Queue = asyncio.Queue()
+    _SENTINEL = object()
+
+    def _producer():
+        # 워커 스레드: 동기 제너레이터를 소비해 큐로 밀어넣는다.
+        try:
+            for event in stream_experiment(body.message, body.session_id or ""):
+                loop.call_soon_threadsafe(q.put_nowait, event)
+        except Exception as e:  # 방어적 — stream_experiment가 자체적으로 error 이벤트를 내지만
+            loop.call_soon_threadsafe(q.put_nowait, {"type": "error", "detail": str(e)})
+        finally:
+            loop.call_soon_threadsafe(q.put_nowait, _SENTINEL)
+
+    state.executor.submit(_producer)
+
+    async def event_gen():
+        import json
+        while True:
+            event = await q.get()
+            if event is _SENTINEL:
+                break
+            etype = event.get("type", "message")
+            payload = json.dumps(event, ensure_ascii=False)
+            yield f"event: {etype}\ndata: {payload}\n\n"
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",   # nginx/프록시 버퍼링 방지 (SSE 즉시 전달)
+        },
+    )
+
+
 @app.get("/api/agents/health")
 async def agents_health():
     """멀티에이전트 시스템 상태 확인."""

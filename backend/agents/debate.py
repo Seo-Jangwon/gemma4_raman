@@ -31,7 +31,7 @@ def _advance_plan(state: ExperimentState) -> dict:
     return {"plan": plan, "current_step_idx": idx + 1}
 
 
-_llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0.2)
+_llm = ChatAnthropic(model="claude-opus-4-8", temperature=0.2)
 
 _JUDGE_SYSTEM = """\
 두 전문가의 토론 결과를 보고 최종 합의 여부를 판단하세요.
@@ -122,5 +122,12 @@ def debate_node(state: ExperimentState) -> dict:
     if not spectrum_analysis:
         return {"debate_result": "debate 스킵: 스펙트럼 분석 없음", **_advance_plan(state)}
 
-    debate_result, _ = _run_debate(spectrum_analysis, domain_interpretation, sample_type)
+    try:
+        debate_result, _ = _run_debate(spectrum_analysis, domain_interpretation, sample_type)
+    except Exception as e:
+        # 토론은 교차 검증용 보조 절차 — LLM 장애 시 실험을 막지 않고 스킵한다.
+        # (_fail_step 대신 즉시 스킵하는 이유: debate의 기본 on_fail 정책도 skip이라
+        #  Planner 왕복만 한 번 늘어날 뿐 결과가 같다 — 여기서 단락(short-circuit))
+        return {"debate_result": f"debate 스킵: LLM 호출 실패 ({e})", **_advance_plan(state)}
+
     return {"debate_result": debate_result, **_advance_plan(state)}

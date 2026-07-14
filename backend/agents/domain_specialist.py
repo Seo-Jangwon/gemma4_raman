@@ -4,7 +4,7 @@ DomainSpecialistNode — 동적 persona 도메인 전문가.
 sample_type 기반으로 PERSONA_REGISTRY에서 persona를 자동 선택.
 spectrum_analysis를 입력으로 받아 도메인 관점 해석을 제공.
 
-LLM: Claude claude-sonnet-4-6 (교체 포인트: _llm 변수)
+LLM: Claude claude-opus-4-8 (교체 포인트: _llm 변수)
 """
 
 from __future__ import annotations
@@ -25,8 +25,29 @@ def _advance_plan(state: ExperimentState) -> dict:
         plan[idx] = {**plan[idx], "status": "done"}
     return {"plan": plan, "current_step_idx": idx + 1}
 
+
+def _fail_step(state: ExperimentState, error: str) -> dict:
+    """LLM 장애 시: step failed + failure_log 기록, idx는 전진하지 않는다.
+    처리(기본 정책 skip — 해석 실패는 측정 데이터를 해치지 않음)는 Planner 몫."""
+    import time
+    idx = state.get("current_step_idx", 0)
+    plan = list(state.get("plan", []))
+    step = plan[idx] if idx < len(plan) else {}
+    if idx < len(plan):
+        plan[idx] = {**plan[idx], "status": "failed", "result": {"error": error}}
+    return {
+        "plan": plan,
+        "failure_log": [{
+            "step_id": step.get("step_id", "?"),
+            "agent": "domain_specialist",
+            "action": step.get("action", ""),
+            "error": error,
+            "timestamp": time.time(),
+        }],
+    }
+
 # ── LLM 설정 (교체 포인트) ────────────────────────────────────────────────────
-_llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0)
+_llm = ChatAnthropic(model="claude-opus-4-8", temperature=0)
 
 # ── Persona Registry ──────────────────────────────────────────────────────────
 # key: persona 이름, value: 해당 sample_type 키워드 튜플
@@ -132,10 +153,14 @@ def domain_specialist_node(state: ExperimentState) -> dict:
         "실험 목적과 연관된 결론을 제시하세요."
     )
 
-    response = _llm.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=prompt),
-    ])
+    try:
+        response = _llm.invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=prompt),
+        ])
+    except Exception as e:
+        # LLM 장애가 그래프를 죽이지 않게 실패 step으로 변환 (Planner가 skip 결정)
+        return _fail_step(state, f"domain_specialist LLM 호출 실패: {e}")
 
     return {
         "domain_interpretation": f"[{persona}]\n{response.content}",

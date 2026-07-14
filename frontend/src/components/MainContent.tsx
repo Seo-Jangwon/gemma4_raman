@@ -19,6 +19,10 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   text: string
   isError?: boolean
+  // 스트리밍 실험용 확장 필드
+  id?: number                  // 진행상황 메시지를 이벤트마다 갱신하기 위한 안정 키
+  kind?: 'progress' | 'clarification' | 'report'
+  steps?: string[]             // kind==='progress' 일 때 노드별 진행 로그 누적
 }
 
 const DEFAULT_PARAMS: SpectrumParams = {
@@ -47,6 +51,9 @@ export default function MainContent({
 }: MainContentProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [chatLoading, setChatLoading] = useState(false)
+  // clarification(되묻기) 대화를 이어가기 위한 세션 id.
+  // 빈 문자열이면 새 실험, 값이 있으면 진행 중인 되묻기의 답변을 같은 세션에 이어붙인다.
+  const [sessionId, setSessionId] = useState('')
   const [params, setParams] = useState<SpectrumParams>(DEFAULT_PARAMS)
   const [stagePos, setStagePos] = useState<{ x: number; y: number; z: number } | null>(null)
   const [availableGains, setAvailableGains] = useState<number[]>([])
@@ -101,20 +108,104 @@ export default function MainContent({
     syncHardwareState()
   }, [syncHardwareState])
 
+  // ── 멀티에이전트 실험 파이프라인 (SSE 스트리밍 + clarification) ──
+  // 홈 채팅 입력은 이 핸들러로 간다. /api/experiment/stream 을 열고
+  // 서버가 흘려보내는 SSE 이벤트(intent/clarification/node/done/error)를 파싱해
+  // 진행상황을 실시간으로 채팅에 반영한다.
   const handleChat = useCallback(async (command: string) => {
     setMessages(prev => [...prev, { role: 'user', text: command }])
     setChatLoading(true)
+
+    const streamId = Date.now()          // 이번 스트림의 진행상황 메시지를 식별하는 키
+    let localSid = sessionId             // 서버가 발급/유지하는 세션 id
+
+    // 노드 진행 로그 한 줄을 진행상황 메시지에 누적한다(없으면 새로 만든다).
+    const appendStep = (line: string) => {
+      setMessages(prev => {
+        const idx = prev.findIndex(m => m.id === streamId)
+        if (idx === -1) {
+          return [...prev, { role: 'assistant', text: '', kind: 'progress', steps: [line], id: streamId }]
+        }
+        const copy = [...prev]
+        copy[idx] = { ...copy[idx], steps: [...(copy[idx].steps || []), line] }
+        return copy
+      })
+    }
+
+    const handleEvent = (type: string, data: any) => {
+      if (data?.session_id) localSid = data.session_id
+      switch (type) {
+        case 'intent':
+          // 해석된 의도는 굳이 채팅에 노출하지 않는다(진행 로그로 충분). 필요 시 확장.
+          break
+        case 'node':
+          if (data?.message) appendStep(data.message)
+          break
+        case 'clarification':
+          // 되묻기 — 세션을 유지하고, 다음 사용자 입력을 답변으로 이어붙인다.
+          setSessionId(localSid)
+          setMessages(prev => [...prev, {
+            role: 'assistant', text: data.question || '추가 정보가 필요합니다.', kind: 'clarification',
+          }])
+          break
+        case 'done': {
+          setSessionId('')   // 실험 종료 → 다음 입력은 새 실험
+          const report = data.final_report || data.abort_reason || '실험이 완료되었습니다.'
+          setMessages(prev => [...prev, {
+            role: 'assistant', text: report, kind: 'report', isError: !!data.abort_reason,
+          }])
+          syncHardwareState()
+          break
+        }
+        case 'error':
+          setSessionId('')
+          setMessages(prev => [...prev, {
+            role: 'assistant', text: data.detail || '실험 실행 오류', isError: true,
+          }])
+          break
+      }
+    }
+
     try {
-      const { data } = await axios.post('/api/hardware-command', { command })
-      setMessages(prev => [...prev, { role: 'assistant', text: data.message }])
-      await syncHardwareState()
+      const resp = await fetch('/api/experiment/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: command, session_id: sessionId }),
+      })
+      if (!resp.ok || !resp.body) throw new Error(`서버 응답 오류 (${resp.status})`)
+
+      // SSE 파싱: "event: X\ndata: Y\n\n" 블록 단위로 끊어 처리.
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const blocks = buffer.split('\n\n')
+        buffer = blocks.pop() ?? ''       // 마지막 조각은 미완성일 수 있어 보류
+        for (const block of blocks) {
+          if (!block.trim()) continue
+          let etype = 'message'
+          let dataStr = ''
+          for (const line of block.split('\n')) {
+            if (line.startsWith('event:')) etype = line.slice(6).trim()
+            else if (line.startsWith('data:')) dataStr += line.slice(5).trim()
+          }
+          if (dataStr) {
+            try { handleEvent(etype, JSON.parse(dataStr)) } catch { /* 파싱 실패 무시 */ }
+          }
+        }
+      }
     } catch (err: any) {
-      const errText = err.response?.data?.detail ?? '명령 전송 실패'
-      setMessages(prev => [...prev, { role: 'assistant', text: errText, isError: true }])
+      setSessionId('')
+      setMessages(prev => [...prev, {
+        role: 'assistant', text: err?.message ?? '실험 요청 실패', isError: true,
+      }])
     } finally {
       setChatLoading(false)
     }
-  }, [syncHardwareState])
+  }, [sessionId, syncHardwareState])
 
   const handleParamChange = useCallback((update: Partial<SpectrumParams>) => {
     setParams(prev => {
@@ -212,7 +303,7 @@ export default function MainContent({
                 )}
                 {messages.map((msg, i) => (
                   <div
-                    key={i}
+                    key={msg.id ?? i}
                     className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
@@ -221,10 +312,16 @@ export default function MainContent({
                           ? 'bg-raman-500 text-white rounded-br-sm'
                           : msg.isError
                           ? 'bg-red-50 border border-red-200 text-red-700 rounded-bl-sm'
+                          : msg.kind === 'clarification'
+                          ? 'bg-amber-50 border border-amber-200 text-amber-900 rounded-bl-sm'
+                          : msg.kind === 'progress'
+                          ? 'bg-gray-50 border border-gray-200 text-gray-600 rounded-bl-sm font-mono text-xs'
                           : 'bg-gray-100 text-gray-800 rounded-bl-sm'
                       }`}
                     >
-                      {msg.text}
+                      {msg.kind === 'progress'
+                        ? (msg.steps || []).map((s, j) => <div key={j}>{s}</div>)
+                        : msg.text}
                     </div>
                   </div>
                 ))}
