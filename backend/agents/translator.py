@@ -21,7 +21,7 @@ import json
 import re
 
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from backend.agents.state import ClarifiedIntent, ExperimentState
 
@@ -61,12 +61,21 @@ is_experiment_request 판정 기준:
 주의: 항상 위 JSON 스키마 하나만 출력하세요. 코드블록(```)이나 설명 문장을 앞뒤에 절대 붙이지 마세요."""
 
 
-def _invoke_and_parse(user_msg: str) -> dict:
-    """LLM 호출 1회 + JSON 파싱. 실패 시 예외를 그대로 던진다(재시도는 호출부 책임)."""
-    response = _llm.invoke([
-        SystemMessage(content=_SYSTEM),
-        HumanMessage(content=user_msg),
-    ])
+def _invoke_and_parse(user_msg: str, history: list[dict] | None = None) -> dict:
+    """LLM 호출 1회 + JSON 파싱. 실패 시 예외를 그대로 던진다(재시도는 호출부 책임).
+
+    history: [{"role": "user"|"assistant", "text": str}, ...] — 이번 세션의 과거 대화.
+    "내가 이전에 뭐라고 했지?" 같은 메타 질문에 답하거나, 예전 실험에서 언급된
+    시료/기판을 다시 참조할 수 있도록 실제 멀티턴 메시지로 LLM에 넘긴다.
+    (과거엔 이 문맥이 통째로 사라져 clarification 라운드가 끝나면 매번 "새 대화"였다.)
+    """
+    messages = [SystemMessage(content=_SYSTEM)]
+    for turn in history or []:
+        cls = HumanMessage if turn.get("role") == "user" else AIMessage
+        messages.append(cls(content=turn.get("text", "")))
+    messages.append(HumanMessage(content=user_msg))
+
+    response = _llm.invoke(messages)
     raw = (response.content or "").strip()
     # 코드블록 제거
     raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
@@ -75,12 +84,13 @@ def _invoke_and_parse(user_msg: str) -> dict:
     return json.JSONDecoder().raw_decode(raw)[0]
 
 
-def translate(user_msg: str) -> ClarifiedIntent:
+def translate(user_msg: str, history: list[dict] | None = None) -> ClarifiedIntent:
     """자연어 메시지 → ClarifiedIntent. (노드와 orchestrator가 공유하는 순수 함수)
 
-    orchestrator는 clarification 루프에서 "누적된" 대화 문자열을 넘긴다.
+    orchestrator는 clarification 루프에서 "누적된" 대화 문자열을 user_msg로 넘긴다.
     (예: "그래핀 측정해줘\n[추가 정보] 기판은 SiO2 웨이퍼, 타겟은 어두운 육각 플레이크")
     LLM이 이 누적 문맥을 하나의 intent로 병합한다.
+    history는 그와 별개로 "이번 세션에서 이미 끝난 지난 턴들"을 전달한다(위 docstring 참고).
 
     드물게 모델이 빈 응답/비JSON 응답을 줄 때가 있어(일시적) 1회 재시도한다.
     """
@@ -88,7 +98,7 @@ def translate(user_msg: str) -> ClarifiedIntent:
     last_err = None
     for attempt in range(2):
         try:
-            parsed = _invoke_and_parse(user_msg)
+            parsed = _invoke_and_parse(user_msg, history)
             break
         except Exception as e:
             last_err = e

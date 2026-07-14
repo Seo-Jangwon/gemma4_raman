@@ -35,14 +35,33 @@ _RECURSION_LIMIT = 150
 # 광손상 위험이 최소화된다 → "끝내 모르면 조심스럽게 진행"이 안전한 최종 방어선.
 _MAX_CLARIFY_ROUNDS = 2
 
-# ── 세션 저장소 (clarification 대화 유지용) ────────────────────────────────────
-# {session_id: {"accumulated": str, "rounds": int}}
-# clarification은 여러 턴에 걸쳐 정보를 모은다. 사용자가 앞서 한 말과 방금 준 답을
-# 합쳐서 다시 번역해야 하므로, 누적 메시지를 세션별로 서버에 들고 있는다.
+# ── 세션 저장소 (clarification 대화 + 대화 이력 유지용) ─────────────────────────
+# {session_id: {"accumulated": str, "rounds": int, "history": [{"role","text"}, ...]}}
+#   - accumulated/rounds : "지금 채우고 있는 한 실험"의 clarification 버퍼.
+#     실험이 확정되거나 잡담으로 판명되면 즉시 초기화된다(다음 요청은 새 실험으로 시작).
+#   - history            : 세션이 살아있는 동안(=같은 브라우저 탭) 계속 쌓이는 대화 기록.
+#     예전엔 accumulated/rounds와 함께 세션 전체를 pop()해 지웠는데, 그러면 실험 하나가
+#     끝나거나 잡담 한 번에 응답하는 순간 "이전에 뭐라고 했는지"까지 통째로 사라졌다
+#     (예: 실험 완료 후 "내가 방금 뭐라고 했지?"에 답을 못함). 이제 이 필드만 별도로
+#     보존해 translate()에 대화 맥락으로 전달한다.
 # 로컬 단일 사용자 도구라 in-memory dict로 충분하다(프로세스 종료 시 초기화).
 # ※ 경험 저장소(experience_store.json)와 혼동 금지 — 그건 실험 "노하우"의 영속
-#    기억이고, 이건 진행 중인 한 요청의 "대화 상태"라 휘발성이어도 된다.
+#    기억이고, 이건 대화 세션 상태라 휘발성이어도 된다.
 _SESSIONS: dict[str, dict] = {}
+
+# history에 쌓아두는 최대 메시지 수(사용자+어시스턴트 합산). 무한정 쌓이면 매 translate()
+# 호출마다 LLM에 보내는 토큰이 계속 불어나므로 최근 대화만 유지한다.
+_HISTORY_MAX_TURNS = 20
+
+
+def _remember(sess: dict, role: str, text: str) -> None:
+    """세션의 대화 이력에 한 턴을 추가한다(길이 제한 적용)."""
+    if not text:
+        return
+    hist = sess.setdefault("history", [])
+    hist.append({"role": role, "text": text})
+    if len(hist) > _HISTORY_MAX_TURNS:
+        del hist[: len(hist) - _HISTORY_MAX_TURNS]
 
 
 def _get_graph():
@@ -164,16 +183,21 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
       {"type": "error",         "detail": str}                  오류
 
     [흐름]
-    1. 세션에 이번 메시지를 누적한다(이전 턴의 되묻기 답변을 합침).
-    2. translate()로 intent 생성 → "intent" 이벤트.
+    1. 세션의 accumulated 버퍼에 이번 메시지를 누적한다(이전 턴의 되묻기 답변을 합침).
+       세션의 history(지난 턴 전체 기록)는 translate()에 대화 맥락으로 함께 전달한다.
+    2. translate(accumulated, history)로 intent 생성 → "intent" 이벤트.
     3. intent.is_experiment_request가 False면 — 잡담/메타 질문이라 실험 파이프라인이
        필요 없다 — "chat" 이벤트로 direct_reply를 바로 돌려주고 종료한다
        (clarify 게이트를 타지 않음 — 실험도 아닌데 "시료가 뭔가요?"라고 되묻는 것을 방지).
     4. clarify.check_intent()로 필수 정보 확인.
        - 부족 & 라운드 여유 있음 → "clarification" 이벤트 후 종료(그래프 실행 안 함).
-       - 충족 or 라운드 소진 → 세션 정리 후 그래프 스트리밍 진행.
+       - 충족 or 라운드 소진 → accumulated/rounds만 초기화 후 그래프 스트리밍 진행
+         (history는 유지 — 다음 대화도 이번 실험 맥락을 참조할 수 있게).
     5. graph.stream(...)의 매 노드 갱신마다 "node" 이벤트.
-    6. 종료 시 경험 기록 후 "done" 이벤트.
+    6. 종료 시 경험 기록 + 결과를 history에 남긴 후 "done" 이벤트.
+
+    모든 분기(chat/clarification/done)에서 어시스턴트의 응답을 _remember()로 history에
+    적립한다 — "방금 뭐라고 답했어?" 같은 다음 턴 메타 질문도 근거를 갖고 답할 수 있도록.
     """
     # ── session_id 확정 (빈 값이면 새로 발급해 클라이언트에 알려줌) ──
     import uuid
@@ -185,42 +209,58 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
 
     try:
         # ── 1. 메시지 누적 ──
-        sess = _SESSIONS.get(sid) or {"accumulated": "", "rounds": 0}
+        sess = _SESSIONS.get(sid) or {"accumulated": "", "rounds": 0, "history": []}
+        # translate()에 넘길 "지난 턴들" — 이번 메시지를 history에 추가하기 전 스냅샷.
+        # (이번 메시지 자체는 아래 accumulated/user_msg로 별도 전달되므로 중복을 피한다)
+        history_for_context = list(sess.get("history", []))
+
         if sess["accumulated"]:
             # 이전 턴에서 되물었고, 이번 메시지는 그 답변 → 문맥에 덧붙인다.
             sess["accumulated"] = f"{sess['accumulated']}\n[추가 정보] {user_message}"
         else:
             sess["accumulated"] = user_message
 
-        # ── 2. 번역 ──
-        intent: ClarifiedIntent = translate(sess["accumulated"])
+        # ── 2. 번역 (대화 이력을 함께 전달) ──
+        intent: ClarifiedIntent = translate(sess["accumulated"], history=history_for_context)
         yield ev({"type": "intent", "intent": dict(intent)})
+
+        _remember(sess, "user", user_message)
 
         # ── 3. 실험 요청이 아니면(잡담/메타 질문) 여기서 바로 응답하고 종료 ──
         # clarify 게이트를 타지 않는다 — "너 뭐 할 수 있어?" 같은 메시지에
         # "시료가 뭔가요?"로 되묻는 것은 안전 목적(sample_type 확인)에 안 맞는다.
         if not intent.get("is_experiment_request", True):
-            _SESSIONS.pop(sid, None)
-            yield ev({"type": "chat",
-                      "reply": intent.get("direct_reply") or "라만 실험 측정을 도와드릴 수 있어요. 무엇을 측정하고 싶으신가요?"})
+            reply = intent.get("direct_reply") or "라만 실험 측정을 도와드릴 수 있어요. 무엇을 측정하고 싶으신가요?"
+            _remember(sess, "assistant", reply)
+            # 실험 누적 버퍼만 초기화한다(다음 요청은 새 실험으로 시작) —
+            # 대화 이력(history)은 세션이 살아있는 한 계속 보존한다.
+            sess["accumulated"] = ""
+            sess["rounds"] = 0
+            _SESSIONS[sid] = sess
+            yield ev({"type": "chat", "reply": reply})
             return
 
         # ── 4. clarification 게이트 ──
         check = clarify.check_intent(intent)
         if not check["ok"] and sess["rounds"] < _MAX_CLARIFY_ROUNDS:
             sess["rounds"] += 1
+            _remember(sess, "assistant", check["question"])
             _SESSIONS[sid] = sess            # 다음 턴을 위해 대화 상태 저장
             yield ev({"type": "clarification",
                       "question": check["question"],
                       "missing": check["missing"]})
             return                            # 이번 턴은 여기서 종료(그래프 실행 안 함)
 
-        # 진행 확정 → 세션의 대화 상태는 정리(다음 요청은 새 실험으로 시작)
-        _SESSIONS.pop(sid, None)
+        # 진행 확정 → 실험 누적 버퍼만 정리(대화 이력은 유지). 그래프에 넘길 최종
+        # 사용자 메시지는 버퍼를 지우기 전에 따로 챙겨둔다.
+        experiment_message = sess["accumulated"]
+        sess["accumulated"] = ""
+        sess["rounds"] = 0
+        _SESSIONS[sid] = sess
 
         # ── 5. 그래프 스트리밍 실행 ──
         # intent를 사전 주입해 그래프 안 translator는 통과시킨다(중복 LLM 호출 방지).
-        state = initial_state(user_message=sess["accumulated"],
+        state = initial_state(user_message=experiment_message,
                               session_id=sid, intent=intent)
         graph = _get_graph()
 
@@ -249,9 +289,15 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
         except Exception:
             pass
 
+        report = final_state.get("final_report") or ""
+        abort_reason = final_state.get("abort_reason")
+        # 다음 턴에 "방금 실험 어떻게 됐어?" 같은 질문에 답할 수 있도록 결과도 이력에 남긴다.
+        _remember(sess, "assistant", report or (f"[중단] {abort_reason}" if abort_reason else ""))
+        _SESSIONS[sid] = sess
+
         yield ev({"type": "done",
-                  "final_report": final_state.get("final_report") or "",
-                  "abort_reason": final_state.get("abort_reason"),
+                  "final_report": report,
+                  "abort_reason": abort_reason,
                   "state": _public_state(final_state)})
 
     except Exception as e:

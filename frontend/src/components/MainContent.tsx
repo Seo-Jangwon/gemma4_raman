@@ -140,7 +140,9 @@ export default function MainContent({
           break
         case 'chat':
           // 실험 요청이 아닌 잡담/메타 질문 — 실험 파이프라인 없이 바로 답변.
-          setSessionId('')
+          // 세션은 유지한다(초기화하면 백엔드가 쌓아둔 대화 이력을 다음 턴에 못 씀 —
+          // "내가 이전에 뭐라고 했지?" 같은 질문에 답하려면 같은 session_id를 계속 써야 한다).
+          setSessionId(localSid)
           setMessages(prev => [...prev, {
             role: 'assistant', text: data.reply || '',
           }])
@@ -156,7 +158,9 @@ export default function MainContent({
           }])
           break
         case 'done': {
-          setSessionId('')   // 실험 종료 → 다음 입력은 새 실험
+          // 실험 자체(계획/누적 버퍼)는 끝났지만 세션(대화 이력)은 유지한다 —
+          // 백엔드가 다음 턴을 위해 결과를 history에 남겨두므로 같은 session_id로 이어간다.
+          setSessionId(localSid)
           const report = data.final_report || data.abort_reason || '실험이 완료되었습니다.'
           setMessages(prev => [...prev, {
             role: 'assistant', text: report, kind: 'report', isError: !!data.abort_reason,
@@ -165,7 +169,8 @@ export default function MainContent({
           break
         }
         case 'error':
-          setSessionId('')
+          // 네트워크/서버 오류 — 세션은 유지해 재시도 시 대화 맥락이 끊기지 않게 한다.
+          setSessionId(localSid)
           setMessages(prev => [...prev, {
             role: 'assistant', text: data.detail || '실험 실행 오류', isError: true,
           }])
@@ -205,7 +210,8 @@ export default function MainContent({
         }
       }
     } catch (err: any) {
-      setSessionId('')
+      // fetch 자체가 실패한 경우(네트워크 등) — 세션은 유지(재시도 시 맥락 보존).
+      setSessionId(localSid)
       setMessages(prev => [...prev, {
         role: 'assistant', text: err?.message ?? '실험 요청 실패', isError: true,
       }])
