@@ -361,7 +361,7 @@ async def experiment_stream(body: ExperimentRequest, request: Request):
     이벤트 형식(표준 SSE):
         event: <type>\\n
         data:  <json>\\n\\n
-    type ∈ {intent, clarification, node, done, error}. (orchestrator.stream_experiment 참고)
+    type ∈ {intent, chat, clarification, node, done, error}. (orchestrator.stream_experiment 참고)
 
     [동기 제너레이터를 async SSE로 잇는 방법]
     stream_experiment는 내부에서 LangGraph를 블로킹 실행하는 "동기" 제너레이터다.

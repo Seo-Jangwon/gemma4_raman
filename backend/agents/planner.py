@@ -40,7 +40,7 @@ from backend.agents import experience
 from backend.agents.state import ExperimentState, PlanStep
 
 # ── LLM 설정 (교체 포인트) ────────────────────────────────────────────────────
-_llm = ChatAnthropic(model="claude-opus-4-8", temperature=0)
+_llm = ChatAnthropic(model="claude-opus-4-8")
 
 # ── 한도 상수 ─────────────────────────────────────────────────────────────────
 _MAX_STEP_RETRIES = 2   # step당 재시도 한도 — 같은 실패를 3번 이상 반복하지 않는다

@@ -40,7 +40,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from backend.agents.state import ExperimentState
 
 # ── vision LLM (이미지에서 타겟 픽셀 좌표를 읽는 용도) ────────────────────────
-_llm_vision = ChatAnthropic(model="claude-opus-4-8", temperature=0)
+_llm_vision = ChatAnthropic(model="claude-opus-4-8")
 
 # ── 픽셀→mm 변환 상수 (move_to_pixel과 동일 수식 — 주석의 [설계 결정] 참고) ──
 # Config.ini가 없는 개발 환경에서도 import가 죽지 않도록 방어.

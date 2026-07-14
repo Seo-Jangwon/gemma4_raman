@@ -26,7 +26,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from backend.agents.state import ClarifiedIntent, ExperimentState
 
 # ── LLM 설정 (교체 포인트) ────────────────────────────────────────────────────
-_llm = ChatAnthropic(model="claude-opus-4-8", temperature=0)
+_llm = ChatAnthropic(model="claude-opus-4-8")
 
 _SYSTEM = """\
 당신은 라만 분광 실험 요청을 구조화된 JSON으로 변환하는 전문가입니다.
@@ -34,6 +34,9 @@ _SYSTEM = """\
 
 출력 JSON 스키마:
 {
+  "is_experiment_request": true 또는 false,
+  "direct_reply": "is_experiment_request가 false일 때만 채우는 필드. 사용자에게 바로 보여줄
+                    자연스러운 한국어 답변(인사 응대, 기능 소개 등). true면 빈 문자열.",
   "primary_objective": "측정 목적 한 문장",
   "sample_type": "샘플 종류 (예: graphene, exosome, battery_electrode, unknown)",
   "substrate": "기판 종류. 사용자 요청에서 유추 (예: glass, sio2 wafer, gold film). 언급 없으면 빈 문자열",
@@ -49,7 +52,27 @@ _SYSTEM = """\
   "user_preferences": {}
 }
 
-주의: JSON 코드블록 없이 순수 JSON만 출력하세요."""
+is_experiment_request 판정 기준:
+- 라만 분광 측정을 요청하거나, 이전 요청에 대한 추가 정보(시료/기판/위치 등)를 주는 메시지 → true
+- 인사말, 잡담, "너 뭐 할 수 있어?" 같은 메타 질문, 실험과 무관한 질문 → false
+  (false인 경우 direct_reply에 이 시스템이 라만 실험 설계·측정을 돕는 도구임을 안내하고,
+   primary_objective 등 나머지 실험 필드는 빈 값/기본값으로 채우세요)
+
+주의: 항상 위 JSON 스키마 하나만 출력하세요. 코드블록(```)이나 설명 문장을 앞뒤에 절대 붙이지 마세요."""
+
+
+def _invoke_and_parse(user_msg: str) -> dict:
+    """LLM 호출 1회 + JSON 파싱. 실패 시 예외를 그대로 던진다(재시도는 호출부 책임)."""
+    response = _llm.invoke([
+        SystemMessage(content=_SYSTEM),
+        HumanMessage(content=user_msg),
+    ])
+    raw = (response.content or "").strip()
+    # 코드블록 제거
+    raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
+    # raw_decode: 맨 앞의 JSON 값 하나만 파싱하고 뒤따르는 텍스트는 무시한다.
+    # (모델이 JSON 뒤에 부연 설명을 덧붙이는 경우 json.loads는 "Extra data"로 실패한다)
+    return json.JSONDecoder().raw_decode(raw)[0]
 
 
 def translate(user_msg: str) -> ClarifiedIntent:
@@ -58,34 +81,27 @@ def translate(user_msg: str) -> ClarifiedIntent:
     orchestrator는 clarification 루프에서 "누적된" 대화 문자열을 넘긴다.
     (예: "그래핀 측정해줘\n[추가 정보] 기판은 SiO2 웨이퍼, 타겟은 어두운 육각 플레이크")
     LLM이 이 누적 문맥을 하나의 intent로 병합한다.
+
+    드물게 모델이 빈 응답/비JSON 응답을 줄 때가 있어(일시적) 1회 재시도한다.
     """
-    try:
-        response = _llm.invoke([
-            SystemMessage(content=_SYSTEM),
-            HumanMessage(content=user_msg),
-        ])
-        raw = response.content.strip()
-        # 코드블록 제거
-        raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
-        parsed = json.loads(raw)
+    parsed = None
+    last_err = None
+    for attempt in range(2):
+        try:
+            parsed = _invoke_and_parse(user_msg)
+            break
+        except Exception as e:
+            last_err = e
+            if attempt == 0:
+                print(f"[Translator] 파싱 실패, 재시도: {e}")
+
+    if parsed is None:
+        print(f"[Translator] 파싱 실패, fallback 사용: {last_err}")
+        # is_experiment_request는 판정 불가 → True(안전한 기본값)로 두어
+        # 기존처럼 clarify 게이트가 부족한 정보를 되묻도록 한다.
         return ClarifiedIntent(
-            primary_objective=parsed.get("primary_objective", user_msg),
-            sample_type=parsed.get("sample_type", "unknown"),
-            # 기판 종류 — 경험 저장소의 에피소드 컨텍스트 키.
-            # 같은 시료라도 기판(유리/실리콘/금박)에 따라 배경 신호가 달라
-            # 과거 경험 매칭 시 기판 일치 여부가 유사도에 반영된다.
-            substrate=parsed.get("substrate", "") or "",
-            # 타겟 외형 설명 — roi_detector의 visual_search가 vision LLM에게
-            # "무엇을 찾을지" 전달하는 근거. 좌표가 없는 요청에서 특히 중요.
-            target_description=parsed.get("target_description", "") or "",
-            success_criteria=parsed.get("success_criteria", []),
-            constraints=parsed.get("constraints", {}),
-            user_preferences=parsed.get("user_preferences", {}),
-            raw_user_message=user_msg,
-        )
-    except Exception as e:
-        print(f"[Translator] 파싱 실패, fallback 사용: {e}")
-        return ClarifiedIntent(
+            is_experiment_request=True,
+            direct_reply="",
             primary_objective=user_msg,
             sample_type="unknown",
             substrate="",
@@ -95,6 +111,24 @@ def translate(user_msg: str) -> ClarifiedIntent:
             user_preferences={},
             raw_user_message=user_msg,
         )
+
+    return ClarifiedIntent(
+        is_experiment_request=bool(parsed.get("is_experiment_request", True)),
+        direct_reply=parsed.get("direct_reply", "") or "",
+        primary_objective=parsed.get("primary_objective", user_msg),
+        sample_type=parsed.get("sample_type", "unknown"),
+        # 기판 종류 — 경험 저장소의 에피소드 컨텍스트 키.
+        # 같은 시료라도 기판(유리/실리콘/금박)에 따라 배경 신호가 달라
+        # 과거 경험 매칭 시 기판 일치 여부가 유사도에 반영된다.
+        substrate=parsed.get("substrate", "") or "",
+        # 타겟 외형 설명 — roi_detector의 visual_search가 vision LLM에게
+        # "무엇을 찾을지" 전달하는 근거. 좌표가 없는 요청에서 특히 중요.
+        target_description=parsed.get("target_description", "") or "",
+        success_criteria=parsed.get("success_criteria", []),
+        constraints=parsed.get("constraints", {}),
+        user_preferences=parsed.get("user_preferences", {}),
+        raw_user_message=user_msg,
+    )
 
 
 def translator_node(state: ExperimentState) -> dict:

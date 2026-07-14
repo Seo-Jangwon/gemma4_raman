@@ -30,6 +30,11 @@ from typing import Annotated, Optional, TypedDict
 
 
 class ClarifiedIntent(TypedDict):
+    is_experiment_request: bool  # False면 라만 실험 요청이 아닌 잡담/메타 질문.
+                                  # orchestrator가 clarify 게이트를 건너뛰고
+                                  # direct_reply를 바로 사용자에게 돌려준다.
+    direct_reply: str            # is_experiment_request=False일 때만 사용하는
+                                  # 사용자 응답 문장. 실험 요청이면 빈 문자열.
     primary_objective: str
     sample_type: str           # persona binding 트리거 (domain_specialist)
     substrate: str             # 기판 종류 (예: "glass", "sio2 wafer", "gold film").

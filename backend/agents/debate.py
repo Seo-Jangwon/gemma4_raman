@@ -31,7 +31,7 @@ def _advance_plan(state: ExperimentState) -> dict:
     return {"plan": plan, "current_step_idx": idx + 1}
 
 
-_llm = ChatAnthropic(model="claude-opus-4-8", temperature=0.2)
+_llm = ChatAnthropic(model="claude-opus-4-8")
 
 _JUDGE_SYSTEM = """\
 두 전문가의 토론 결과를 보고 최종 합의 여부를 판단하세요.

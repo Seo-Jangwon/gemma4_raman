@@ -55,7 +55,7 @@ from backend.agents.state import ExperimentState
 # ── LLM 설정 (교체 포인트 — Ollama 사용 시 ChatOllama로 교체) ─────────────────
 # from langchain_community.chat_models import ChatOllama
 # _llm = ChatOllama(model="gemma4:31b", base_url="http://192.168.1.16:11434")
-_llm = ChatAnthropic(model="claude-opus-4-8", temperature=0)
+_llm = ChatAnthropic(model="claude-opus-4-8")
 
 # ── 스테이지 한계 (배경 측정 위치 클램프용) ───────────────────────────────────
 # Config.ini가 없는 개발 PC에서도 import가 죽지 않도록 방어한다.

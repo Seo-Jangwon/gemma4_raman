@@ -138,6 +138,13 @@ export default function MainContent({
         case 'intent':
           // 해석된 의도는 굳이 채팅에 노출하지 않는다(진행 로그로 충분). 필요 시 확장.
           break
+        case 'chat':
+          // 실험 요청이 아닌 잡담/메타 질문 — 실험 파이프라인 없이 바로 답변.
+          setSessionId('')
+          setMessages(prev => [...prev, {
+            role: 'assistant', text: data.reply || '',
+          }])
+          break
         case 'node':
           if (data?.message) appendStep(data.message)
           break

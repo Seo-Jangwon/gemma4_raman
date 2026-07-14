@@ -47,7 +47,7 @@ def _fail_step(state: ExperimentState, error: str) -> dict:
     }
 
 # ── LLM 설정 (교체 포인트) ────────────────────────────────────────────────────
-_llm = ChatAnthropic(model="claude-opus-4-8", temperature=0)
+_llm = ChatAnthropic(model="claude-opus-4-8")
 
 # ── Persona Registry ──────────────────────────────────────────────────────────
 # key: persona 이름, value: 해당 sample_type 키워드 튜플

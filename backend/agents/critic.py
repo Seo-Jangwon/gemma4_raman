@@ -48,7 +48,7 @@ _MIN_PEAK_OVER_BASELINE = 300.0
 # 벗어났거나 초점이 나갔을 가능성이 높다.
 _BG_DOMINANCE_RATIO = 1.15
 
-_critic_llm = ChatAnthropic(model="claude-opus-4-8", temperature=0)
+_critic_llm = ChatAnthropic(model="claude-opus-4-8")
 
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────

@@ -157,6 +157,7 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
 
     yield하는 이벤트(dict) 종류 — 모두 "type"과 "session_id"를 포함:
       {"type": "intent",        "intent": {...}}                해석된 의도
+      {"type": "chat",          "reply": str}                   실험 요청이 아닌 메시지 응답(이번 턴 종료)
       {"type": "clarification", "question": str, "missing": [...]}  되묻기(이번 턴 종료)
       {"type": "node",          "node": str, "message": str}    진행상황 한 줄
       {"type": "done",          "final_report": str, "state": {...}}  완료
@@ -165,11 +166,14 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
     [흐름]
     1. 세션에 이번 메시지를 누적한다(이전 턴의 되묻기 답변을 합침).
     2. translate()로 intent 생성 → "intent" 이벤트.
-    3. clarify.check_intent()로 필수 정보 확인.
+    3. intent.is_experiment_request가 False면 — 잡담/메타 질문이라 실험 파이프라인이
+       필요 없다 — "chat" 이벤트로 direct_reply를 바로 돌려주고 종료한다
+       (clarify 게이트를 타지 않음 — 실험도 아닌데 "시료가 뭔가요?"라고 되묻는 것을 방지).
+    4. clarify.check_intent()로 필수 정보 확인.
        - 부족 & 라운드 여유 있음 → "clarification" 이벤트 후 종료(그래프 실행 안 함).
        - 충족 or 라운드 소진 → 세션 정리 후 그래프 스트리밍 진행.
-    4. graph.stream(...)의 매 노드 갱신마다 "node" 이벤트.
-    5. 종료 시 경험 기록 후 "done" 이벤트.
+    5. graph.stream(...)의 매 노드 갱신마다 "node" 이벤트.
+    6. 종료 시 경험 기록 후 "done" 이벤트.
     """
     # ── session_id 확정 (빈 값이면 새로 발급해 클라이언트에 알려줌) ──
     import uuid
@@ -192,7 +196,16 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
         intent: ClarifiedIntent = translate(sess["accumulated"])
         yield ev({"type": "intent", "intent": dict(intent)})
 
-        # ── 3. clarification 게이트 ──
+        # ── 3. 실험 요청이 아니면(잡담/메타 질문) 여기서 바로 응답하고 종료 ──
+        # clarify 게이트를 타지 않는다 — "너 뭐 할 수 있어?" 같은 메시지에
+        # "시료가 뭔가요?"로 되묻는 것은 안전 목적(sample_type 확인)에 안 맞는다.
+        if not intent.get("is_experiment_request", True):
+            _SESSIONS.pop(sid, None)
+            yield ev({"type": "chat",
+                      "reply": intent.get("direct_reply") or "라만 실험 측정을 도와드릴 수 있어요. 무엇을 측정하고 싶으신가요?"})
+            return
+
+        # ── 4. clarification 게이트 ──
         check = clarify.check_intent(intent)
         if not check["ok"] and sess["rounds"] < _MAX_CLARIFY_ROUNDS:
             sess["rounds"] += 1
@@ -205,7 +218,7 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
         # 진행 확정 → 세션의 대화 상태는 정리(다음 요청은 새 실험으로 시작)
         _SESSIONS.pop(sid, None)
 
-        # ── 4. 그래프 스트리밍 실행 ──
+        # ── 5. 그래프 스트리밍 실행 ──
         # intent를 사전 주입해 그래프 안 translator는 통과시킨다(중복 LLM 호출 방지).
         state = initial_state(user_message=sess["accumulated"],
                               session_id=sid, intent=intent)
@@ -230,7 +243,7 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
                               "node": node_name,
                               "message": _summarize_node(node_name, delta, final_state)})
 
-        # ── 5. 경험 기록 (성공/실패/중단 모든 종료 경로가 여기를 지남) ──
+        # ── 6. 경험 기록 (성공/실패/중단 모든 종료 경로가 여기를 지남) ──
         try:
             experience.record_experiment(dict(final_state))
         except Exception:

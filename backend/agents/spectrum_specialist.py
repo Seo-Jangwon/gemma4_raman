@@ -60,7 +60,7 @@ def _fail_step(state: ExperimentState, error: str) -> dict:
 
 
 # ── LLM 설정 (교체 포인트) ────────────────────────────────────────────────────
-_llm = ChatAnthropic(model="claude-opus-4-8", temperature=0)
+_llm = ChatAnthropic(model="claude-opus-4-8")
 
 _SYSTEM = """\
 당신은 라만 분광 물리 전문가입니다. 장비 종류에 무관하게 스펙트럼 데이터를 분석합니다.
