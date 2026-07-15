@@ -29,6 +29,9 @@ import time
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 
+# experience는 stdlib만 import하므로 순환 참조가 생기지 않는다
+# (hw_manager → critic → experience 방향으로만 흐른다)
+from backend.agents import experience
 from backend.agents.state import CriticLogEntry, ExperimentState
 
 _BIO_KEYWORDS = {"exosome", "cell", "lipid", "tissue", "bacteria", "protein", "membrane"}
@@ -108,7 +111,18 @@ def _last_spectrum_stats(observations: list[dict]) -> dict | None:
 
 # ── 체크포인트별 함수 ─────────────────────────────────────────────────────────
 
-def check_c1_plan_sanity(state: ExperimentState) -> CriticLogEntry:
+def _c1_safety_rules(state: ExperimentState) -> CriticLogEntry | None:
+    """
+    C1 1단계 — 결정적 안전 규칙 (하드 플로어).
+
+    [왜 이 부분만은 규칙인가]
+    bio 시료 광손상 판정은 "그날의 LLM 컨디션"에 맡길 수 없다. 모델이 한 번
+    흔들려 80% 조사를 승인하면 시편이 탄다. 숫자 비교로 답이 나오는 판정에
+    LLM을 쓸 이유도 없다 (비용·지연·비결정성만 추가).
+    → 위험이 명백하면 여기서 즉시 반환하고 LLM 검토는 호출하지도 않는다.
+
+    반환 None = 규칙상 문제 없음 → 2단계(기억 기반 논리 검토)로 넘어간다.
+    """
     plan = state.get("plan", [])
     if not plan:
         return _entry("C1", "WARNING", "plan이 비어 있음 — default plan 적용 필요", "B")
@@ -140,7 +154,125 @@ def check_c1_plan_sanity(state: ExperimentState) -> CriticLogEntry:
                 "B",
             )
 
+    return None
+
+
+_C1_REVIEW_SYSTEM = """\
+당신은 라만 분광 실험 '계획'을 실행 전에 검토하는 심사자입니다.
+계획이 실험 목적을 달성할 수 있는 논리적 구조인지 판단하세요.
+
+결함(has_defect=true)으로 판정할 것 — 실행하면 목적을 달성할 수 없는 구조적 문제:
+- 필요한 선행 step 누락: 예) 기판 배경 분리가 목적인데 배경 측정(acquire_background)이 없음,
+  좌표를 모르는데 위치 결정(locate_target) 없이 측정부터 함
+- 순서 모순: 예) 측정(acquire_*) 전에 분석(analyst)을 배치, 위치 결정 전에 측정
+- 목적과 무관하거나 목적을 달성할 수 없는 계획: 예) 스펙트럼 측정 요청인데 acquire_target이 없음
+- 과거 실패의 반복: 유사 실패 사례와 같은 방식을 그대로 되풀이하는 계획
+
+결함이 아닌 것 (has_defect=false로 둘 것):
+- 과거 기록에 없는 새로운 step 전이 — 새 시료·새 프로토콜 탐색은 정상이며,
+  과거에 없다는 이유로 거부하면 시스템이 초기 습관에 영원히 갇힌다
+- step 개수가 과거보다 많거나 적음, action 문구 차이, params 세부값 차이
+- 파라미터의 적정성 — 레이저 파워/노출은 실행 중 적응형 튜닝과 C2/C3가 통제하므로
+  계획 단계에서 판단하지 않는다
+
+애매하면 has_defect=false로 두세요. 이 검토는 명백한 구조적 결함만 걸러내는 게이트이며,
+실행 중 안전은 별도의 하드 게이트(C2)가 보장합니다.
+
+JSON으로만 답변하세요: {"has_defect": true/false, "reason": "구체적 근거 한 문장", "fix": "무엇을 고쳐야 하는지 한 문장 (has_defect=false면 빈 문자열)"}"""
+
+
+def _plan_text(plan: list) -> str:
+    """검토 프롬프트용 계획 서술 — agent:task 단위로 압축."""
+    lines = []
+    for s in plan:
+        params = dict(s.get("params", {}) or {})
+        task = params.pop("task", "")
+        head = f"{s.get('agent', '?')}" + (f":{task}" if task else "")
+        lines.append(
+            f"{s.get('step_id', '?')}. [{head}] {s.get('action', '')} "
+            f"params={params or '{}'} on_fail={s.get('on_fail', '?')}"
+        )
+    return "\n".join(lines)
+
+
+def _c1_memory_review(state: ExperimentState) -> CriticLogEntry:
+    """
+    C1 2단계 — 기억 기반 논리 검토 (LLM).
+
+    [왜 LLM인가 — 규칙으로 안 되는 영역]
+    "배경 분리가 목적인데 배경 측정이 없다", "측정 전에 분석을 배치했다" 같은
+    구조적 결함은 숫자 비교로 판정할 수 없다. 계획의 '의도'와 'step 구성'의
+    관계를 읽어야 하므로 LLM이 필요하다.
+
+    [왜 기억을 근거로 주는가]
+    절차 그래프(H-EPM)에 과거 성공 전이와 실패 사례가 쌓여 있는데, 지금까지는
+    계획 '생성'에만 advisory로 쓰이고 '검토'에는 전혀 쓰이지 않았다.
+    같은 기억을 검토자에게도 주면 "이 상황에서 이렇게 했다가 실패했다"는
+    부정적 지식이 실행 전에 한 번 더 걸러진다.
+    (근거는 experience.review_evidence가 생성 — 사실만 나열하고 판정은 안 한다)
+
+    [실패 시 APPROVE로 강등하는 이유]
+    검증기 자체의 장애가 실험을 막으면 안 된다. C4/C5와 같은 철학이며,
+    안전은 이미 1단계 규칙과 C2(Tier-A)가 독립적으로 보장한다.
+    """
+    plan = state.get("plan", [])
+    intent = state.get("intent") or {}
+
+    # 절차 기억과 대조할 근거 확보 (콜드 스타트면 "" → 순수 논리 검토만)
+    try:
+        signature = [experience.action_key(s) for s in plan]
+        evidence = experience.review_evidence(signature, experience.build_context(state))
+    except Exception:
+        evidence = ""
+
+    constraints = intent.get("constraints", {}) or {}
+    has_coords = constraints.get("x") is not None and constraints.get("y") is not None
+
+    prompt = (
+        f"## 실험 목적\n{intent.get('primary_objective', '')}\n"
+        f"시료: {intent.get('sample_type', 'unknown')} / "
+        f"기판: {intent.get('substrate', '') or '(불명)'}\n"
+        f"타겟 위치: {'사용자가 좌표 제공' if has_coords else '좌표 없음 — 탐색 필요'}\n"
+        f"타겟 외형: {intent.get('target_description', '') or '(없음)'}\n\n"
+        f"## 검토 대상 계획\n{_plan_text(plan)}\n\n"
+        f"## 과거 실험 기억과의 대조\n{evidence or '(과거 기억 없음 — 계획 자체의 논리만 검토하세요)'}\n\n"
+        "이 계획에 실행 전에 고쳐야 할 명백한 구조적 결함이 있습니까?"
+    )
+
+    try:
+        resp = _critic_llm.invoke([
+            SystemMessage(content=_C1_REVIEW_SYSTEM),
+            HumanMessage(content=prompt),
+        ])
+        parsed = _parse_json(resp.content)
+    except Exception:
+        return _entry("C1", "APPROVE", "논리 검토 생략 (검증기 장애)", "none")
+
+    if parsed.get("has_defect"):
+        # Tier-B ABORT → Planner가 재계획한다 (한도 초과 시 Planner가 최종 중단).
+        # 1단계 규칙과 동일하게 Tier-B인 이유는 위 _c1_safety_rules 주석 참고.
+        fix = parsed.get("fix", "")
+        return _entry(
+            "C1", "ABORT",
+            f"계획 결함: {parsed.get('reason', '')}" + (f" → {fix}" if fix else ""),
+            "B",
+            suggestion={"issue": "plan_defect", "fix": fix},
+        )
+
     return _entry("C1", "APPROVE", "", "none")
+
+
+def check_c1_plan_sanity(state: ExperimentState) -> CriticLogEntry:
+    """
+    계획 검토 게이트 — 2단계 구조.
+      1단계: 결정적 안전 규칙 (LLM 없음). 위험하면 즉시 반환 — LLM 호출 안 함.
+      2단계: 기억 기반 논리 검토 (LLM + 절차 그래프 근거).
+    안전은 규칙이 못박고, 논리는 기억을 근거로 LLM이 본다 — 두 층의 관심사가 다르다.
+    """
+    rule_verdict = _c1_safety_rules(state)
+    if rule_verdict is not None:
+        return rule_verdict
+    return _c1_memory_review(state)
 
 
 def check_c2_hardware_safety(

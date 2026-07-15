@@ -1,8 +1,24 @@
 """
-HWManagerNode — 하드웨어 도구 래퍼 에이전트.
+HWManagerNode — 하드웨어를 만지는 모든 동작을 담당하는 단일 실행 에이전트.
+
+[에이전트 통합 노트 — roi_detector → locate_target task 흡수]
+과거에는 "측정 위치 결정"이 별도 노드(roi_detector)였다. 하지만 위치 탐색과
+스펙트럼 측정은 둘 다 "스테이지/카메라/레이저를 움직이는 손"이고, 위치 추적·
+dose 부기·시뮬레이션 강등 같은 인프라를 통째로 공유한다. 노드를 나눠서 얻는
+것은 없고 ablation 단위와 그래프 왕복만 늘었다. 이제 task 하나로 흡수한다 —
+ablation 시 "시각 탐색 유무"는 locate_target의 mode 플래그로 통제하면 된다.
 
 [구조 개요]
-step.params["task"]에 따라 3가지 실행 경로로 분기한다:
+step.params["task"]에 따라 4가지 실행 경로로 분기한다:
+
+  0. "locate_target"      — 측정 위치(ROI) 결정 (구 roi_detector)
+     * 좌표가 있으면 manual: 그대로 채택.
+     * 없으면 visual_search: 현미경 프레임 → vision LLM으로 타겟 픽셀 식별 →
+       move_to_pixel → 오토포커스. 시야(~0.3mm)씩 나선형으로 최대 5개 영역 탐색.
+       같은 프레임에서 "빈 기판" 픽셀도 함께 받아 배경 측정 위치로 저장한다 —
+       타겟을 눈으로 확인한 그 화면에서 고른 기판이 맹목적 오프셋(+0.5mm)보다
+       "진짜 기판"일 확률이 높다 (기판 배경 분리 문제의 입구).
+     * 결과는 state.next_roi에 기록 → acquire_target이 그 위치로 이동해 측정.
 
   1. "acquire_target"     — 적응형 스펙트럼 획득 (결정적 코드)
      타겟 물질별 최적 레이저 파워/노출을 모른다는 문제에 대응:
@@ -14,7 +30,7 @@ step.params["task"]에 따라 3가지 실행 경로로 분기한다:
   2. "acquire_background" — 기판 배경 참조 측정 (결정적 코드)
      기판 background와 타겟 신호 구분이 어렵다는 문제에 대응:
      타겟 옆 기판 위치로 이동 → "타겟과 동일 조건"으로 측정 → 원위치 복귀.
-     결과는 state.background_reference에 저장되어 spectrum_specialist가
+     결과는 state.background_reference에 저장되어 analyst가
      타겟 고유 피크를 분리하는 기준이 된다.
 
   3. task 없음            — 기존 LLM tool-calling 루프 (유연한 자유 작업)
@@ -42,6 +58,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import re
 import time
 
 from langchain_anthropic import ChatAnthropic
@@ -57,12 +74,20 @@ from backend.agents.state import ExperimentState
 # _llm = ChatOllama(model="gemma4:31b", base_url="http://192.168.1.16:11434")
 _llm = ChatAnthropic(model="claude-opus-4-8")
 
-# ── 스테이지 한계 (배경 측정 위치 클램프용) ───────────────────────────────────
+# ── 스테이지/카메라/렌즈 상수 (배경 위치 클램프 + 픽셀→mm 변환용) ─────────────
 # Config.ini가 없는 개발 PC에서도 import가 죽지 않도록 방어한다.
 try:
-    from backend.config import STAGE_MAX_X, STAGE_MAX_Y
+    from backend.config import (
+        CALIB_FACTOR_X, CALIB_FACTOR_Y,
+        CAMERA_HEIGHT, CAMERA_WIDTH,
+        LENS_HEIGHT_UM, LENS_WIDTH_UM,
+        STAGE_MAX_X, STAGE_MAX_Y,
+    )
 except Exception:
     STAGE_MAX_X, STAGE_MAX_Y = 75.3, 50.2  # 장비 스펙 기본값
+    CAMERA_WIDTH, CAMERA_HEIGHT = 1060, 800
+    LENS_WIDTH_UM, LENS_HEIGHT_UM = 305.0, 230.0
+    CALIB_FACTOR_X, CALIB_FACTOR_Y = 1.4, 1.285
 
 # ── 적응형 튜닝 상수 ──────────────────────────────────────────────────────────
 # CCD 16-bit(65535). 신호 목표 창을 [5000, 50000]으로 잡은 이유:
@@ -85,6 +110,38 @@ _MAX_SCALE_PER_ITER = 8.0     # 1회 반복당 최대 증폭 배율 — 급격�
 
 _BIO_KEYWORDS = {"exosome", "cell", "lipid", "tissue", "bacteria", "protein", "membrane"}
 _MAX_POWER_BIO = 40.0         # critic.py와 동일 값 — bio 시료 튜닝 상한
+
+# ── locate_target(시각 탐색) 상수 (구 roi_detector) ───────────────────────────
+# vision LLM — 현미경 이미지에서 타겟 픽셀 좌표를 읽는 용도
+_llm_vision = ChatAnthropic(model="claude-opus-4-8")
+
+# 픽셀→mm 변환 — hw_tools.raman_tools.move_to_pixel과 반드시 동일 수식.
+# (다르면 vision이 고른 배경 위치가 엉뚱한 스테이지 좌표가 된다)
+_UM_PER_PX_X = LENS_WIDTH_UM / CAMERA_WIDTH
+_UM_PER_PX_Y = LENS_HEIGHT_UM / CAMERA_HEIGHT
+_SIGN_X = -1   # pixel +X(right) → stage -X  (raman_tools.move_to_pixel과 동일)
+_SIGN_Y = +1   # pixel +Y(down)  → stage +Y
+
+# 나선형 탐색 오프셋 (mm) — 시야(~0.3mm)와 겹치지 않게 0.25mm 간격.
+# (0,0)=현재 화면부터 시작해 좌우/대각으로 확장. 5개로 제한하는 이유:
+# 탐색은 가이드빔/조명만 쓰므로 시편 손상은 없지만 무한 탐색은 실험 시간을
+# 폭주시킨다. 5회 안에 못 찾으면 "탐색 실패"를 명확히 선언하고 Planner의
+# 재계획에 넘기는 것이 어정쩡한 위치에서 레이저를 쏘는 것보다 안전하다.
+_SEARCH_OFFSETS_MM = [(0.0, 0.0), (0.25, 0.0), (-0.5, 0.0), (0.25, 0.25), (0.0, -0.5)]
+
+_MIN_CONFIDENCE = 0.5   # vision LLM 확신도가 이보다 낮으면 "못 찾음" 취급 —
+                        # 낮은 확신으로 이동하면 엉뚱한 곳에 레이저를 쏘게 된다.
+
+_VISION_SYSTEM = """\
+당신은 광학 현미경 이미지에서 측정 타겟을 찾는 시각 분석 전문가입니다.
+이미지를 보고 요청된 타겟이 있는지 판단하고, 있으면 중심 픽셀 좌표를 알려주세요.
+또한 타겟이 아닌 '빈 기판(background)' 영역의 픽셀 좌표도 하나 골라주세요.
+빈 기판 좌표는 타겟에서 충분히 떨어져 있고, 다른 타겟/이물질이 없는 균일한 영역이어야 합니다.
+
+JSON으로만 답변하세요:
+{"found": true/false, "pixel_x": 정수, "pixel_y": 정수, "confidence": 0.0~1.0,
+ "background_pixel_x": 정수, "background_pixel_y": 정수, "reason": "판단 근거 한 문장"}
+타겟이 없으면 found=false로 하고 나머지 좌표는 null로 두세요."""
 
 _SYSTEM = """\
 당신은 라만 분광기 하드웨어를 제어하는 전문 에이전트입니다.
@@ -178,6 +235,7 @@ def _make_ctx(state: ExperimentState, step: dict) -> dict:
         "c2_abort": None,                         # C2 HARD VETO 발생 시 entry 저장
         "acquisition_params": None,               # 튜닝 확정 시 채워짐
         "background_reference": None,             # 배경 측정 성공 시 채워짐
+        "next_roi": None,                         # locate_target 성공 시 채워짐
         "_sim_last_data": None,                   # 시뮬레이션 IPBSA용 캐시
     }
 
@@ -417,12 +475,205 @@ def _tune_acquire(ctx: dict, start_power: float, start_exposure: float,
     return result, power, exposure, False, history
 
 
+# ── Task 0: 측정 위치 결정 (구 roi_detector) ──────────────────────────────────
+
+def _ask_vision(img_b64: str, target_description: str, width: int, height: int) -> dict:
+    """
+    현미경 프레임을 vision LLM에 보여주고 타겟/기판 픽셀 좌표를 받는다.
+    실패(파싱/API 오류)는 found=False로 강등 — 탐색 루프는 다음 오프셋으로 계속.
+    """
+    prompt = (
+        f"찾을 타겟: {target_description}\n"
+        f"이미지 해상도: 가로 {width}px × 세로 {height}px.\n"
+        "타겟의 중심 픽셀 좌표와, 비교 측정용 '빈 기판' 픽셀 좌표를 알려주세요."
+    )
+    try:
+        resp = _llm_vision.invoke([
+            SystemMessage(content=_VISION_SYSTEM),
+            HumanMessage(content=[
+                {"type": "text", "text": prompt},
+                # anthropic 네이티브 이미지 블록 — langchain-anthropic이 그대로 전달
+                {"type": "image", "source": {
+                    "type": "base64", "media_type": "image/png", "data": img_b64}},
+            ]),
+        ])
+        cleaned = re.sub(r"```(?:json)?", "", resp.content).strip().rstrip("`").strip()
+        parsed = json.loads(cleaned)
+        if not isinstance(parsed, dict):
+            return {"found": False}
+        return parsed
+    except Exception:
+        return {"found": False}
+
+
+def _pixel_delta_to_mm(dpx: float, dpy: float) -> tuple[float, float]:
+    """픽셀 변위 → 스테이지 mm 변위. move_to_pixel과 반드시 동일한 수식."""
+    dx_mm = dpx * _UM_PER_PX_X * CALIB_FACTOR_X / 1000.0 * _SIGN_X
+    dy_mm = dpy * _UM_PER_PX_Y * CALIB_FACTOR_Y / 1000.0 * _SIGN_Y
+    return dx_mm, dy_mm
+
+
+def _visual_search(ctx: dict, target_description: str) -> dict | None:
+    """
+    나선형 탐색으로 타겟을 찾아 스테이지를 타겟 위로 이동시키고 ROI를 반환.
+    실패 시 None. (카메라 스트림 정리는 항상 수행)
+
+    도구 호출이 ctx의 _call 관문을 지나므로 스테이지 위치 추적이 유지된다.
+    카메라/이미지 호출은 record=False — base64 프레임을 observations에 쌓으면
+    상태가 수 MB로 불어나고 보고서 프롬프트에도 도움이 안 되기 때문.
+    """
+    stream = _call(ctx, "start_camera_stream", {}, record=False)
+    if not stream.get("ok"):
+        return None  # 카메라 자체가 안 됨 — 호출부가 fallback 판단
+
+    try:
+        for i, (ox, oy) in enumerate(_SEARCH_OFFSETS_MM):
+            # 첫 시도(0,0)는 현재 화면 그대로, 이후는 시야만큼 이동해 인접 탐색
+            if i > 0:
+                mv = _call(ctx, "move_stage_relative", {"dx": ox, "dy": oy})
+                if not mv.get("ok"):
+                    continue  # 이동 실패한 오프셋은 건너뛰고 다음 후보 시도
+
+            img = _call(ctx, "analyze_microscope_image",
+                        {"question": f"타겟 탐색: {target_description}"}, record=False)
+            if not img.get("ok") or not img.get("image_base64"):
+                continue
+
+            found = _ask_vision(
+                img["image_base64"], target_description,
+                img.get("width", CAMERA_WIDTH), img.get("height", CAMERA_HEIGHT))
+
+            if not found.get("found") or float(found.get("confidence") or 0) < _MIN_CONFIDENCE:
+                continue
+
+            px, py = int(found["pixel_x"]), int(found["pixel_y"])
+
+            # 타겟 픽셀로 스테이지 이동 (이미지 중심 = 현재 스테이지 위치)
+            mv = _call(ctx, "move_to_pixel", {"pixel_x": px, "pixel_y": py})
+            if not mv.get("ok"):
+                continue
+
+            # 오토포커스 — 실패해도 진행 (초점이 조금 나가도 스펙트럼은 나오며,
+            # 품질 문제는 C3의 신호부족/배경우세 검사가 다시 걸러준다)
+            _call(ctx, "run_autofocus", {}, record=False)
+
+            pos = _call(ctx, "get_stage_position", {}, record=False)
+            if not pos.get("ok"):
+                continue
+            target_pos = {"x": pos.get("x"), "y": pos.get("y"), "z": pos.get("z")}
+
+            # ── 배경(기판) 위치 계산 ──────────────────────────────────────────
+            # vision LLM이 같은 프레임에서 고른 "빈 기판" 픽셀을,
+            # 타겟 픽셀과의 변위 → mm 변위로 변환해 스테이지 좌표를 만든다.
+            # (이동하지 않고 좌표만 계산 — 실제 이동은 acquire_background가 한다)
+            background_position = None
+            bgx, bgy = found.get("background_pixel_x"), found.get("background_pixel_y")
+            if bgx is not None and bgy is not None:
+                dmm_x, dmm_y = _pixel_delta_to_mm(float(bgx) - px, float(bgy) - py)
+                background_position = {
+                    "x": min(max(target_pos["x"] + dmm_x, 0.0), STAGE_MAX_X),
+                    "y": min(max(target_pos["y"] + dmm_y, 0.0), STAGE_MAX_Y),
+                }
+
+            return {
+                "x": target_pos["x"], "y": target_pos["y"], "z": target_pos["z"],
+                "mode": "visual_search",
+                "confidence": float(found.get("confidence") or 0),
+                "reason": found.get("reason", ""),
+                "background_position": background_position,
+                "search_attempts": i + 1,
+            }
+
+        return None  # 모든 오프셋 소진 — 탐색 실패
+    finally:
+        # 스트림은 반드시 정리 — 켜둔 채 방치하면 다음 카메라 사용이 충돌한다
+        _call(ctx, "stop_camera_stream", {}, record=False)
+
+
+def _task_locate_target(state: ExperimentState, step: dict, ctx: dict) -> tuple[bool, str]:
+    """
+    측정 위치(ROI) 결정. 성공 시 ctx["next_roi"]에 저장 → 노드 반환값으로 상태 반영.
+
+    [3가지 동작 모드]
+      1. manual           — step params 또는 intent.constraints에 x/y가 있으면 그대로.
+                            (위치를 아는데 시각 탐색을 강제하면 시간 낭비 + 오탐 위험)
+      2. visual_search    — 좌표가 없고 카메라가 있으면 vision 탐색 (위 _visual_search).
+      3. current_position — 둘 다 불가하면 현재 위치 유지 (마지막 fallback).
+                            단, Planner가 visual_search를 명시 요구했는데 실패한
+                            경우는 fallback 대신 정직하게 실패 보고 → 재계획 유도.
+    """
+    intent = state.get("intent") or {}
+    constraints = intent.get("constraints", {}) or {}
+    params = step.get("params", {}) or {}
+
+    # ── 모드 1: manual ────────────────────────────────────────────────────────
+    x = params.get("x", constraints.get("x"))
+    y = params.get("y", constraints.get("y"))
+    z = params.get("z", constraints.get("z"))
+    if x is not None or y is not None:
+        ctx["next_roi"] = {
+            "x": float(x) if x is not None else 0.0,
+            "y": float(y) if y is not None else 0.0,
+            "z": float(z) if z is not None else None,
+            "mode": "manual",
+            "confidence": 1.0,
+            "background_position": None,  # manual 모드는 acquire_background가
+                                          # 오프셋 규칙(+0.5mm)으로 기판 위치를 정한다
+        }
+        return True, f"타겟 위치 확정 (manual): ({ctx['next_roi']['x']}, {ctx['next_roi']['y']})"
+
+    # ── 모드 2: visual_search ─────────────────────────────────────────────────
+    requested_visual = params.get("mode") == "visual_search"
+    target_description = (
+        params.get("target_description")
+        or intent.get("target_description")
+        or intent.get("sample_type", "측정 대상 시료")
+    )
+
+    if ctx["dispatch"] is None:
+        # 하드웨어 미연결(시뮬레이션): 현재 위치를 타겟으로 가정하고 진행 —
+        # 개발 환경에서 파이프라인 나머지를 검증할 수 있게 한다.
+        current = ctx["position"] or {}
+        ctx["next_roi"] = {
+            "x": current.get("x", 0.0), "y": current.get("y", 0.0),
+            "z": current.get("z"),
+            "mode": "simulated_search", "confidence": 1.0,
+            "background_position": {"x": current.get("x", 0.0) + 0.5,
+                                    "y": current.get("y", 0.0)},
+        }
+        return True, "타겟 위치 (시뮬레이션): 현재 위치를 타겟으로 가정"
+
+    roi = _visual_search(ctx, target_description)
+    if roi is not None:
+        ctx["next_roi"] = roi
+        return True, (f"타겟 시각 탐색 성공: ({roi['x']}, {roi['y']}) "
+                      f"확신도 {roi['confidence']:.2f}, 시도 {roi['search_attempts']}회")
+
+    # ── 탐색 실패 처리 ────────────────────────────────────────────────────────
+    if requested_visual:
+        # 어정쩡한 위치에서 측정을 강행하는 것보다, Planner가 재계획
+        # (예: 다른 target_description, 사용자 좌표 확인, 중심 좌표 측정)
+        # 하도록 실패를 정직하게 보고하는 것이 데이터 신뢰성에 낫다.
+        return False, (f"시각 탐색 실패: '{target_description}'을(를) "
+                       f"{len(_SEARCH_OFFSETS_MM)}개 시야에서 찾지 못함")
+
+    # ── 모드 3: current_position (시각 탐색이 '요구'된 게 아닌 일반 요청) ─────
+    current = ctx["position"] or {}
+    ctx["next_roi"] = {
+        "x": current.get("x", 0.0), "y": current.get("y", 0.0),
+        "z": current.get("z"),
+        "mode": "current_position", "confidence": 0.0,
+        "background_position": None,
+    }
+    return True, "타겟 위치: 현재 스테이지 위치 유지 (fallback)"
+
+
 # ── Task 1: 타겟 적응형 획득 ──────────────────────────────────────────────────
 
 def _task_acquire_target(state: ExperimentState, step: dict, ctx: dict) -> tuple[bool, str]:
     params = step.get("params", {}) or {}
 
-    # 1. ROI로 이동 — roi_detector가 정한 타겟 위치가 있고 현재 위치와 다르면 이동.
+    # 1. ROI로 이동 — locate_target step이 정한 타겟 위치가 있고 현재 위치와 다르면 이동.
     #    (visual_search가 이미 타겟 위로 이동시켰으면 0-이동으로 스킵된다)
     roi = state.get("next_roi") or {}
     if roi.get("x") is not None:
@@ -524,7 +775,7 @@ def _task_acquire_background(state: ExperimentState, step: dict, ctx: dict) -> t
         _call(ctx, "apply_background_subtraction",
               {"source": "last", "version_label": "background", "poly_order": 5})
 
-        # spectrum_specialist가 프롬프트에 바로 넣을 수 있는 압축 요약을 만들어 둔다.
+        # analyst가 프롬프트에 바로 넣을 수 있는 압축 요약을 만들어 둔다.
         # (1024포인트 원본을 상태에 두 벌 들고 다니지 않기 위한 다운샘플)
         data = result.get("data") or []
         shift = result.get("raman_shift_cm-1") or list(range(len(data)))
@@ -653,7 +904,9 @@ def hw_manager_node(state: ExperimentState) -> dict:
 
     success, note = False, ""
     try:
-        if task == "acquire_target":
+        if task == "locate_target":
+            success, note = _task_locate_target(state, step, ctx)
+        elif task == "acquire_target":
             success, note = _task_acquire_target(state, step, ctx)
         elif task == "acquire_background":
             success, note = _task_acquire_background(state, step, ctx)
@@ -693,6 +946,8 @@ def hw_manager_node(state: ExperimentState) -> dict:
         out["acquisition_params"] = ctx["acquisition_params"]
     if ctx["background_reference"]:
         out["background_reference"] = ctx["background_reference"]
+    if ctx["next_roi"]:
+        out["next_roi"] = ctx["next_roi"]
 
     # C2 HARD VETO는 실패 처리보다 우선 — 즉시 실험 중단 (Tier-A)
     if ctx["c2_abort"] is not None:

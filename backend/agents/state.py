@@ -11,8 +11,9 @@ Annotated[list, operator.add] reducer를 사용한다.
                           적응형 튜닝 결과를 보관. 이후 step(배경 측정 등)이
                           동일 조건을 재사용해 스펙트럼 간 비교 가능성을 보장한다.
   * background_reference: 기판(substrate) 배경 스펙트럼 참조. 타겟 스펙트럼에서
-                          기판 유래 피크를 분리할 때 spectrum_specialist가 사용.
-  * next_roi            : roi_detector가 결정한 타겟 위치 + 기판 배경 측정 위치.
+                          기판 유래 피크를 분리할 때 analyst가 사용.
+  * next_roi            : hw_manager(locate_target task)가 결정한 타겟 위치 +
+                          기판 배경 측정 위치.
 - 안정적 failure 처리를 위해 다음 필드를 추가했다:
   * failure_log         : 각 step의 실패 원인을 구조화 기록. Planner가 재계획 시
                           LLM 프롬프트에 넣어 "같은 실패를 반복하지 않는" 계획을
@@ -36,13 +37,13 @@ class ClarifiedIntent(TypedDict):
     direct_reply: str            # is_experiment_request=False일 때만 사용하는
                                   # 사용자 응답 문장. 실험 요청이면 빈 문자열.
     primary_objective: str
-    sample_type: str           # persona binding 트리거 (domain_specialist)
+    sample_type: str           # persona binding 트리거 (analyst의 도메인 해석 phase)
     substrate: str             # 기판 종류 (예: "glass", "sio2 wafer", "gold film").
                                # — 기판마다 배경 신호가 다르므로 경험 저장소의
                                #   에피소드 컨텍스트 키로 사용된다 (experience.py).
     target_description: str    # 시각 탐색용 타겟 외형 설명 (예: "둥근 어두운 세포 덩어리")
-                               # — 타겟 위치를 모르는 경우 roi_detector visual_search가
-                               #   vision LLM에게 "무엇을 찾을지" 알려주는 근거가 된다.
+                               # — 타겟 위치를 모르는 경우 hw_manager locate_target의
+                               #   visual_search가 vision LLM에게 "무엇을 찾을지" 알려주는 근거.
     success_criteria: list[str]
     constraints: dict          # max_laser_power_pct, max_exposure_s, x, y, z 등
     user_preferences: dict
@@ -51,7 +52,8 @@ class ClarifiedIntent(TypedDict):
 
 class PlanStep(TypedDict):
     step_id: str
-    agent: str                 # "hw_manager"|"spectrum_specialist"|"domain_specialist"|...
+    agent: str                 # "hw_manager"|"analyst" — 실행 스포크는 이 둘뿐.
+                               # (hw_manager는 params["task"]로 위치탐색/측정/배경측정을 구분)
     action: str
     params: dict
     status: str                # "pending"|"running"|"done"|"failed"|"skipped"
@@ -116,17 +118,19 @@ class ExperimentState(TypedDict):
     # ── 기판 배경 참조 ────────────────────────────────────────────────────────
     # {"position": {...}, "max_intensity": float, "summary": "wn:val, ...",
     #  "power_pct": float, "exposure_s": float}
-    # spectrum_specialist가 타겟 스펙트럼과 나란히 놓고 기판 유래 피크를 배제한다.
+    # analyst가 타겟 스펙트럼과 나란히 놓고 기판 유래 피크를 배제한다.
     background_reference: Optional[dict]
 
-    # ── Specialist 출력 ───────────────────────────────────────────────────────
+    # ── Analyst 출력 ──────────────────────────────────────────────────────────
+    # analyst 노드의 2-phase 산출물. phase 1(물리 분석)과 phase 2(도메인 해석 +
+    # 물리 분석에 대한 교차검증)를 별도 필드로 두는 이유: critic C4가 두 해석의
+    # 모순 여부를 비교 검증하려면 서로 독립된 텍스트여야 한다.
     spectrum_analysis: Optional[str]
     domain_interpretation: Optional[str]
-    debate_result: Optional[str]
 
     # ── RAG / ROI ─────────────────────────────────────────────────────────────
     rag_results: list[dict]
-    # next_roi: roi_detector 출력.
+    # next_roi: hw_manager의 locate_target task 출력.
     # {"x", "y", "z", "mode": "manual"|"visual_search"|"current_position",
     #  "confidence": float, "background_position": {"x","y"} | None}
     next_roi: Optional[dict]
@@ -165,7 +169,6 @@ def initial_state(user_message: str, session_id: str = "",
         background_reference=None,
         spectrum_analysis=None,
         domain_interpretation=None,
-        debate_result=None,
         rag_results=[],
         next_roi=None,
         abort_reason=None,

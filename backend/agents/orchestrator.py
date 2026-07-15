@@ -13,10 +13,10 @@ from __future__ import annotations
 
 from typing import Iterator, Optional
 
-from backend.agents import clarify, experience
+from backend.agents import experience
 from backend.agents.graph import build_graph
 from backend.agents.state import ClarifiedIntent, ExperimentState, initial_state
-from backend.agents.translator import translate
+from backend.agents.translator import check_intent, translate
 
 _graph = None
 
@@ -80,8 +80,13 @@ def run_experiment(user_message: str, session_id: str = "") -> dict:
     멀티에이전트 실험 파이프라인을 동기로 1회 실행.
     (clarification 없이 곧바로 실행 — 벤치마크는 완전한 명령을 주기 때문)
     반환값: ExperimentState 최종 상태 dict
+
+    intent를 여기서 사전 번역해 주입한다 — 그래프에는 더 이상 translator 노드가
+    없다(진입점이 planner). 번역은 항상 그래프 밖에서 일어난다.
     """
-    state = initial_state(user_message=user_message, session_id=session_id)
+    intent = translate(user_message)
+    state = initial_state(user_message=user_message, session_id=session_id,
+                          intent=intent)
     graph = _get_graph()
     result: ExperimentState = graph.invoke(state, config={"recursion_limit": _RECURSION_LIMIT})
 
@@ -115,27 +120,25 @@ def _summarize_node(node: str, delta: dict, state: dict) -> str:
         # 재계획인지, 다음 어디로 가는지, 계획이 몇 단계인지
         if delta.get("abort_reason"):
             return f"⛔ 계획 중단: {delta['abort_reason']}"
+        if delta.get("final_report"):
+            # 보고서 생성은 planner에 내장돼 있다 (구 report_generator 흡수)
+            return "📝 최종 보고서 작성 완료 → 일관성 검증(C5)"
         plan = delta.get("plan")
         nxt = delta.get("next_node")
-        if plan is not None and nxt == "":
-            return f"🧭 계획 수립: 총 {len(plan)}단계"
-        if nxt == "report_generator":
-            return "📝 결과 보고서 생성 준비"
+        if plan is not None and nxt == "critic" and delta.get("critic_checkpoint") == "C1":
+            return f"🧭 계획 수립: 총 {len(plan)}단계 → 안전 검증(C1)"
         if nxt:
             return f"🧭 다음 단계 → {nxt}"
         return "🧭 계획 검토 중"
 
-    if node == "roi_detector":
-        roi = delta.get("next_roi") or {}
-        mode = roi.get("mode", "")
-        if roi.get("x") is not None:
-            return f"🔍 타겟 위치 확정: ({roi.get('x')}, {roi.get('y')}) [{mode}]"
-        return "🔍 타겟 위치 탐색 중"
-
     if node == "hw_manager":
+        # 위치 탐색(locate_target) / 적응형 측정 / 배경 측정을 delta 내용으로 구분
+        roi = delta.get("next_roi") or {}
         acq = delta.get("acquisition_params") or {}
         bg = delta.get("background_reference") or {}
-        if acq.get("tuned"):
+        if delta.get("abort_reason"):
+            return f"⛔ 측정 중단: {delta['abort_reason']}"
+        if acq.get("tuned") is not None and acq:
             hist = acq.get("history") or []
             n = len(hist)
             last = hist[-1] if hist else {}
@@ -143,8 +146,8 @@ def _summarize_node(node: str, delta: dict, state: dict) -> str:
                     f"{acq.get('exposure_s')}s (조사 {n}회, max={last.get('max_adu')})")
         if bg.get("summary"):
             return f"⚙️ 기판 배경 측정 완료 (max={bg.get('max_intensity')})"
-        if delta.get("abort_reason"):
-            return f"⛔ 측정 중단: {delta['abort_reason']}"
+        if roi.get("x") is not None:
+            return f"🔍 타겟 위치 확정: ({roi.get('x')}, {roi.get('y')}) [{roi.get('mode', '')}]"
         return "⚙️ 하드웨어 동작 수행"
 
     if node == "critic":
@@ -155,18 +158,8 @@ def _summarize_node(node: str, delta: dict, state: dict) -> str:
             return f"{icon} 품질 점검 {e.get('checkpoint')}: {e.get('verdict')} — {e.get('reason','')[:60]}"
         return "🔎 품질 점검"
 
-    if node == "spectrum_specialist":
-        return "📊 스펙트럼 분석 완료"
-    if node == "domain_specialist":
-        return "🧬 도메인 해석 완료"
-    if node == "rag_searcher":
-        return "📚 참고문헌 검색 완료"
-    if node == "debate":
-        return "🗣️ 교차검증(debate) 완료"
-    if node == "report_generator":
-        return "📝 최종 보고서 작성 완료"
-    if node == "translator":
-        return "🈯 요청 해석 완료"
+    if node == "analyst":
+        return "📊 스펙트럼 분석 + 도메인 해석 완료"
     return f"• {node}"
 
 
@@ -240,8 +233,8 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
             yield ev({"type": "chat", "reply": reply})
             return
 
-        # ── 4. clarification 게이트 ──
-        check = clarify.check_intent(intent)
+        # ── 4. clarification 게이트 (translator.check_intent — 결정적 규칙) ──
+        check = check_intent(intent)
         if not check["ok"] and sess["rounds"] < _MAX_CLARIFY_ROUNDS:
             sess["rounds"] += 1
             _remember(sess, "assistant", check["question"])

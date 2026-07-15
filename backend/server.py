@@ -339,7 +339,7 @@ def _require_llm(state: AppState):
 
 @app.post("/api/experiment/run")
 async def experiment_run(body: ExperimentRequest, request: Request):
-    """7-agent LangGraph 멀티에이전트 실험 파이프라인."""
+    """LangGraph 멀티에이전트 실험 파이프라인 (planner/hw_manager/analyst/critic)."""
     from backend.agents.orchestrator import run_experiment
     state = _state(request)
     loop = asyncio.get_event_loop()
@@ -413,10 +413,11 @@ async def agents_health():
     """멀티에이전트 시스템 상태 확인."""
     return {
         "status": "ok",
+        # 그래프 노드 4개 + 그래프 밖 전처리(translator)까지 노출.
+        # (구 spectrum/domain/debate → analyst, roi_detector → hw_manager의
+        #  locate_target task, rag_searcher/report_generator → planner 내장)
         "agents": [
-            "translator", "planner", "critic",
-            "hw_manager", "spectrum_specialist", "domain_specialist",
-            "rag_searcher", "roi_detector", "debate",
+            "translator", "planner", "critic", "hw_manager", "analyst",
         ],
     }
 

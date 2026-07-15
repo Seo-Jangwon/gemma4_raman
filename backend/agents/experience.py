@@ -46,14 +46,19 @@ experience의 재사용이다.
      "outcome": {"power_pct": 12.5, "exposure_s": 0.8, "max_intensity": 34000,
                  "background_max_intensity": 4200, "tuned": true,
                  "roi_mode": "visual_search", "c3_issues": [], "notes": "..."},
-     "plan_signature": ["roi_detector:visual_search", "hw_manager:acquire_target", ...],
-     "steps": 5}
+     "plan_signature": ["hw_manager:locate_target", "hw_manager:acquire_target", ...],
+     "steps": 4}
   ],
   "graph": {                          # 절차 기억 (성공 실험만 반영)
-    "edges": {"roi_detector:visual_search->hw_manager:acquire_target":
+    "edges": {"hw_manager:locate_target->hw_manager:acquire_target":
               {"n": 4, "eff": 0.8, "episode_ids": [1, 3, 5, 6]}}
   }
 }
+
+※ 에이전트 통합(2026-07-15) 이전에 기록된 에피소드는 옛 키(roi_detector:visual_search
+   등)를 갖는다. 절차 그래프의 옛 edge는 새 키와 prefix가 안 맞아 자연히 회수되지
+   않을 뿐 오동작은 없다 — 에피소드 회수(recall_params/recall_summary)는 컨텍스트
+   유사도만 보므로 키 변경과 무관하게 계속 유효하다.
 """
 
 from __future__ import annotations
@@ -282,6 +287,73 @@ def suggest_next_steps(prev_key: str, context: dict, top_k: int = 2) -> list[dic
     return candidates[:top_k]
 
 
+def review_evidence(plan_signature: list[str], context: dict) -> str:
+    """
+    Critic C1(계획 검토)용 근거 텍스트 — "이 계획을 과거 기억과 대조하면 무엇이 보이나".
+
+    [왜 recall_summary와 따로 두나]
+    recall_summary는 planner에게 "무엇을 하면 좋은지" 알려주는 생성용 advisory다.
+    이 함수는 critic에게 "이미 만들어진 이 계획이 과거와 어떻게 다른지" 알려주는
+    검토용 근거다 — 계획의 step 전이(a→b)를 절차 그래프와 하나씩 대조해야 하므로
+    입력(plan_signature)과 출력(전이별 대조 결과)이 근본적으로 다르다.
+
+    [중요 — 새로운 전이는 결함이 아니다]
+    "과거에 없던 전이"를 결함으로 취급하면 초기에 우연히 성공한 절차에 영원히
+    갇히고(lock-in), 새 시료·새 프로토콜 탐색이 전부 거부된다. 그래서 이 함수는
+    판정하지 않고 사실만 나열한다 — 판정은 critic의 LLM이 하며, 그 프롬프트에
+    "미지 전이 자체는 결함이 아님"을 명시한다.
+
+    반환: 근거 텍스트. 대조할 기억이 아예 없으면 "" (콜드 스타트 → 논리 검토만 수행).
+    """
+    data = _load()
+    episodes = data["episodes"]
+    if not episodes:
+        return ""   # 콜드 스타트 — 대조할 과거가 없다
+
+    edges = data["graph"]["edges"]
+    lines: list[str] = []
+
+    # ① step 전이 대조 — 이 계획의 각 전이가 과거 성공에서 몇 번 나왔나
+    known: list[str] = []
+    unknown: list[str] = []
+    for a, b in zip(plan_signature, plan_signature[1:]):
+        key = f"{a}->{b}"
+        edge = edges.get(key)
+        if edge:
+            known.append(f"{key} (과거 성공 {edge.get('n', 0)}회)")
+        else:
+            unknown.append(key)
+    if known:
+        lines.append("계획의 step 전이 중 과거 성공 실험에서 검증된 것:")
+        lines.extend(f"  - {k}" for k in known)
+    if unknown:
+        lines.append("과거 성공 기록에 없는 전이 (참고용 — 새 시도일 수 있음):")
+        lines.extend(f"  - {k}" for k in unknown)
+
+    # ② 유사 컨텍스트의 성공 절차 — "비슷한 상황에서 실제로 통했던 순서"
+    successes = _rank_episodes(context, episodes, success_only=True)[:2]
+    for score, ep in successes:
+        sig = " → ".join(ep.get("plan_signature", []))
+        out = ep.get("outcome", {})
+        if sig:
+            lines.append(
+                f"유사 성공 사례 (유사도 {score:.1f}): {sig} "
+                f"[레이저 {out.get('power_pct')}%, 노출 {out.get('exposure_s')}s]"
+            )
+
+    # ③ 유사 컨텍스트의 실패 — "이 상황에서 이렇게 했다가 실패했다"
+    fails = [(s, ep) for s, ep in _rank_episodes(context, episodes, success_only=False)
+             if not ep.get("success")][:2]
+    for score, ep in fails:
+        out = ep.get("outcome", {})
+        sig = " → ".join(ep.get("plan_signature", [])) or "(절차 기록 없음)"
+        lines.append(
+            f"유사 실패 사례 (유사도 {score:.1f}): {sig} → {out.get('notes', '원인 불명')}"
+        )
+
+    return "\n".join(lines)
+
+
 def recall_summary(context: dict) -> str:
     """
     Planner 계획 생성 프롬프트용 요약.
@@ -347,7 +419,7 @@ def record_experiment(state: dict) -> None:
     """
     실험 1건의 최종 상태를 에피소드 + 절차 그래프에 기록.
     호출 지점을 orchestrator(그래프 invoke 직후) 단일 지점으로 둔 이유:
-    abort로 중단된 실험은 report_generator에 도달하지 않으므로, 거기서 기록하면
+    abort로 중단된 실험은 보고서 생성 단계에 도달하지 않으므로, 거기서 기록하면
     실패 지식이 영영 쌓이지 않는다. invoke 직후는 모든 종료 경로가 지나간다.
     """
     intent = state.get("intent") or {}
