@@ -161,7 +161,21 @@ _HW_TOOL_NAMES = {
     "run_autofocus", "apply_background_subtraction",
 }
 
-_lc_tools_cache: tuple[list, dict] | None = None
+# ── 하드웨어 "질의" 경로에서만 허용하는 도구 (run_hardware_query 참고) ──────────
+# 실험 파이프라인 밖(채팅 한 줄)에서 도는 경로라 Critic C1(계획 안전 검증)을
+# 거치지 않는다. 따라서 레이저 조사·스테이지 이동처럼 시편을 손상시키거나
+# 물리 상태를 바꾸는 도구는 절대 넣지 않는다 — 관측 전용(read-only)만 허용.
+# "화면 좀 보여줘" 수준의 요청에 필요한 건 이것으로 충분하고, 그 이상(측정·이동)은
+# 실험 요청으로 분류돼 Planner+Critic 게이트를 타야 한다.
+_QUERY_TOOL_NAMES = {
+    "get_stage_position", "get_ccd_info", "capture_camera_frame",
+    "analyze_focus_quality", "start_camera_stream", "stop_camera_stream",
+}
+
+# 허용 이름 집합(frozenset)별 도구 빌드 결과 캐시.
+# _HW_TOOL_NAMES(실험용)와 _QUERY_TOOL_NAMES(질의용)가 서로 다른 목록을 쓰므로
+# 단일 캐시로는 둘이 섞인다 → 집합을 키로 분리해 캐싱한다.
+_lc_tools_cache: dict[frozenset, tuple[list, dict]] = {}
 
 
 def _get_dispatch() -> dict | None:
@@ -176,11 +190,16 @@ def _get_dispatch() -> dict | None:
         return None
 
 
-def _build_lc_tools():
-    """hw_tools.TOOL_DISPATCH의 함수를 LangChain @tool로 래핑해 반환 (LLM 루프용)."""
-    global _lc_tools_cache
-    if _lc_tools_cache is not None:
-        return _lc_tools_cache
+def _build_lc_tools(allowed: set | None = None):
+    """hw_tools.TOOL_DISPATCH의 함수를 LangChain @tool로 래핑해 반환 (LLM 루프용).
+
+    allowed: 바인딩할 도구 이름 집합. None이면 실험용 전체(_HW_TOOL_NAMES).
+             질의 경로는 관측 전용 부분집합(_QUERY_TOOL_NAMES)을 넘긴다.
+    """
+    names = frozenset(allowed if allowed is not None else _HW_TOOL_NAMES)
+    cached = _lc_tools_cache.get(names)
+    if cached is not None:
+        return cached
 
     try:
         from backend.hw_tools.raman_tools import TOOL_DISPATCH
@@ -194,7 +213,7 @@ def _build_lc_tools():
     for schema in RAMAN_TOOLS:
         fn_info = schema.get("function", {})
         name = fn_info.get("name", "")
-        if name not in _HW_TOOL_NAMES:
+        if name not in names:
             continue
         raw_fn = TOOL_DISPATCH.get(name)
         if raw_fn is None:
@@ -211,8 +230,8 @@ def _build_lc_tools():
         lc_tools.append(_make_tool(raw_fn, name, desc))
         tool_map[name] = raw_fn
 
-    _lc_tools_cache = (lc_tools, tool_map)
-    return _lc_tools_cache
+    _lc_tools_cache[names] = (lc_tools, tool_map)
+    return lc_tools, tool_map
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -516,7 +535,7 @@ def _pixel_delta_to_mm(dpx: float, dpy: float) -> tuple[float, float]:
 def _visual_search(ctx: dict, target_description: str) -> dict | None:
     """
     나선형 탐색으로 타겟을 찾아 스테이지를 타겟 위로 이동시키고 ROI를 반환.
-    실패 시 None. (카메라 스트림 정리는 항상 수행)
+    실패 시 None. (내가 켠 카메라 스트림은 반드시 정리)
 
     도구 호출이 ctx의 _call 관문을 지나므로 스테이지 위치 추적이 유지된다.
     카메라/이미지 호출은 record=False — base64 프레임을 observations에 쌓으면
@@ -525,6 +544,8 @@ def _visual_search(ctx: dict, target_description: str) -> dict | None:
     stream = _call(ctx, "start_camera_stream", {}, record=False)
     if not stream.get("ok"):
         return None  # 카메라 자체가 안 됨 — 호출부가 fallback 판단
+    # 내가 켠 스트림만 내가 끈다 — _look_at_microscope의 [스트림 소유권] 주석 참고.
+    owns_stream = not stream.get("already_streaming", False)
 
     try:
         for i, (ox, oy) in enumerate(_SEARCH_OFFSETS_MM):
@@ -586,8 +607,9 @@ def _visual_search(ctx: dict, target_description: str) -> dict | None:
 
         return None  # 모든 오프셋 소진 — 탐색 실패
     finally:
-        # 스트림은 반드시 정리 — 켜둔 채 방치하면 다음 카메라 사용이 충돌한다
-        _call(ctx, "stop_camera_stream", {}, record=False)
+        # 내가 켠 스트림만 정리 — 프론트 MJPEG 뷰가 켜 둔 스트림을 끄면 그 화면이 죽는다.
+        if owns_stream:
+            _call(ctx, "stop_camera_stream", {}, record=False)
 
 
 def _task_locate_target(state: ExperimentState, step: dict, ctx: dict) -> tuple[bool, str]:
@@ -882,6 +904,139 @@ def _run_llm_tool_loop(state: ExperimentState, step: dict, ctx: dict) -> tuple[b
         err = ctx["observations"][-1]["result"].get("error", "?") if ctx["observations"] else "?"
         return False, f"마지막 도구 호출 실패: {err}"
     return True, "작업 완료"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 하드웨어 질의 (실험 파이프라인 밖 — 채팅에서 바로 답하는 경로)
+# ──────────────────────────────────────────────────────────────────────────────
+# 왜 여기(hw_manager)에 두는가:
+#   "지금 현미경 화면 보여?" 같은 질문에 답하려면 "어떤 도구가 있고 무엇을 할 수
+#   있는지"를 알아야 한다. 그걸 아는 곳은 도구를 실제로 들고 있는 이 모듈뿐이다.
+#   translator는 도구를 바인딩하지 않으므로(순수 JSON 변환기), 그쪽에서 답하면
+#   "그런 기능 없습니다" 같은 사실과 다른 답을 지어낸다 — 실제로 그랬다.
+#   → orchestrator는 하드웨어 질의를 여기로 넘기고, 답변은 도구 실행 결과로 만든다.
+#
+# 안전 경계:
+#   이 경로는 Planner/Critic C1 게이트를 타지 않는다. 그래서 _QUERY_TOOL_NAMES
+#   (관측 전용)만 바인딩한다 — 레이저·이동은 실험 요청으로 분류돼야 한다.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_QUERY_SYSTEM = """\
+당신은 라만 분광기 하드웨어의 상태를 사용자에게 알려주는 에이전트입니다.
+사용 가능한 도구로 실제 장비 상태를 확인한 뒤, 그 결과에 근거해 한국어로 답하세요.
+
+규칙:
+- 반드시 도구를 먼저 호출해 실제 값을 확인하고 답하세요. 추측하지 마세요.
+- 당신이 가진 도구로 할 수 없는 일이면 "할 수 없다"가 아니라,
+  무엇이 가능한지(어떤 도구가 있는지) 알려주세요.
+- 레이저 조사나 스테이지 이동이 필요한 요청이면, 그건 이 대화창에서 바로 하지 않고
+  "측정 요청으로 말씀해 주시면 계획을 세워 안전 검증 후 수행한다"고 안내하세요.
+- 답변은 2~4문장으로 간결하게. JSON이 아닌 자연스러운 한국어 문장으로 답하세요."""
+
+_LOOK_SYSTEM = """\
+당신은 현미경 카메라 이미지를 보고 사용자에게 설명하는 전문가입니다.
+이미지에 실제로 보이는 것만 근거로, 한국어 2~4문장으로 설명하세요.
+시야에 보이는 물체의 모양·밝기·분포, 초점 상태를 구체적으로 언급하세요."""
+
+
+def _look_at_microscope(ctx: dict, question: str) -> str:
+    """현미경 프레임 1장을 캡처해 vision LLM에게 보여주고 설명을 받는다.
+
+    analyze_microscope_image를 tool-calling 루프에 직접 바인딩하지 않는 이유:
+    이 도구의 반환값에는 PNG base64 문자열이 들어 있어(수 MB) ToolMessage로
+    LLM 컨텍스트에 그대로 실리면 토큰이 폭발한다. 그래서 이미지 처리는 코드가
+    맡고, LLM에게는 "설명 텍스트"만 돌려준다.
+
+    [스트림 소유권 — 끄기 전에 반드시 확인]
+    프론트의 MJPEG 뷰(/api/camera/stream)가 열려 있으면 카메라는 "이미" 스트리밍
+    중이다. 그 상태에서 우리가 끝나고 stop_camera_stream을 부르면 TUCam의
+    AbortWait/Cap_Stop/Buf_Release가 실행되어 MJPEG 쪽 화면이 죽는다(그리고 그
+    루프는 프레임이 None이 되면 yield를 못 해 접속 종료도 감지 못 하고 영원히 돈다).
+    → 내가 켠 스트림만 내가 끈다.
+    """
+    stream = _call(ctx, "start_camera_stream", {}, record=False)
+    if not stream.get("ok"):
+        return f"카메라 스트림을 켤 수 없습니다: {stream.get('error', '알 수 없는 오류')}"
+    # 이 호출이 스트림을 켰다면 우리 소유 → 끝나고 정리한다.
+    # 이미 켜져 있었다면 남의 것 → 건드리지 않는다.
+    owns_stream = not stream.get("already_streaming", False)
+
+    try:
+        img = _call(ctx, "analyze_microscope_image", {"question": question}, record=False)
+        if not img.get("ok") or not img.get("image_base64"):
+            return f"현미경 프레임을 가져오지 못했습니다: {img.get('error', '알 수 없는 오류')}"
+
+        resp = _llm_vision.invoke([
+            SystemMessage(content=_LOOK_SYSTEM),
+            HumanMessage(content=[
+                {"type": "text", "text": question},
+                {"type": "image", "source": {
+                    "type": "base64", "media_type": "image/png",
+                    "data": img["image_base64"]}},
+            ]),
+        ])
+        return (resp.content or "").strip() or "이미지를 해석하지 못했습니다."
+    except Exception as e:
+        return f"이미지 해석 중 오류: {type(e).__name__}: {e}"
+    finally:
+        if owns_stream:
+            try:
+                _call(ctx, "stop_camera_stream", {}, record=False)
+            except Exception:
+                pass
+
+
+def run_hardware_query(user_msg: str) -> str:
+    """실험이 아닌 "장비 상태 질문"에 도구를 실제로 호출해 답한다.
+
+    orchestrator가 intent.request_type == "hardware"일 때 호출한다.
+    반환: 사용자에게 그대로 보여줄 한국어 답변 문장.
+    """
+    ctx = _make_ctx({}, {"step_id": "query"})
+    lc_tools, _ = _build_lc_tools(_QUERY_TOOL_NAMES)
+
+    if ctx["dispatch"] is None or not lc_tools:
+        return ("지금은 장비에 연결돼 있지 않아(시뮬레이션 모드) 실제 화면이나 상태를 "
+                "읽을 수 없습니다. 장비 PC에서 실행하면 현미경 화면 확인, 스테이지 위치, "
+                "CCD 상태, 초점 품질을 조회할 수 있습니다.")
+
+    # 화면을 "보는" 능력은 코드가 감싼 전용 도구로 제공한다(위 _look_at_microscope 참고).
+    @tool("look_at_microscope",
+          description="현미경 카메라의 현재 화면을 실제로 보고 무엇이 보이는지 설명한다. "
+                      "사용자가 화면/시야/샘플 모습을 물어보면 이 도구를 사용하라. "
+                      "question 인자에 사용자가 궁금해하는 내용을 넣어라.")
+    def _look(question: str = "현재 현미경 화면에 무엇이 보이나요?") -> str:
+        return _look_at_microscope(ctx, question)
+
+    llm_with_tools = _llm.bind_tools(lc_tools + [_look])
+    messages = [SystemMessage(content=_QUERY_SYSTEM), HumanMessage(content=user_msg)]
+
+    try:
+        for _ in range(6):                     # LLM 무한 루프 방지
+            response = llm_with_tools.invoke(messages)
+            messages.append(response)
+            if not response.tool_calls:
+                return (response.content or "").strip() or "장비 상태를 확인하지 못했습니다."
+
+            for tc in response.tool_calls:
+                name, args = tc["name"], tc["args"] or {}
+                if name == "look_at_microscope":
+                    result = _look_at_microscope(ctx, args.get("question") or user_msg)
+                else:
+                    result = _call(ctx, name, args)
+                # 대용량 배열은 컨텍스트에서 제외 (_run_llm_tool_loop와 동일 정책)
+                if isinstance(result, dict):
+                    result = {k: v for k, v in result.items()
+                              if not (isinstance(v, list) and len(v) > 32)}
+                messages.append(ToolMessage(
+                    content=json.dumps(result, ensure_ascii=False, default=str),
+                    tool_call_id=tc["id"]))
+        return "장비 상태 확인이 길어져 중단했습니다. 다시 질문해 주세요."
+    except Exception as e:
+        return f"장비 상태를 확인하는 중 오류가 발생했습니다: {type(e).__name__}: {e}"
+    # 카메라 스트림 정리는 _look_at_microscope가 자기가 켠 경우에만 수행한다.
+    # 여기서 무조건 stop_camera_stream을 부르면 프론트 MJPEG 뷰가 켜 둔 스트림까지
+    # 꺼서 화면이 죽는다 (_look_at_microscope의 [스트림 소유권] 주석 참고).
 
 
 # ══════════════════════════════════════════════════════════════════════════════

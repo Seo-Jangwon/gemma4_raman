@@ -727,18 +727,24 @@ def start_camera_stream() -> dict:
     """
     카메라 실시간 스트리밍을 시작합니다.
     USE_camera_stream.py의 StreamingTUCam.start_stream()을 호출합니다.
+
+    반환의 already_streaming: 이 호출 "이전에" 이미 스트리밍 중이었는지.
+    호출자가 스트림 소유권을 판단하는 근거다 — 남이(예: 프론트 MJPEG 뷰) 켜 둔
+    스트림을 내가 끄면 그쪽 화면이 죽는다. already_streaming=True면 끄지 말 것.
     """
     if _camera is None:
         return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
-    
+
     try:
         # 이미 스트리밍 중인지 확인 (StreamingTUCam 내부 속성 활용)
         if getattr(_camera, 'is_streaming', False):
-            return {"ok": True, "status": "카메라는 이미 스트리밍 중입니다."}
-            
+            return {"ok": True, "already_streaming": True,
+                    "status": "카메라는 이미 스트리밍 중입니다."}
+
         _camera.start_stream()
-        return {"ok": True, "status": "카메라 스트리밍이 성공적으로 시작되었습니다."}
-        
+        return {"ok": True, "already_streaming": False,
+                "status": "카메라 스트리밍이 성공적으로 시작되었습니다."}
+
     except Exception as e:
         return {"ok": False, "error": f"스트리밍 시작 실패: {str(e)}"}
 
@@ -1414,7 +1420,24 @@ def save_point_data(
 
 def analyze_microscope_image(question: str = "샘플의 특정 물체(예: 세포)를 찾고 중심점 픽셀 좌표를 알려주세요.") -> dict:
     """
-    TuCam 현미경 카메라 화면을 무손실 PNG (Base64)로 캡처하여 반환.
+    TuCam 현미경 카메라 화면을 PNG (Base64)로 캡처하여 반환.
+
+    [왜 CAMERA_WIDTH×CAMERA_HEIGHT로 리사이즈하는가 — 두 가지 이유]
+
+    1) 좌표계 일치 (기능 버그 수정)
+       get_latest_frame()은 센서 네이티브 해상도를 그대로 준다(Config.ini의
+       Width/Height는 뷰 기준 해상도일 뿐 프레임 크기가 아니다). 그런데 이 이미지를
+       보고 vision LLM이 찍은 픽셀 좌표는 결국 move_to_pixel()로 들어가고,
+       move_to_pixel은 이미지 중심을 (CAMERA_WIDTH/2, CAMERA_HEIGHT/2)로 가정해
+       계산한다. 두 해상도가 다르면 스테이지가 엉뚱한 곳으로 이동한다.
+       USE_scan.py도 같은 이유로 픽셀→스테이지 계산 전에 이 크기로 리사이즈한다.
+       → 여기서 미리 맞춰 두면 이 함수의 출력 좌표계 = move_to_pixel의 입력 좌표계.
+
+    2) API 이미지 제한
+       Anthropic API는 이미지 1장당 base64 10MB, 긴 변 2576px가 상한이고 그보다 큰
+       이미지는 어차피 서버에서 다운스케일된다. 네이티브 프레임을 무손실 PNG로 보내면
+       12MB를 넘겨 요청 자체가 거부됐다(실제로 그랬다). 1060×800이면 ~2MB, 긴 변도
+       상한 이하라 다운스케일이 없어 좌표가 보낸 그대로 유지된다.
     """
     if _camera is None:
         return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
@@ -1428,17 +1451,21 @@ def analyze_microscope_image(question: str = "샘플의 특정 물체(예: 세�
 
         if frame.dtype == np.uint16:
             frame = (frame >> 8).astype(np.uint8)
-        
+
         if frame.ndim == 2:
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
         else:
             frame_bgr = frame.copy()
 
-        # PNG(무손실 원본)
+        # 뷰 기준 해상도로 정규화 — 위 docstring의 (1)(2)
+        if frame_bgr.shape[:2] != (CAMERA_HEIGHT, CAMERA_WIDTH):
+            frame_bgr = cv2.resize(frame_bgr, (CAMERA_WIDTH, CAMERA_HEIGHT),
+                                   interpolation=cv2.INTER_AREA)
+
         height, width = frame_bgr.shape[:2]
         ret, buf = cv2.imencode('.png', frame_bgr)
         enhanced_question = f"{question}\n\n[현재 첨부된 이미지의 원본 해상도는 가로 {width}px, 세로 {height}px 입니다. 픽셀 좌표를 반환할 때 이 해상도를 기준으로 정확한 픽셀 값을 제시하세요.][주의: 당신은 픽셀 좌표를 반환하게 되며, 이는 스테이지 좌표가 아닙니다. 스테이지를 해당 위치로 이동하려면, move_to_pixel(pixel_x, pixel_y) 함수를 사용해야 합니다.]"
-        
+
         if not ret:
             return {"ok": False, "error": "PNG 인코딩 실패"}
         img_b64 = base64.b64encode(buf).decode('utf-8')
@@ -1447,8 +1474,8 @@ def analyze_microscope_image(question: str = "샘플의 특정 물체(예: 세�
             "ok": True,
             "image_base64": img_b64,
             "question": enhanced_question,
-            "width": frame_bgr.shape[1],
-            "height": frame_bgr.shape[0],
+            "width": width,
+            "height": height,
         }
     except Exception as e:
         return {"ok": False, "error": str(e)}

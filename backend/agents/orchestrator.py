@@ -15,6 +15,7 @@ from typing import Iterator, Optional
 
 from backend.agents import experience
 from backend.agents.graph import build_graph
+from backend.agents.hw_manager import run_hardware_query
 from backend.agents.state import ClarifiedIntent, ExperimentState, initial_state
 from backend.agents.translator import check_intent, translate
 
@@ -179,9 +180,11 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
     1. 세션의 accumulated 버퍼에 이번 메시지를 누적한다(이전 턴의 되묻기 답변을 합침).
        세션의 history(지난 턴 전체 기록)는 translate()에 대화 맥락으로 함께 전달한다.
     2. translate(accumulated, history)로 intent 생성 → "intent" 이벤트.
-    3. intent.is_experiment_request가 False면 — 잡담/메타 질문이라 실험 파이프라인이
-       필요 없다 — "chat" 이벤트로 direct_reply를 바로 돌려주고 종료한다
-       (clarify 게이트를 타지 않음 — 실험도 아닌데 "시료가 뭔가요?"라고 되묻는 것을 방지).
+    3. intent.request_type이 "experiment"가 아니면 그래프를 돌리지 않고 종료한다
+       (clarify 게이트를 타지 않음 — 실험도 아닌데 "시료가 뭔가요?"라고 되묻는 것을 방지):
+         - "hardware": 장비 상태 질문 → hw_manager.run_hardware_query()가 실제 도구를
+           호출해 답을 만든다 → "chat" 이벤트.
+         - "chat"    : 인사/잡담 → translator의 direct_reply → "chat" 이벤트.
     4. clarify.check_intent()로 필수 정보 확인.
        - 부족 & 라운드 여유 있음 → "clarification" 이벤트 후 종료(그래프 실행 안 함).
        - 충족 or 라운드 소진 → accumulated/rounds만 초기화 후 그래프 스트리밍 진행
@@ -219,11 +222,22 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
 
         _remember(sess, "user", user_message)
 
-        # ── 3. 실험 요청이 아니면(잡담/메타 질문) 여기서 바로 응답하고 종료 ──
+        # ── 3. 실험 요청이 아닌 두 경로 — 그래프를 돌리지 않고 이번 턴에서 끝낸다 ──
         # clarify 게이트를 타지 않는다 — "너 뭐 할 수 있어?" 같은 메시지에
         # "시료가 뭔가요?"로 되묻는 것은 안전 목적(sample_type 확인)에 안 맞는다.
-        if not intent.get("is_experiment_request", True):
-            reply = intent.get("direct_reply") or "라만 실험 측정을 도와드릴 수 있어요. 무엇을 측정하고 싶으신가요?"
+        rtype = intent.get("request_type", "experiment")
+        if rtype in ("hardware", "chat"):
+            if rtype == "hardware":
+                # "지금 현미경 화면 보여?" 같은 장비 상태 질문.
+                # translator에게 답을 맡기면 도구를 모르니 "그런 기능 없다"고 지어낸다
+                # (실제로 그런 버그가 있었다). 도구를 들고 있는 hw_manager가
+                # 실제로 조회해서 답하게 한다 — 관측 전용 도구만 쓰므로 안전하다.
+                yield ev({"type": "node", "node": "hw_manager",
+                          "message": "🔬 장비 상태 확인 중"})
+                reply = run_hardware_query(sess["accumulated"])
+            else:
+                reply = intent.get("direct_reply") or "라만 실험 측정을 도와드릴 수 있어요. 무엇을 측정하고 싶으신가요?"
+
             _remember(sess, "assistant", reply)
             # 실험 누적 버퍼만 초기화한다(다음 요청은 새 실험으로 시작) —
             # 대화 이력(history)은 세션이 살아있는 한 계속 보존한다.

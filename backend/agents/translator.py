@@ -48,9 +48,9 @@ _SYSTEM = """\
 
 출력 JSON 스키마:
 {
-  "is_experiment_request": true 또는 false,
-  "direct_reply": "is_experiment_request가 false일 때만 채우는 필드. 사용자에게 바로 보여줄
-                    자연스러운 한국어 답변(인사 응대, 기능 소개 등). true면 빈 문자열.",
+  "request_type": "experiment" 또는 "hardware" 또는 "chat",
+  "direct_reply": "request_type이 'chat'일 때만 채우는 필드. 사용자에게 바로 보여줄
+                    자연스러운 한국어 답변(인사 응대 등). 그 외에는 빈 문자열.",
   "primary_objective": "측정 목적 한 문장",
   "sample_type": "샘플 종류 (예: graphene, exosome, battery_electrode, unknown)",
   "substrate": "기판 종류. 사용자 요청에서 유추 (예: glass, sio2 wafer, gold film). 언급 없으면 빈 문자열",
@@ -66,11 +66,25 @@ _SYSTEM = """\
   "user_preferences": {}
 }
 
-is_experiment_request 판정 기준:
-- 라만 분광 측정을 요청하거나, 이전 요청에 대한 추가 정보(시료/기판/위치 등)를 주는 메시지 → true
-- 인사말, 잡담, "너 뭐 할 수 있어?" 같은 메타 질문, 실험과 무관한 질문 → false
-  (false인 경우 direct_reply에 이 시스템이 라만 실험 설계·측정을 돕는 도구임을 안내하고,
-   primary_objective 등 나머지 실험 필드는 빈 값/기본값으로 채우세요)
+request_type 판정 기준 (셋 중 하나를 반드시 고르세요):
+
+1. "experiment" — 라만 분광 측정 요청이거나, 이전 측정 요청에 대한 추가 정보
+   (시료/기판/위치 등)를 주는 메시지. 레이저 조사나 스테이지 이동이 필요한 요청도 포함.
+   예: "그래핀 측정해줘", "기판은 SiO2 웨이퍼야", "저 입자 스펙트럼 찍어줘"
+
+2. "hardware" — 측정 실험은 아니지만 "지금 장비 상태"를 묻는 질문. 실제 장비를 조회해야
+   답할 수 있는 것들. 이 경우 하드웨어 에이전트가 도구로 직접 확인해 답하므로
+   direct_reply는 비워 두세요.
+   예: "지금 현미경 화면 보여?", "화면에 뭐가 보여?", "스테이지 지금 어디야?",
+       "초점 맞아?", "CCD 온도 몇 도야?"
+
+3. "chat" — 인사말, 잡담, 시스템의 능력을 묻는 메타 질문 등 장비 조회가 필요 없는 메시지.
+   direct_reply에 답변을 채우세요.
+   예: "안녕", "너 뭐 할 수 있어?", "고마워"
+
+중요 — "hardware"와 "chat"을 혼동하지 마세요. "지금/현재 ~ 어때?"처럼 **실제 장비의
+현재 상태**를 묻는 것은 chat이 아니라 hardware입니다. 이 시스템은 현미경 카메라,
+스테이지, CCD를 직접 읽을 수 있으므로 "그런 기능이 없다"고 답해서는 안 됩니다.
 
 주의: 항상 위 JSON 스키마 하나만 출력하세요. 코드블록(```)이나 설명 문장을 앞뒤에 절대 붙이지 마세요."""
 
@@ -121,10 +135,10 @@ def translate(user_msg: str, history: list[dict] | None = None) -> ClarifiedInte
 
     if parsed is None:
         print(f"[Translator] 파싱 실패, fallback 사용: {last_err}")
-        # is_experiment_request는 판정 불가 → True(안전한 기본값)로 두어
+        # request_type은 판정 불가 → "experiment"(안전한 기본값)로 두어
         # 기존처럼 check_intent 게이트가 부족한 정보를 되묻도록 한다.
         return ClarifiedIntent(
-            is_experiment_request=True,
+            request_type="experiment",
             direct_reply="",
             primary_objective=user_msg,
             sample_type="unknown",
@@ -136,8 +150,13 @@ def translate(user_msg: str, history: list[dict] | None = None) -> ClarifiedInte
             raw_user_message=user_msg,
         )
 
+    # 모르는 값이 오면 "experiment"로 강등 — clarify 게이트가 받아주므로 가장 안전하다.
+    rtype = str(parsed.get("request_type", "experiment")).strip().lower()
+    if rtype not in ("experiment", "hardware", "chat"):
+        rtype = "experiment"
+
     return ClarifiedIntent(
-        is_experiment_request=bool(parsed.get("is_experiment_request", True)),
+        request_type=rtype,
         direct_reply=parsed.get("direct_reply", "") or "",
         primary_objective=parsed.get("primary_objective", user_msg),
         sample_type=parsed.get("sample_type", "unknown"),

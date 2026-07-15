@@ -600,8 +600,21 @@ async def camera_stream(request: Request):
         raise HTTPException(status_code=503, detail="카메라 미연결")
 
     async def generate():
+        """
+        [왜 매 루프마다 is_disconnected()를 확인하는가 — 좀비 제너레이터 방지]
+        Starlette은 제너레이터가 yield해서 소켓에 쓰려고 할 때 비로소 클라이언트
+        접속 종료를 알아챈다. 그런데 카메라가 프레임을 못 주면(get_latest_frame이
+        None) 아래 루프는 yield를 한 번도 하지 않는다 → 브라우저가 떠나도 그 사실을
+        영영 모른 채 while True를 계속 돌며 50ms마다 공용 스레드풀
+        (ThreadPoolExecutor(max_workers=4))에 작업을 밀어 넣는다.
+        새로고침할 때마다 이런 좀비가 하나씩 쌓이고, 워커가 마르면 채팅 요청
+        (/api/experiment/stream의 _producer)이 줄을 서서 수 분씩 지연됐다.
+        → 프레임 유무와 무관하게 접속 종료를 직접 확인하고 빠져나온다.
+        """
         loop = asyncio.get_event_loop()
         while True:
+            if await request.is_disconnected():
+                break
             try:
                 frame = await loop.run_in_executor(state.executor, camera.get_latest_frame)
             except Exception as e:

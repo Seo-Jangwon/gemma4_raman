@@ -31,11 +31,14 @@ from typing import Annotated, Optional, TypedDict
 
 
 class ClarifiedIntent(TypedDict):
-    is_experiment_request: bool  # False면 라만 실험 요청이 아닌 잡담/메타 질문.
-                                  # orchestrator가 clarify 게이트를 건너뛰고
-                                  # direct_reply를 바로 사용자에게 돌려준다.
-    direct_reply: str            # is_experiment_request=False일 때만 사용하는
-                                  # 사용자 응답 문장. 실험 요청이면 빈 문자열.
+    request_type: str            # "experiment" | "hardware" | "chat"
+                                  #  - experiment: 라만 측정 요청 → clarify 게이트 → 그래프 실행
+                                  #  - hardware  : "지금 화면 보여?" 같은 장비 상태 질문.
+                                  #    orchestrator가 hw_manager.run_hardware_query()로 넘겨
+                                  #    실제 도구를 호출해 답한다(관측 전용 도구만 허용).
+                                  #  - chat      : 인사/잡담 → direct_reply를 그대로 반환.
+    direct_reply: str            # request_type="chat"일 때만 사용하는 사용자 응답 문장.
+                                  # 그 외에는 빈 문자열.
     primary_objective: str
     sample_type: str           # persona binding 트리거 (analyst의 도메인 해석 phase)
     substrate: str             # 기판 종류 (예: "glass", "sio2 wafer", "gold film").
