@@ -14,19 +14,36 @@ pydantic
 # ── LLM / 에이전트 (LangGraph 멀티에이전트 파이프라인) ─────────────────────
 langgraph
 langchain-core
-langchain-anthropic   # 모든 에이전트가 claude-opus-4-8 호출에 사용
+langchain-anthropic   # 다중 에이전트가 claude-opus-4-8 호출에 사용
+langchain-ollama      # 단일 에이전트(agents/single_agent.py)의 ChatOllama — gemma4:31b 호출.
+                      # 다중 에이전트와 동일한 bind_tools 경로를 타게 해 LLM 어댑터
+                      # 차이를 비교에서 제거하기 위함(single_agent.py 상단 주석 참고).
 python-dotenv         # .env에서 ANTHROPIC_API_KEY 로드 (backend/agents/__init__.py)
 
+# ── 지식베이스 RAG (backend/agents/knowledge.py, kb_ingest.py) ──────────────
+chromadb              # 벡터 인덱스. backend/agents/knowledge_base/chroma.sqlite3에 영속.
+                      # ⚠ 설치 전 `pip install --dry-run chromadb`로 확인할 것 —
+                      # uvicorn/click/typer를 특정 버전으로 끌어내려 서버가 깨질 수 있다.
+                      # 없으면 키워드 매칭으로 폴백한다(경고 로그 + _retriever 필드로 추적).
+                      # ※ onnxruntime(~200MB)을 함께 끌고 오지만 우리는 Chroma 기본
+                      #    임베딩을 안 쓰므로 죽은 무게다. 제거하면 chromadb가 깨진다.
+# 임베딩은 별도 패키지가 없다 — Ollama HTTP(/api/embed)를 requests로 직접 호출한다.
+# 계측 PC에서 1회: ollama pull bge-m3    (한/영 혼용 KB라 다국어 모델이 필요)
+
 # ── 레거시 채팅 경로 (hardware-command, llm_client) ─────────────────────────
-ollama
+ollama                # hardware_manager의 기동 시 연결 확인 + llm_client.run_agent(레거시).
+                      # 단일 에이전트는 더 이상 이 raw 클라이언트를 쓰지 않는다.
 
 # ── 스펙트럼/이미지 처리 ─────────────────────────────────────────────────────
-numpy
+numpy                  # 스펙트럼 리샘플/정규화(knowledge.preprocess_spectrum) 포함
 opencv-python          # 카메라 스트림, ROI 처리
 matplotlib              # test_spectrum.py 플롯, Andor SDK 예제
+pymupdf                 # KB 색인 시 PDF 텍스트/페이지 렌더 (kb_ingest.load_pdf).
+                        # 색인 전용 — 서버/에이전트 런타임은 import하지 않는다.
 
 # ── 하드웨어 통신 ────────────────────────────────────────────────────────────
 pyserial                # hw_tools/USE_laser_with_power.py (레이저 파워 컨트롤러 시리얼 통신)
 
 # ── 벤치마크/유틸 ────────────────────────────────────────────────────────────
-requests                 # benchmark/benchmark_runner.py
+requests                 # benchmark/benchmark_runner.py,
+                         # + KB 임베딩 호출(agents/knowledge.py → Ollama /api/embed)

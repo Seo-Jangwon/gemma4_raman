@@ -29,7 +29,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 # ── FastAPI ────────────────────────────────────────────────────────────────────
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -38,8 +38,7 @@ from pydantic import BaseModel
 from backend.hardware_manager import HardwareManager
 import backend.llm_client as llm_client
 from backend.config import CAMERA_WIDTH, CAMERA_HEIGHT, LENS_WIDTH_UM, LENS_HEIGHT_UM
-from backend.hw_tools.raman_tool_schemas import RAMAN_TOOLS
-from backend.hw_tools.raman_tools import TOOL_DISPATCH, init_hardware as rt_init_hardware
+from backend.hw_tools.raman_tools import init_hardware as rt_init_hardware
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -172,26 +171,6 @@ class CCDStatusResponse(BaseModel):
     connected: bool
     temperature: Optional[int]
     temp_status: Optional[str]
-
-class HardwareCommandRequest(BaseModel):
-    command: str
-
-class ChatRequest(BaseModel):
-    message: str
-    agent: str = "general"
-
-class AutoFocusRequest(BaseModel):
-    initial_z: float
-    z_range: float
-    z_step: float
-
-class OptimizeRequest(BaseModel):
-    sample_type: str
-    purpose: str
-    target_peaks: Optional[list[float]] = None
-
-class TroubleshootRequest(BaseModel):
-    issue: str = ""
 
 class MovePixelRequest(BaseModel):
     px: float
@@ -332,15 +311,10 @@ async def ccd_connect(body: CCDConnectRequest, request: Request):
 # AI 에이전트 엔드포인트
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _require_llm(state: AppState):
-    if state.hw.ollama is None:
-        raise HTTPException(status_code=503, detail="LLM이 연결되지 않았습니다.")
-
-
 @app.post("/api/experiment/run")
 async def experiment_run(body: ExperimentRequest, request: Request):
-    """LangGraph 멀티에이전트 실험 파이프라인 (planner/hw_manager/analyst/critic)."""
-    from backend.agents.orchestrator import run_experiment
+    """단일 gemma4 에이전트 동기 실행 (세션 히스토리 없이 1회, 벤치마크/레거시용)."""
+    from backend.agents.single_agent import run_experiment
     state = _state(request)
     loop = asyncio.get_event_loop()
     try:
@@ -355,20 +329,20 @@ async def experiment_run(body: ExperimentRequest, request: Request):
 
 @app.post("/api/experiment/stream")
 async def experiment_stream(body: ExperimentRequest, request: Request):
-    """멀티에이전트 실험 파이프라인 — SSE 스트리밍 (clarification + 진행상황).
+    """단일 gemma4 에이전트 — SSE 스트리밍(도구 호출 진행상황 + 세션 대화 기억).
 
     프론트엔드는 fetch로 이 엔드포인트를 열고 ReadableStream을 파싱한다.
     이벤트 형식(표준 SSE):
         event: <type>\\n
         data:  <json>\\n\\n
-    type ∈ {intent, chat, clarification, node, done, error}. (orchestrator.stream_experiment 참고)
+    type ∈ {chat, node, done, error}. (single_agent.stream_experiment 참고)
 
     [동기 제너레이터를 async SSE로 잇는 방법]
-    stream_experiment는 내부에서 LangGraph를 블로킹 실행하는 "동기" 제너레이터다.
+    stream_experiment는 내부에서 Ollama 호출을 블로킹 실행하는 "동기" 제너레이터다.
     이를 이벤트 루프에서 직접 돌리면 서버가 멈추므로, ThreadPoolExecutor 워커에서
     돌리고 각 이벤트를 asyncio.Queue로 넘겨 async 쪽에서 흘려보낸다.
     """
-    from backend.agents.orchestrator import stream_experiment
+    from backend.agents.single_agent import stream_experiment
 
     state = _state(request)
     loop = asyncio.get_event_loop()
@@ -410,178 +384,14 @@ async def experiment_stream(body: ExperimentRequest, request: Request):
 
 @app.get("/api/agents/health")
 async def agents_health():
-    """멀티에이전트 시스템 상태 확인."""
+    """단일 에이전트 시스템 상태 확인 (구 4노드 LangGraph → gemma4 단일 ReAct 에이전트)."""
+    from backend.agents.single_agent import ALL_TOOLS
     return {
         "status": "ok",
-        # 그래프 노드 4개 + 그래프 밖 전처리(translator)까지 노출.
-        # (구 spectrum/domain/debate → analyst, roi_detector → hw_manager의
-        #  locate_target task, rag_searcher/report_generator → planner 내장)
-        "agents": [
-            "translator", "planner", "critic", "hw_manager", "analyst",
-        ],
+        "agents": ["single_agent"],
+        "model": "gemma4 (ollama)",
+        "tools": len(ALL_TOOLS),
     }
-
-
-@app.post("/api/hardware-command")
-async def hardware_command(body: HardwareCommandRequest, request: Request):
-    state = _state(request)
-    _require_llm(state)
-    loop = asyncio.get_event_loop()
-    try:
-        llm_response, tool_trace = await loop.run_in_executor(
-            state.executor,
-            lambda: llm_client.run_agent(
-                user_message=body.command,
-                tools=RAMAN_TOOLS,
-                tool_dispatch=TOOL_DISPATCH,
-                max_steps=20,
-                verbose=True,
-            ),
-        )
-        return {"message": llm_response, "tool_trace": tool_trace}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/chat")
-async def chat(body: ChatRequest, request: Request):
-    state = _state(request)
-    _require_llm(state)
-    loop = asyncio.get_event_loop()
-    try:
-        llm_response, tool_trace = await loop.run_in_executor(
-            state.executor,
-            lambda: llm_client.run_agent(
-                user_message=body.message,
-                tools=RAMAN_TOOLS,
-                tool_dispatch=TOOL_DISPATCH,
-                max_steps=20,
-                verbose=True,
-            ),
-        )
-        return {"message": llm_response, "data": None}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/autofocus")
-async def autofocus(body: AutoFocusRequest, request: Request):
-    state = _state(request)
-    _require_llm(state)
-    loop = asyncio.get_event_loop()
-    prompt = (
-        f"자동 초점 조절을 수행하세요. "
-        f"초기 Z 위치: {body.initial_z}mm, "
-        f"탐색 범위: ±{body.z_range/2}mm, "
-        f"이동 간격: {body.z_step}mm. "
-        f"스테이지를 각 Z 위치로 이동하며 최적 초점을 찾아주세요."
-    )
-    try:
-        llm_response, _tool_trace = await loop.run_in_executor(
-            state.executor,
-            lambda: llm_client.run_agent(
-                user_message=prompt,
-                tools=RAMAN_TOOLS,
-                tool_dispatch=TOOL_DISPATCH,
-                max_steps=30,
-            ),
-        )
-        import numpy as np
-        z_positions = list(np.arange(
-            body.initial_z - body.z_range / 2,
-            body.initial_z + body.z_range / 2 + body.z_step,
-            body.z_step,
-        ).tolist())
-        optimal_z = body.initial_z
-        return {
-            "optimal_z": optimal_z,
-            "best_score": 0.0,
-            "z_positions": z_positions,
-            "focus_scores": [0.0] * len(z_positions),
-            "message": llm_response,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/optimize-parameters")
-async def optimize_parameters(body: OptimizeRequest, request: Request):
-    state = _state(request)
-    _require_llm(state)
-    loop = asyncio.get_event_loop()
-
-    peaks_str = f", 목표 피크: {body.target_peaks}" if body.target_peaks else ""
-    prompt = (
-        f"라만 분광 실험 파라미터를 추천해 주세요.\n"
-        f"- 샘플 종류: {body.sample_type}\n"
-        f"- 측정 목적: {body.purpose}{peaks_str}\n"
-        f"레이저 출력(%), CCD 노출 시간(초), 누적 횟수를 포함해 한국어로 답변하세요."
-    )
-    try:
-        summary = await loop.run_in_executor(
-            state.executor,
-            lambda: llm_client.generate(prompt),
-        )
-        return {
-            "summary": summary,
-            "spectrometer_settings": {
-                "laser_power_mw": 40,
-                "grating": "1200",
-                "nd_filter": 1.0,
-            },
-            "ccd_settings": {
-                "exposure_time_s": 1.0,
-                "num_accumulations": 3,
-            },
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/troubleshoot")
-async def troubleshoot(body: TroubleshootRequest, request: Request):
-    state = _state(request)
-    _require_llm(state)
-    loop = asyncio.get_event_loop()
-    prompt = (
-        f"라만 분광기 문제 진단을 도와주세요.\n"
-        f"증상: {body.issue}\n"
-        f"가능한 원인과 해결책을 한국어로 설명하세요."
-    )
-    try:
-        result = await loop.run_in_executor(
-            state.executor,
-            lambda: llm_client.generate(prompt),
-        )
-        return {"diagnosis": result, "recommendations": []}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/troubleshoot/upload")
-async def troubleshoot_upload(
-    file: UploadFile = File(...),
-    request: Request = None,
-):
-    state = _state(request)
-    _require_llm(state)
-    contents = await file.read()
-    loop = asyncio.get_event_loop()
-    import base64
-    b64 = base64.b64encode(contents).decode()
-    prompt = (
-        f"라만 분광기 이미지를 분석하고 문제를 진단해 주세요. "
-        f"(이미지 크기: {len(contents)} bytes)\n"
-        f"가능한 원인과 해결책을 한국어로 설명하세요."
-    )
-    try:
-        result = await loop.run_in_executor(
-            state.executor,
-            lambda: llm_client.generate(prompt),
-        )
-        return {"diagnosis": result, "recommendations": []}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -750,6 +560,120 @@ async def spectrum_acquire(body: AcquireSpectrumRequest, request: Request):
     if not result.get("ok"):
         raise HTTPException(status_code=500, detail=result.get("error", "측정 실패"))
     return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 지식베이스(KB) 엔드포인트
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# 에이전트는 이 HTTP API를 쓰지 않는다 — 에이전트는 search_knowledge_base 도구로
+# knowledge.search_kb()를 직접 호출한다. 여기 있는 건 사람용이다:
+#   운영: 문서 업로드 → 재색인
+#   디버깅: 에이전트가 뭘 검색해 오는지 눈으로 확인
+#   실험 전 점검: 지금 벡터 검색인지 키워드 폴백인지 확인 (가장 중요)
+
+@app.get("/api/kb/status")
+async def kb_status_endpoint():
+    """KB 진단 — 어느 검색기가 살아있고 인덱스에 몇 개 들었는지.
+
+    ⚠ 벤치마크를 돌리기 전에 반드시 확인할 것. retriever가 "keyword"인데 그걸
+    모른 채 실험하면 "벡터 RAG를 붙인 결과"라고 쓴 게 전부 거짓이 된다.
+    """
+    from backend.agents.knowledge import kb_status
+    return kb_status()
+
+
+@app.get("/api/kb/search")
+async def kb_search_endpoint(q: str, top_k: int = 3):
+    """에이전트와 똑같은 경로로 KB를 검색해 본다(디버깅용).
+
+    에이전트가 이상한 파라미터를 고를 때, 프롬프트 탓인지 검색 탓인지 가르는 데 쓴다.
+    """
+    from backend.agents.knowledge import search_kb
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="q가 비어 있습니다")
+    hits = search_kb(q, top_k=top_k)
+    return {
+        "query": q,
+        "count": len(hits),
+        # 항목별 _retriever와 별개로, 응답 수준에서도 한 번 더 노출한다.
+        "retriever": hits[0].get("_retriever") if hits else None,
+        "results": hits,
+    }
+
+
+@app.post("/api/kb/reload")
+async def kb_reload_endpoint():
+    """캐시를 비워 다음 조회 때 디스크를 다시 읽게 한다.
+
+    knowledge_base.json을 고쳤을 때 서버를 껐다 켜지 않아도 되게 하는 용도.
+    (Chroma 인덱스 자체를 갱신하려면 /api/kb/reindex가 필요하다 — 이건 캐시만 비운다.)
+    """
+    from backend.agents.knowledge import kb_status, reload_kb
+    reload_kb()
+    return {"ok": True, "message": "KB 캐시를 비웠습니다", "status": kb_status()}
+
+
+@app.post("/api/kb/upload")
+async def kb_upload_endpoint(file: UploadFile = File(...)):
+    """문서를 kb_sources/에 저장한다. 색인은 하지 않는다.
+
+    [왜 업로드와 색인을 분리하나]
+    색인은 문서 수에 비례해 임베딩을 돌리므로 수 초~수 분이 걸린다. 업로드 요청을
+    그동안 붙잡아 두면 프론트가 타임아웃난다. 여러 파일을 올린 뒤 /api/kb/reindex를
+    한 번 부르는 게 임베딩 왕복도 줄인다.
+    """
+    from backend.agents.knowledge import KB_SOURCES_DIR
+
+    allowed = {".pdf", ".txt", ".md", ".json"}
+    name = Path(file.filename or "").name          # 경로 탈출 방지 — 파일명만 취한다
+    if not name:
+        raise HTTPException(status_code=400, detail="파일명이 없습니다")
+    if Path(name).suffix.lower() not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"지원하지 않는 형식입니다. 가능: {', '.join(sorted(allowed))}",
+        )
+
+    KB_SOURCES_DIR.mkdir(parents=True, exist_ok=True)
+    dest = KB_SOURCES_DIR / name
+    try:
+        dest.write_bytes(await file.read())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"저장 실패: {e}")
+
+    return {
+        "ok": True,
+        "filename": name,
+        "bytes": dest.stat().st_size,
+        "message": "저장됨. 검색에 반영하려면 POST /api/kb/reindex 를 호출하세요.",
+    }
+
+
+@app.post("/api/kb/reindex")
+async def kb_reindex_endpoint(request: Request, caption: bool = False):
+    """kb_sources/와 knowledge_base.json을 다시 읽어 Chroma를 재색인한다.
+
+    caption=true면 PDF 페이지를 gemma4로 캡션한다(페이지당 VLM 1회 — 매우 느림).
+
+    색인은 블로킹 작업(임베딩 HTTP 왕복 다수)이라 워커 스레드에서 돌린다.
+    """
+    from backend.agents.kb_ingest import ingest
+    from backend.agents.knowledge import kb_status, reload_kb
+
+    state = _state(request)
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            state.executor,
+            lambda: ingest(caption=caption, with_spectra=True),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"색인 실패: {e}")
+
+    # 색인이 컬렉션을 지웠다 다시 만들었으므로, 검색 쪽이 들고 있는 낡은 핸들을 버린다.
+    reload_kb()
+    return {"ok": True, "indexed": result, "status": kb_status()}
 
 
 # ── 헬스체크 ───────────────────────────────────────────────────────────────────

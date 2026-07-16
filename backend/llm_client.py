@@ -36,6 +36,17 @@ def _get_client() -> "ollama.Client":
     return _client
 
 
+def get_client() -> "ollama.Client":
+    """서버 기동 시 주입된 ollama.Client 인스턴스에 접근하는 공개 접근자.
+
+    [2026-07-16] 단일 에이전트는 더 이상 이 함수를 쓰지 않는다. raw ollama.Client
+    대신 LangChain ChatOllama로 갈아탔기 때문이다(다중 에이전트와 동일한 bind_tools
+    경로를 타게 해서, 단일 vs 다중 비교에 LLM 어댑터 차이가 섞이지 않도록 한 것 —
+    backend/agents/single_agent.py 상단 주석 참고).
+    현재 호출자는 없으며, 아래 run_agent(레거시 경로)를 위해 남겨둔다."""
+    return _get_client()
+
+
 def generate(prompt: str) -> str:
     response = _get_client().generate(model=OLLAMA_MODEL, prompt=prompt)
     return response["response"]
