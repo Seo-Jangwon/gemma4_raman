@@ -66,7 +66,7 @@ except ImportError:
 STAGE_DLL_PATH   = str(_BACKEND / "hw_tools" / "Tango_DLL.dll")
 
 LASER_PORT       = "COM4"
-OLLAMA_HOST      = "http://192.168.1.16:11434"
+OLLAMA_HOST      = "http://192.168.1.15:11434"
 OLLAMA_MODEL     = "gemma4:31b"
 
 # CCD 온도 목표 (°C)

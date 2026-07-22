@@ -21,8 +21,13 @@ interface ChatMessage {
   isError?: boolean
   // 스트리밍 실험용 확장 필드
   id?: number                  // 진행상황 메시지를 이벤트마다 갱신하기 위한 안정 키
-  kind?: 'progress' | 'clarification' | 'report'
+  kind?: 'progress' | 'clarification' | 'report' | 'spectrum'
   steps?: string[]             // kind==='progress' 일 때 노드별 진행 로그 누적
+  // kind==='spectrum' — 측정 결과 스펙트럼 이미지(합본 포함) + 다운로드 링크
+  imageUrl?: string
+  csvUrl?: string
+  jsonUrl?: string
+  zipUrl?: string
 }
 
 const DEFAULT_PARAMS: SpectrumParams = {
@@ -149,6 +154,14 @@ export default function MainContent({
           break
         case 'node':
           if (data?.message) appendStep(data.message)
+          break
+        case 'spectrum':
+          // 측정 스펙트럼 이미지 — 채팅에 인라인 렌더 + 다운로드 링크.
+          setMessages(prev => [...prev, {
+            role: 'assistant', text: data.title || '', kind: 'spectrum',
+            imageUrl: data.image_url, csvUrl: data.csv_url, jsonUrl: data.json_url,
+            zipUrl: data.zip_url,
+          }])
           break
         case 'clarification':
           // 되묻기 — 세션을 유지하고, 다음 사용자 입력을 답변으로 이어붙인다.
@@ -334,6 +347,26 @@ export default function MainContent({
                     >
                       {msg.kind === 'progress'
                         ? (msg.steps || []).map((s, j) => <div key={j}>{s}</div>)
+                        : msg.kind === 'spectrum'
+                        ? (
+                          <div className="space-y-1.5">
+                            {msg.text && <div className="font-medium text-gray-700">{msg.text}</div>}
+                            {msg.imageUrl && (
+                              <a href={msg.imageUrl} target="_blank" rel="noreferrer">
+                                <img
+                                  src={msg.imageUrl}
+                                  alt={msg.text || '스펙트럼'}
+                                  className="rounded-lg border border-gray-200 max-w-full"
+                                />
+                              </a>
+                            )}
+                            <div className="flex gap-3 text-xs text-raman-600 flex-wrap">
+                              {msg.csvUrl && <a href={msg.csvUrl} download className="hover:underline">CSV 다운로드</a>}
+                              {msg.imageUrl && <a href={msg.imageUrl} download className="hover:underline">PNG 다운로드</a>}
+                              {msg.zipUrl && <a href={msg.zipUrl} download className="hover:underline">전체 다운로드 (zip)</a>}
+                            </div>
+                          </div>
+                        )
                         : msg.text}
                     </div>
                   </div>

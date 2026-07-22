@@ -74,6 +74,7 @@ from langchain_core.messages import (
 
 from backend.agents.knowledge import search_kb
 from backend.hw_tools.raman_tool_schemas import RAMAN_TOOLS
+from backend.spectrum_store import spectrum_event
 
 # hardware_manager는 장비 PC의 Config.ini를 읽으므로 개발 PC에서 import가 실패할 수
 # 있다. 모델명/호스트는 실패해도 기본값으로 굴러가야 하므로 try로 감싼다.
@@ -81,14 +82,14 @@ from backend.hw_tools.raman_tool_schemas import RAMAN_TOOLS
 try:
     from backend.hardware_manager import OLLAMA_HOST, OLLAMA_MODEL
 except Exception:
-    OLLAMA_HOST = "http://192.168.1.16:11434"
+    OLLAMA_HOST = "http://192.168.1.15:11434"
     OLLAMA_MODEL = "gemma4:31b"
 
 # ── 사이클/계획 예산 ──────────────────────────────────────────────────────────
-_MAX_CYCLES = 20            # 최대 의사결정 사이클 수 (= commit 행동 실행 횟수)
+_MAX_CYCLES = 150            # 최대 의사결정 사이클 수 (= commit 행동 실행 횟수)
 _MAX_PLANNING_STEPS = 6     # 한 사이클 내 planning(정보수집) 라운드 상한
 _SOFT_PLAN_LIMIT = 4        # 이 라운드부터 "이제 실행/보고서로" 진행 문구를 강화
-_MAX_AGENT_STEPS = 40       # 턴 전체 propose() 호출 총량 가드(무한 루프 방지)
+_MAX_AGENT_STEPS = 150       # 턴 전체 propose() 호출 총량 가드(무한 루프 방지)
 
 # 조사량 하드 상한 (대화 한 턴 기준). AILA와 동일한 물리적 회로차단기 —
 # "판단"이 아니라 폭주 방지용 최후 안전장치.
@@ -452,7 +453,9 @@ Language Agents) 구조로 동작합니다. 당신은 명시적인 작업기억�
 [안전 규칙]
 - 도구가 오류나 안전 차단을 반환하면 우회하지 말고 상황을 그대로 사용자에게 보고합니다.
 - 모르는 것을 추측하지 않습니다 — 도구로 확인하거나 사용자에게 묻습니다.
-- 인사/잡담/능력 질문은 도구 없이 즉시 한국어로 답합니다."""
+- 인사/잡담/능력 질문은 도구 없이 즉시 한국어로 답합니다.
+- 스테이지 좌표 단위: mm (X: 0~75.3, Y: 0~50.2, Z: -1.0~1.0, 원점은 x=37.8759, y=25.24805, z는 해당없음)
+"""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1007,7 +1010,7 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
 
 # 세션별 LangChain 메시지 히스토리(대화 기억). cross-session 노하우는 별도로 JSON에 축적.
 _SESSIONS: dict[str, list] = {}
-_HISTORY_MAX_TURNS = 20
+_HISTORY_MAX_TURNS = 100
 
 
 def _is_user_turn(msg) -> bool:
@@ -1098,6 +1101,9 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
                 yield ev({"type": "node", "node": event["name"],
                           "message": _describe_tool(event["name"], event["args"],
                                                     event["result"], event["action"])})
+                sp = spectrum_event(event["result"])   # 측정이면 스펙트럼 이미지도 전달
+                if sp:
+                    yield ev(sp)
             elif etype == "error":
                 yield ev({"type": "error", "detail": event["detail"]})
                 return

@@ -138,7 +138,7 @@ def _ollama_host() -> str:
         from backend.hardware_manager import OLLAMA_HOST  # type: ignore
         return OLLAMA_HOST
     except Exception:
-        return os.environ.get("OLLAMA_HOST", "http://192.168.1.16:11434")
+        return os.environ.get("OLLAMA_HOST", "http://192.168.1.15:11434")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -71,16 +71,17 @@ from langchain_core.messages import (
 
 from backend.agents.knowledge import search_kb
 from backend.hw_tools.raman_tool_schemas import RAMAN_TOOLS
+from backend.spectrum_store import spectrum_event
 
 # hardware_manager는 장비 PC의 Config.ini를 읽으므로 개발 PC에서 import가 실패할 수
 # 있다. 모델명/호스트는 실패해도 기본값으로 굴러가야 하므로 try로 감싼다.
 try:
     from backend.hardware_manager import OLLAMA_HOST, OLLAMA_MODEL
 except Exception:
-    OLLAMA_HOST = "http://192.168.1.16:11434"
+    OLLAMA_HOST = "http://192.168.1.15:11434"
     OLLAMA_MODEL = "gemma4:31b"
 
-_MAX_AGENT_STEPS = 40   # LLM 무한 루프 방지
+_MAX_AGENT_STEPS = 100   # LLM 무한 루프 방지
 
 # 조사량 하드 상한 (대화 한 턴 기준, mJ 단위 근사치 = power_pct * exposure_s * 0.01의 누계).
 # 별도 위치별 추적이나 시료별 클램프 없이 "이번 턴에 쏜 총량"만 본다 —
@@ -171,7 +172,9 @@ SYSTEM_PROMPT = """\
 [안전 규칙 — 반드시 준수]
 - 도구가 오류를 반환하거나 안전 차단이 걸리면 즉시 사용자에게 상황을 그대로 보고한다.
   우회하거나 강제로 재시도하지 않는다.
-- 모르는 것을 추측하지 않는다 — 도구로 확인하거나 사용자에게 묻는다."""
+- 모르는 것을 추측하지 않는다 — 도구로 확인하거나 사용자에게 묻는다.
+- 스테이지 좌표 단위: mm (X: 0~75.3, Y: 0~50.2, Z: -1.0~1.0, 원점은 x=37.8759, y=25.24805, z는 해당없음)
+"""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -437,7 +440,7 @@ def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
 # 세션별 LangChain 메시지 히스토리. {session_id: [BaseMessage, ...]}
 # 로컬 단일 사용자 도구라 in-memory dict로 충분하다(프로세스 종료 시 초기화).
 _SESSIONS: dict[str, list] = {}
-_HISTORY_MAX_TURNS = 20   # 세션 히스토리에 보존할 최대 사용자 턴 수
+_HISTORY_MAX_TURNS = 100   # 세션 히스토리에 보존할 최대 사용자 턴 수
 
 
 def _is_user_turn(msg) -> bool:
@@ -521,6 +524,9 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
             if etype == "tool":
                 yield ev({"type": "node", "node": event["name"],
                           "message": _describe_tool(event["name"], event["args"], event["result"])})
+                sp = spectrum_event(event["result"])   # 측정이면 스펙트럼 이미지도 전달
+                if sp:
+                    yield ev(sp)
             elif etype == "error":
                 yield ev({"type": "error", "detail": event["detail"]})
                 return

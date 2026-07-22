@@ -15,6 +15,7 @@ type StatusKey =
   | 'DRIFT'
   | 'OFF'
   | 'NOT_SUPPORTED'
+  | 'unknown'
   | 'disconnected'
 
 const STATUS_STYLES: Record<
@@ -57,6 +58,12 @@ const STATUS_STYLES: Record<
     label: 'Not Supported',
     text: 'text-gray-400',
   },
+  unknown: {
+    bg: 'bg-slate-900',
+    dot: 'bg-slate-400 animate-pulse',
+    label: 'Reading…',
+    text: 'text-slate-400',
+  },
   disconnected: {
     bg: 'bg-gray-900',
     dot: 'bg-gray-700',
@@ -78,7 +85,13 @@ export default function CCDStatusBar() {
         const { data } = await axios.get<CCDStatus>('/api/ccd/status', {
           timeout: 1500,
         })
-        setStatus(data)
+        // 촬영 중 등으로 상태를 못 읽으면(connected지만 temp_status=null) 쿨러가 꺼진 게
+        // 아니라 '지금 못 읽은 것'이다 → 마지막으로 알던 양호 상태를 유지해 오표시를 막는다.
+        setStatus(prev =>
+          data.connected && data.temp_status == null && prev.temp_status != null
+            ? { ...prev, connected: true }
+            : data
+        )
       } catch {
         setStatus({ connected: false, temperature: null, temp_status: null })
       }
@@ -92,7 +105,9 @@ export default function CCDStatusBar() {
   const key: StatusKey =
     !status.connected
       ? 'disconnected'
-      : ((status.temp_status as StatusKey | null) ?? 'OFF')
+      // 못 읽은 상태(null)를 'OFF'로 단정하지 않는다 — 쿨러 꺼짐은 백엔드가 'OFF'를
+      // 명시적으로 줄 때만이다(초기/일시 미상은 'Reading…').
+      : ((status.temp_status as StatusKey | null) ?? 'unknown')
 
   const cfg = STATUS_STYLES[key] ?? STATUS_STYLES.disconnected
 

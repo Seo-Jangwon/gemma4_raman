@@ -145,6 +145,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 측정 결과(png/csv/json) 정적 서빙 — 채팅 인라인 표시·다운로드용.
+# vite proxy 가 /api 만 통과시키므로 /api/results 아래에 둔다(spectrum_store.URL_PREFIX 와 일치).
+from fastapi.staticfiles import StaticFiles          # noqa: E402
+from backend.spectrum_store import RESULTS_ROOT       # noqa: E402
+RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
+app.mount("/api/results", StaticFiles(directory=str(RESULTS_ROOT)), name="results")
+
 
 def _state(request: Request) -> AppState:
     return request.app.state.s
@@ -202,7 +209,7 @@ class ExperimentRequest(BaseModel):
     # 어떤 에이전트 아키텍처로 실행할지 선택. 기본값 "AILA"(ReAct baseline)라
     # 이 필드를 보내지 않던 기존 프론트엔드/벤치마크는 그대로 동작한다.
     # "CoALA"를 주면 single_agent_CoALA(의사결정 사이클 + 장기기억)로 라우팅된다.
-    agent: Optional[str] = "AILA"
+    agent: Optional[str] = "CoALA"
 
 
 def _agent_module(name: Optional[str]):
@@ -290,13 +297,21 @@ async def ccd_status(request: Request):
     loop = asyncio.get_event_loop()
     try:
         def _read():
-            t = ccd.get_temperature()            # temperature_status_num 도 업데이트
-            s = ccd.temp_status_dict.get(ccd.temperature_status_num)
-            return int(t), s
+            try:
+                t = ccd.get_temperature()        # temperature_status_num 도 업데이트
+                s = ccd.temp_status_dict.get(ccd.temperature_status_num)
+                return int(t), s
+            except IOError:
+                # 촬영 중(DRV_ACQUIRING)이면 GetTemperature 접근 불가 — 쿨러는 그대로
+                # 켜져 있으므로 '꺼짐'이 아니라 마지막으로 읽은 상태를 그대로 유지한다.
+                cached_t = getattr(ccd, "temperature", None)
+                cached_s = ccd.temp_status_dict.get(
+                    getattr(ccd, "temperature_status_num", None))
+                return (int(cached_t) if cached_t is not None else None), cached_s
         temp, status_str = await loop.run_in_executor(state.executor, _read)
         return CCDStatusResponse(connected=True, temperature=temp, temp_status=status_str)
     except Exception:
-        # 촬영 중 등 일시적 접근 불가
+        # 그 외 일시적 접근 불가 — 상태 미상(프론트는 '꺼짐'이 아닌 미상으로 처리)
         return CCDStatusResponse(connected=True, temperature=None, temp_status=None)
 
 

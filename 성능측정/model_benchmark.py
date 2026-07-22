@@ -22,7 +22,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 # ── 설정 ──────────────────────────────────────────────────────────────────────
 
-OLLAMA_HOST = "http://192.168.1.16:11434"
+OLLAMA_HOST = "http://192.168.1.15:11434"
 
 MODELS = [
     "gemma4:31b",

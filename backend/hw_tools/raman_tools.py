@@ -18,6 +18,17 @@ from backend.config import (
     LENS_WIDTH_UM, LENS_HEIGHT_UM,
     CALIB_FACTOR_X, CALIB_FACTOR_Y,
 )
+# 이 모듈에도 save_spectrum(CSV 저장 툴)이 있어 이름이 겹친다 → 별칭으로 import.
+from backend.spectrum_store import (
+    save_spectrum as _store_save_spectrum,
+    list_results as _store_list_results,
+    combine_spectra as _store_combine_spectra,
+    aggregate_spectra_csv as _store_aggregate_csv,
+    bundle_results as _store_bundle_results,
+    save_scene as _store_save_scene,
+)
+from backend.analysis_sandbox import run_analysis as _run_analysis
+from backend.web_search import web_search as _web_search
 
 STAGE_MIN_Z =  -1.0
 STAGE_MAX_Z =   1.0
@@ -173,6 +184,29 @@ def set_laser_power(percent: float) -> dict:
 # 스펙트럼 수집 (Andor CCD)
 # ──────────────────────────────────────────
 
+def _persist_spectrum(result: dict, tag: str = "") -> dict:
+    """측정 결과를 로컬(날짜/시간)에 저장하고 result['saved']에 경로·URL을 첨부한다.
+
+    스테이지 좌표를 읽을 수 있으면 메타에 실어 제목/파일명이 좌표별로 붙게 한다
+    (예: 10x10 스캔 → (x, y)). 저장 실패가 측정 결과 반환을 막지 않도록 방어적으로 처리.
+    """
+    meta: dict = {}
+    if tag:
+        meta["tag"] = tag
+    try:
+        if _stage is not None:
+            pos = _stage.get_position()
+            meta["x"], meta["y"] = round(float(pos[0]), 3), round(float(pos[1]), 3)
+    except Exception:
+        pass
+    saved = _store_save_spectrum(result, meta or None)
+    if saved.get("ok"):
+        result["saved"] = saved
+    else:
+        result["saved_error"] = saved.get("error")
+    return result
+
+
 def acquire_spectrum(
     exposure: float = 0.2,
     power: float = 40,
@@ -201,8 +235,8 @@ def acquire_spectrum(
     ----------
     exposure : float
         CCD 노출 시간 [초]. 기본 0.2.
-    power : int
-        레이저 출력 [%]. 20/40/60/80/100. 기본 40.
+    power : float
+        레이저 출력 [%]. 0.004 ~ 100 사이 임의 실수 (ND 필터 연속 조절). 기본 40.
     stabilize_sec : float
         레이저 ON 후 안정화 대기 [초]. 기본 0.5.
     acq_mode : str
@@ -238,13 +272,16 @@ def acquire_spectrum(
                          sum_intensity, calibrated, [raman_shift_cm-1, ...]}
     """
     if _ccd is None:
-        return {"ok": False, "error": "분광기가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "분광기(CCD)가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화 후 자동으로 측정 가능합니다."}
     if _laser is None:
         return {"ok": False, "error": "레이저가 초기화되지 않았습니다."}
 
-    valid_powers = {20, 40, 60, 80, 100}
-    if power not in valid_powers:
-        return {"ok": False, "error": f"유효한 출력값: {valid_powers}"}
+    # 레이저 파워는 연속 조절(ND 필터, 0.004~100%). 드라이버 set_power가
+    # 임의 %를 펄스 위치로 보간하며, 범위를 벗어나면 스스로 clamp한다.
+    if not isinstance(power, (int, float)):
+        return {"ok": False, "error": "power는 숫자(%)여야 합니다."}
+    if not (0.004 <= power <= 100):
+        return {"ok": False, "error": "유효한 출력 범위: 0.004 ~ 100 (%)"}
 
     if acq_mode not in ('single', 'accumulate', 'kinetic'):
         return {"ok": False, "error": "acq_mode는 'single' | 'accumulate' | 'kinetic'"}
@@ -372,7 +409,7 @@ def acquire_spectrum(
                     "laser_nm":         float(cal.laser_nm),
                 })
             frames.append(frame)
-        return {
+        return _persist_spectrum({
             "ok": True,
             "mode": "kinetic",
             "num_frames": len(frames),
@@ -380,7 +417,7 @@ def acquire_spectrum(
             "exposure_time": exposure,
             "laser_power_pct": power,
             "frames": frames,
-        }
+        })
     else:
         # Single / Accumulate: start_acquisition_cycle()이 calibration dict 반환
         data = raw
@@ -404,7 +441,7 @@ def acquire_spectrum(
             result["raman_shift_cm-1"] = data["raman_shift_cm-1"]
             result["wavelength_nm"]    = data["wavelength_nm"]
             result["laser_nm"]         = data["laser_nm"]
-        return result
+        return _persist_spectrum(result)
 
 # ──────────────────────────────────────────
 # CCD 파라미터 설정 툴
@@ -413,7 +450,7 @@ def acquire_spectrum(
 def get_ccd_info() -> dict:
     """현재 CCD 설정값 및 상태를 한 번에 조회한다."""
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     try:
         t           = _ccd.get_temperature()
         temp_status = _ccd.get_temperature_status()
@@ -456,7 +493,7 @@ def get_ccd_info() -> dict:
 def set_ccd_exposure(exposure_time: float) -> dict:
     """CCD 노출 시간(초)을 설정한다."""
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     if exposure_time <= 0:
         return {"ok": False, "error": "노출 시간은 0보다 커야 합니다."}
     try:
@@ -479,7 +516,7 @@ def set_ccd_acquisition_mode(
     num_kinetics: kinetic 모드에서 총 프레임 수
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     valid = {'single', 'accumulate', 'kinetic', 'run_till_abort'}
     if mode not in valid:
         return {"ok": False, "error": f"유효한 모드: {valid}"}
@@ -507,7 +544,7 @@ def set_ccd_trigger_mode(mode: str) -> dict:
           'external_exposure' | 'software'
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     valid = {'internal', 'external', 'external_start', 'external_exposure', 'software'}
     if mode not in valid:
         return {"ok": False, "error": f"유효한 모드: {valid}"}
@@ -537,7 +574,7 @@ def set_ccd_read_mode(
     width:  single_track 모드의 행 폭 (기본 1)
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     valid = {'fvb', 'single_track', 'image'}
     if mode not in valid:
         return {"ok": False, "error": f"유효한 모드: {valid}"}
@@ -567,7 +604,7 @@ def set_ccd_preamp_gain(index: int) -> dict:
     사용 가능한 이득 목록은 get_ccd_info()의 preamp_gains_available 참조.
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     try:
         _ccd.set_preamp_gain(index)
         gain_val = _ccd.preamp_gains[index] if _ccd.preamp_gains else None
@@ -582,7 +619,7 @@ def set_ccd_em_gain(gain: int) -> dict:
     EM CCD 전용. get_ccd_info()의 em_gain_range 참조.
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     if not getattr(_ccd, 'em_mode', False):
         return {"ok": False, "error": "이 카메라는 EM CCD가 아닙니다."}
     try:
@@ -598,7 +635,7 @@ def set_mcp_gain(gain: int) -> dict:
     허용 범위는 get_mcp_gain_range()로 확인.
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     try:
         low, high = _ccd.get_mcp_gain_range()
         if not (low <= gain <= high):
@@ -612,7 +649,7 @@ def set_mcp_gain(gain: int) -> dict:
 def get_mcp_gain_range() -> dict:
     """iStar ICCD 카메라의 MCP 이득 허용 범위(min, max)를 반환한다."""
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     try:
         low, high = _ccd.get_mcp_gain_range()
         return {"ok": True, "min": low, "max": high}
@@ -626,7 +663,7 @@ def set_ccd_output_amp(amp: int) -> dict:
     0 = EMCCD 앰프, 1 = 일반(Conventional) 앰프.
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     if amp not in (0, 1):
         return {"ok": False, "error": "amp는 0(EM) 또는 1(Conventional)이어야 합니다."}
     try:
@@ -643,7 +680,7 @@ def set_ccd_shift_speeds(vs_index: int = None, hs_index: int = None) -> dict:
     둘 중 하나만 지정해도 됩니다.
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     result = {"ok": True}
     try:
         if vs_index is not None:
@@ -666,7 +703,7 @@ def set_ccd_temperature(temp: int) -> dict:
     일반적 범위: -80 ~ 20°C.
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     try:
         _ccd.set_temperature(temp)
         return {"ok": True, "target_temperature_C": temp}
@@ -677,7 +714,7 @@ def set_ccd_temperature(temp: int) -> dict:
 def set_ccd_cooler(on: bool) -> dict:
     """CCD 냉각기를 켜거나(True) 끈다(False)."""
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     try:
         _ccd.set_cooler(on)
         return {"ok": True, "cooler": "ON" if on else "OFF"}
@@ -693,7 +730,7 @@ def set_ccd_shutter(mode: str) -> dict:
     'close' — 강제로 닫아둠 (다크/배경 측정 시)
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     if mode not in ('auto', 'open', 'close'):
         return {"ok": False, "error": "mode는 'auto', 'open', 'close' 중 하나여야 합니다."}
     try:
@@ -715,7 +752,7 @@ def set_ccd_image_flip(hflip: bool, vflip: bool) -> dict:
     vflip: 수직 상하 반전 여부
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
     try:
         _ccd.set_image_flip(hflip=hflip, vflip=vflip)
         return {"ok": True, "hflip": hflip, "vflip": vflip}
@@ -1418,6 +1455,46 @@ def save_point_data(
         return {"ok": False, "error": str(e)}
 
 
+def capture_scene() -> dict:
+    """현재 현미경(카메라) 화면을 저장한다 — run_analysis 가 이 위에 피크맵을 오버레이한다.
+
+    스테이지 위치와 렌즈 FOV(µm)로 이미지의 스테이지 좌표 범위(extent, mm)를 계산해
+    함께 저장하므로, 분석 코드에서 imshow(microscope_image, extent=image_extent) 후
+    측정 (x,y)를 그 위에 정합해 찍을 수 있다. 카메라 스트리밍이 켜져 있어야 한다.
+    """
+    if _camera is None:
+        return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
+    import numpy as np
+    import cv2
+    frame = _camera.get_latest_frame()
+    if frame is None:
+        return {"ok": False, "error": "카메라 프레임이 없습니다. 먼저 스트리밍을 시작하세요."}
+    img = frame.copy()
+    if img.dtype == np.uint16:
+        img = (img / 256).astype(np.uint8)
+    if img.ndim == 3:                       # BGR → RGB (matplotlib 표시 기준)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    extent = None
+    try:
+        if _stage is not None:
+            pos = _stage.get_position()
+            cx, cy = float(pos[0]), float(pos[1])          # mm
+            w_mm, h_mm = LENS_WIDTH_UM / 1000.0, LENS_HEIGHT_UM / 1000.0
+            extent = [cx - w_mm / 2, cx + w_mm / 2, cy - h_mm / 2, cy + h_mm / 2]
+    except Exception:
+        pass
+
+    saved = _store_save_scene(img, extent, {})
+    if not saved.get("ok"):
+        return saved
+    return {"ok": True, "image_url": saved["image_url"], "extent": extent,
+            "shape": list(img.shape),
+            # saved 를 실으면 spectrum_event 배선을 타 캡처한 화면이 채팅에 바로 표시된다.
+            "saved": {"title": "현미경 화면 캡처", "image_url": saved["image_url"]},
+            "note": "이후 run_analysis 에서 microscope_image / image_extent 로 사용 가능."}
+
+
 def analyze_microscope_image(question: str = "샘플의 특정 물체(예: 세포)를 찾고 중심점 픽셀 좌표를 알려주세요.") -> dict:
     """
     TuCam 현미경 카메라 화면을 PNG (Base64)로 캡처하여 반환.
@@ -1535,6 +1612,7 @@ TOOL_DISPATCH = {
     "capture_camera_frame":     lambda a: capture_camera_frame(),
     "analyze_microscope_image": lambda a: analyze_microscope_image(**a),
     "move_to_pixel":            lambda a: move_to_pixel(**a),
+    "capture_scene":            lambda a: capture_scene(),
     # ── 오토포커스 ───────────────────────────────────────────────────────────
     "run_autofocus":            lambda a: run_autofocus(**a),
     # ── CCD 설정 ─────────────────────────────────────────────────────────────
@@ -1556,6 +1634,17 @@ TOOL_DISPATCH = {
     # ── 데이터 저장 / 로드 ───────────────────────────────────────────────────
     "save_spectrum":            lambda a: save_spectrum(**a),
     "load_spectrum":            lambda a: load_spectrum(**a),
+    # ── 측정 결과 정리(자동 저장분 대상) ─────────────────────────────────────
+    "list_results":             lambda a: {"ok": True, "items": [
+                                    {k: it[k] for k in ("base", "date", "title", "timestamp", "meta")}
+                                    for it in _store_list_results(**a)]},
+    "combine_spectra":          lambda a: _store_combine_spectra(**a),
+    "aggregate_spectra_csv":    lambda a: _store_aggregate_csv(**a),
+    "bundle_results":           lambda a: _store_bundle_results(**a),
+    # ── 분석 전용 코드 샌드박스(하드웨어 미접근) ─────────────────────────────
+    "run_analysis":             lambda a: _run_analysis(**a),
+    # ── 외부 웹 검색(내부 지식에 없을 때) ────────────────────────────────────
+    "web_search":               lambda a: _web_search(**a),
     # ── 세션 관리 ────────────────────────────────────────────────────────────
     "create_session":           lambda a: create_session(**a),
     "save_point_data":          lambda a: save_point_data(**a),

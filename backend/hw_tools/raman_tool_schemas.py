@@ -905,4 +905,162 @@ RAMAN_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_results",
+            "description": (
+                "acquire_spectrum 으로 자동 저장된 측정 결과 목록을 조회한다. "
+                "각 항목의 base(파일 식별자)·title·timestamp·meta(좌표 등)를 돌려준다. "
+                "combine_spectra / aggregate_spectra_csv / bundle_results 에 넘길 base 를 여기서 얻는다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "조회할 날짜 'YYYY-MM-DD'. 생략하면 오늘.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "combine_spectra",
+            "description": (
+                "저장된 여러 측정 스펙트럼을 한 장의 격자 이미지로 합쳐 렌더한다. "
+                "각 칸 제목은 저장 시 자동 생성된 제목(스캔 좌표·파워·노출)을 그대로 쓴다. "
+                "예: 10x10 스캔이면 좌표별로 배치. names 를 생략하면 해당 날짜 전체를 합친다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string", "description": "대상 날짜 'YYYY-MM-DD'. 생략 시 오늘."},
+                    "names": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "합칠 측정 base 목록(list_results 로 확인). 생략 시 날짜 전체.",
+                    },
+                    "max_cols": {"type": "integer", "description": "격자 열 수. 기본 4.", "minimum": 1},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "aggregate_spectra_csv",
+            "description": (
+                "저장된 여러 측정을 실험당 한 행으로 요약한 CSV(날짜·시각·제목·좌표·파워·노출·"
+                "최대세기·총세기·피크위치)를 만든다. 여러 실험을 한 표로 정리할 때 쓴다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string", "description": "대상 날짜 'YYYY-MM-DD'. 생략 시 오늘."},
+                    "names": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "정리할 측정 base 목록. 생략 시 날짜 전체.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "capture_scene",
+            "description": (
+                "현재 현미경(카메라) 화면을 저장한다. 스테이지 위치·렌즈 FOV로 이미지의 스테이지 좌표 "
+                "범위(extent)까지 계산해 함께 저장하므로, 이후 run_analysis 에서 microscope_image / "
+                "image_extent 로 불러 피크맵을 현미경 이미지 위에 오버레이할 수 있다. "
+                "스캔 측정 전에 한 번 호출해 두면 좋다(카메라 스트리밍 필요)."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": (
+                "외부 웹을 검색해 상위 결과(제목·URL·요약)를 가져온다. 내부 지식/KB(search_kb)로 "
+                "답할 수 없는 최신·전문 정보(문헌, 파라미터 권장값, 방법론 등)를 찾을 때 쓴다. "
+                "먼저 search_kb로 로컬 지식을 확인하고, 부족할 때 이 도구로 외부를 찾는 것을 권장한다. "
+                "인터넷이 안 되면 실패를 반환하므로 그때는 로컬 지식으로 판단한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "검색어. 예: 'raman baseline correction asymmetric least squares'"},
+                    "max_results": {"type": "integer", "description": "가져올 결과 수(1~10). 기본 5.", "minimum": 1, "maximum": 10},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_analysis",
+            "description": (
+                "저장된 측정 데이터에 대한 '계산·시각화' 파이썬 코드를 안전 샌드박스에서 실행한다. "
+                "도구로 제공되지 않는 분석(baseline 보정, 피크 검출, 좌표별 피크맵/히트맵 등)을 코드로 직접 처리할 때 쓴다. "
+                "실행 환경에 이미 주입된 것: "
+                "spectra(list[dict] — 각 항목에 base, title, x, y, power, exposure, mode, "
+                "raman_shift(np.ndarray 또는 None), intensity(np.ndarray)), "
+                "np(numpy), plt(matplotlib.pyplot). "
+                "capture_scene 를 먼저 호출했다면 microscope_image(np.ndarray|None)와 "
+                "image_extent([xmin,xmax,ymin,ymax] 스테이지 mm|None)도 주입된다 — "
+                "ax.imshow(microscope_image, extent=image_extent) 후 측정 (x,y)에 피크를 오버레이하면 "
+                "현미경 이미지 위 피크맵이 된다. "
+                "plt 로 그림을 만들면 자동 저장되어 채팅에 표시된다. 수치 결과는 print() 로 출력하면 관측된다. "
+                "제약(안전): 하드웨어(레이저/스테이지/CCD) 제어 불가, 파일/네트워크 접근 불가, "
+                "import 는 numpy/scipy/matplotlib/math 등 계산 라이브러리만 허용. "
+                "3x3 스캔 같은 '측정'은 이 도구가 아니라 move_stage + acquire_spectrum 으로 먼저 수행하고, "
+                "그 저장 결과를 여기서 분석·시각화한다. 실패 시 error/trace 를 보고 코드를 고쳐 다시 호출한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "실행할 파이썬 분석 코드. spectra, np, plt 를 바로 사용. 예: 각 스펙트럼 피크 세기를 구해 (x,y) 산점도로 피크맵을 그린다.",
+                    },
+                    "date": {"type": "string", "description": "분석 대상 측정 날짜 'YYYY-MM-DD'. 생략 시 오늘."},
+                    "names": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "분석할 측정 base 목록(list_results 로 확인). 생략 시 날짜 전체.",
+                    },
+                    "title": {"type": "string", "description": "결과 그림에 붙일 제목."},
+                },
+                "required": ["code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bundle_results",
+            "description": (
+                "저장된 측정 파일들(png/csv/json)을 zip 하나로 묶어 다운로드 링크를 제공한다. "
+                "사용자가 결과 전체를 내려받고 싶어 할 때 쓴다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string", "description": "대상 날짜 'YYYY-MM-DD'. 생략 시 오늘."},
+                    "names": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "묶을 측정 base 목록. 생략 시 날짜 전체.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
