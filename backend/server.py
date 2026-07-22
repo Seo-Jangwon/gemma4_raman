@@ -199,6 +199,24 @@ class StageSpeedRequest(BaseModel):
 class ExperimentRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    # 어떤 에이전트 아키텍처로 실행할지 선택. 기본값 "AILA"(ReAct baseline)라
+    # 이 필드를 보내지 않던 기존 프론트엔드/벤치마크는 그대로 동작한다.
+    # "CoALA"를 주면 single_agent_CoALA(의사결정 사이클 + 장기기억)로 라우팅된다.
+    agent: Optional[str] = "AILA"
+
+
+def _agent_module(name: Optional[str]):
+    """agent 이름 → (에이전트 모듈, 정규화된 이름).
+
+    AILA↔CoALA를 가르는 판단은 이 함수 '하나'에만 있다 — 새 에이전트를 추가하거나
+    분기 규칙을 바꿀 때 여기만 고치면 라우트는 손대지 않는다. 두 모듈 모두 동일 공개
+    API(ALL_TOOLS / stream_experiment / run_experiment)를 노출하므로 호출부는 동일하다.
+    알 수 없는 값은 기본 AILA로 폴백한다(회귀 방지)."""
+    if (name or "").strip().upper() == "COALA":
+        from backend.agents import single_agent_CoALA as mod
+        return mod, "CoALA"
+    from backend.agents import single_agent_AILA as mod
+    return mod, "AILA"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -314,7 +332,8 @@ async def ccd_connect(body: CCDConnectRequest, request: Request):
 @app.post("/api/experiment/run")
 async def experiment_run(body: ExperimentRequest, request: Request):
     """단일 gemma4 에이전트 동기 실행 (세션 히스토리 없이 1회, 벤치마크/레거시용)."""
-    from backend.agents.single_agent import run_experiment
+    mod, _ = _agent_module(body.agent)
+    run_experiment = mod.run_experiment
     state = _state(request)
     loop = asyncio.get_event_loop()
     try:
@@ -342,7 +361,8 @@ async def experiment_stream(body: ExperimentRequest, request: Request):
     이를 이벤트 루프에서 직접 돌리면 서버가 멈추므로, ThreadPoolExecutor 워커에서
     돌리고 각 이벤트를 asyncio.Queue로 넘겨 async 쪽에서 흘려보낸다.
     """
-    from backend.agents.single_agent import stream_experiment
+    mod, _ = _agent_module(body.agent)
+    stream_experiment = mod.stream_experiment
 
     state = _state(request)
     loop = asyncio.get_event_loop()
@@ -383,14 +403,14 @@ async def experiment_stream(body: ExperimentRequest, request: Request):
 
 
 @app.get("/api/agents/health")
-async def agents_health():
-    """단일 에이전트 시스템 상태 확인 (구 4노드 LangGraph → gemma4 단일 ReAct 에이전트)."""
-    from backend.agents.single_agent import ALL_TOOLS
+async def agents_health(agent: str = "AILA"):
+    """단일 에이전트 시스템 상태 확인. agent 쿼리로 AILA/CoALA 중 선택(기본 AILA)."""
+    mod, name = _agent_module(agent)
     return {
         "status": "ok",
-        "agents": ["single_agent"],
+        "agents": [f"single_agent_{name}"],
         "model": "gemma4 (ollama)",
-        "tools": len(ALL_TOOLS),
+        "tools": len(mod.ALL_TOOLS),
     }
 
 
