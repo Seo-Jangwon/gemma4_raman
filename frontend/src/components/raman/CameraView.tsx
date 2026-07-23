@@ -79,6 +79,16 @@ export default function CameraView({ stagePos, onMoved }: CameraViewProps) {
           draggable={false}
         />
 
+        {/* 중앙 십자선 — 레이저 조사 위치. 뷰포트 정중앙 = 이미지 중심 = 레이저 조사점.
+            pointer-events-none 이라 클릭(스테이지 이동)을 가로막지 않는다. */}
+        <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+          {/* 중심 링 — 정확한 조사점 */}
+          <div
+            className="relative w-4 h-4 rounded-full border border-red-500/90 bg-red-500/10"
+            style={{ filter: 'drop-shadow(0 0 1px rgba(0,0,0,0.9))' }}
+          />
+        </div>
+
         {/* 클릭 인디케이터 */}
         {clickPos && (
           <div

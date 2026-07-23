@@ -158,7 +158,9 @@ def _recall_experiences(args: dict) -> dict:
         # 질의가 없으면 최근 경험을 반환한다(그래도 유용한 컨텍스트).
         ranked = list(reversed(episodes))
     else:
-        scored = [(e, _match_score(query, e, ("sample", "outcome", "lesson", "metrics")))
+        scored = [(e, _match_score(query, e,
+                                   ("sample", "sample_name", "visual_features",
+                                    "outcome", "lesson", "metrics")))
                   for e in episodes]
         ranked = [e for e, s in sorted(scored, key=lambda x: x[1], reverse=True) if s > 0]
         if not ranked:
@@ -177,22 +179,42 @@ def _record_experience(ctx: dict, args: dict) -> dict:
     sample = str(args.get("sample", "")).strip()
     if not sample:
         return {"ok": False, "error": "sample (sample type) is required."}
+
+    # 시스템이 이번 턴 동안 이미 추적한 절차 정보를 자동으로 실어 기록을 구체화한다
+    # (LLM이 굳이 넘기지 않아도 되게). record_*(학습) 메타 액션 자체는 순서에서 뺀다.
+    order = [n for n in ctx.get("tool_call_order", []) if n not in _INTERNAL_LEARNING]
+    counts: dict = {}
+    for n in order:
+        counts[n] = counts.get(n, 0) + 1
+
     entry = {
         "id": uuid.uuid4().hex[:12],
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
         "session_id": ctx.get("session_id", ""),
-        "sample": sample,
+        # ── 시료 식별 ──────────────────────────────────────────────────────────
+        "sample": sample,                                          # 종류/재료 (필수)
+        "sample_name": str(args.get("sample_name", "")).strip(),   # 명시된 이름/라벨
+        "visual_features": str(args.get("visual_features", "")).strip(),  # 현미경 시각 특징
+        # ── 측정 조건·결과 ────────────────────────────────────────────────────
         "params": args.get("params", {}),
         "outcome": str(args.get("outcome", "")).strip(),
         "metrics": str(args.get("metrics", "")).strip(),
         "lesson": str(args.get("lesson", "")).strip(),
+        # ── 시스템 자동 기록(절차 흔적) — LLM 입력 불필요 ─────────────────────
+        "tool_sequence": order,                        # 툴 호출 순서(전체)
+        "tool_counts": counts,                         # 툴별 호출 횟수
+        "n_measurements": counts.get("acquire_spectrum", 0),  # 측정(레이저 조사) 횟수
+        "dose_mj": round(float(ctx.get("dose", 0.0)), 3),     # 이번 턴 누적 조사량
     }
     try:
         _append_json_list(_EPISODIC_PATH, entry)
     except OSError as e:
         return {"ok": False, "error": f"Failed to save experience: {e}"}
     ctx["learned"] = True
-    return {"ok": True, "recorded": entry["id"], "sample": sample}
+    return {"ok": True, "recorded": entry["id"], "sample": sample,
+            "auto_captured": {"tool_calls": len(order),
+                              "n_measurements": entry["n_measurements"],
+                              "dose_mj": entry["dose_mj"]}}
 
 
 def _record_insight(ctx: dict, args: dict) -> dict:
@@ -216,6 +238,7 @@ def _record_insight(ctx: dict, args: dict) -> dict:
     except OSError as e:
         return {"ok": False, "error": f"Failed to save insight: {e}"}
     ctx["learned"] = True
+    ctx["insight_recorded"] = True   # 엔드-오브-턴 유도가 중복 제안하지 않도록 표시
     return {"ok": True, "recorded": entry["id"], "topic": topic}
 
 
@@ -340,12 +363,23 @@ _RECORD_EXP_TOOL_SCHEMA = {
             "[episodic memory write/learning - execution] Record the experience of the experiment just "
             "performed into long-term memory. Call it after finishing the measurement and just before writing "
             "the report - this record is retrieved via recall_experiences in the next session and reused as "
-            "know-how. It does not touch hardware."
+            "know-how. It does not touch hardware. "
+            "You do NOT need to pass the tool-call order, number of measurements, or laser dose - those are "
+            "captured automatically. Focus on describing the sample identity (type and, if the user stated one, "
+            "its explicit name), the sample's visual features seen under the microscope, the parameters used, "
+            "the outcome, quantitative metrics, and the lesson for next time."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "sample": {"type": "string", "description": "Sample type (required). e.g. 'graphene'."},
+                "sample": {"type": "string",
+                           "description": "Sample type/material (required). e.g. 'graphene', 'silicon', 'exosome'."},
+                "sample_name": {"type": "string",
+                                "description": "Explicit sample name/label if the user gave one. "
+                                               "e.g. 'Sample A', 'empty silicon wafer'. Leave empty if none was stated."},
+                "visual_features": {"type": "string",
+                                    "description": "Visual appearance from the microscope image. "
+                                                   "e.g. 'dark ~20um flake near center on a shiny substrate, some folds visible'."},
                 "params": {"type": "object",
                            "description": "Measurement parameters used. e.g. {'power':20,'exposure':2.0}."},
                 "outcome": {"type": "string", "description": "Result summary. e.g. 'G/2D bands good'."},
