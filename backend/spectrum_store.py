@@ -195,7 +195,7 @@ def save_spectrum(result: dict, meta: dict | None = None) -> dict:
            실패해도 측정 자체를 막지 않도록 예외를 삼키고 {ok: False, error} 를 돌려준다.
     """
     if not result or not result.get("ok"):
-        return {"ok": False, "error": "저장할 유효한 측정 결과가 없습니다."}
+        return {"ok": False, "error": "No valid measurement result to save."}
     try:
         now = datetime.now()
         date_dir = now.strftime("%Y-%m-%d")
@@ -233,7 +233,7 @@ def save_spectrum(result: dict, meta: dict | None = None) -> dict:
             "json_url": url(json_path),
         }
     except Exception as e:
-        return {"ok": False, "error": f"결과 저장 실패: {e}"}
+        return {"ok": False, "error": f"Failed to save results: {e}"}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -295,7 +295,7 @@ def combine_spectra(date: str | None = None, names: list[str] | None = None,
     저장 제목(좌표·조건 자동 생성)을 그대로 쓴다. 반환 saved.image_url 로 채팅 표시."""
     d, items = _select(date, names)
     if not items:
-        return {"ok": False, "error": f"{d}에 합칠 측정 결과가 없습니다."}
+        return {"ok": False, "error": f"No measurement results to combine on {d}."}
     n = len(items)
     cols = max(1, min(max_cols, n))
     rows = ceil(n / cols)
@@ -324,7 +324,7 @@ def combine_spectra(date: str | None = None, names: list[str] | None = None,
     fig.savefig(png, bbox_inches="tight")
     plt.close(fig)
     return {"ok": True, "count": n,
-            "saved": {"title": f"합본 · {n}개 측정", "image_url": _url(d, png.name)}}
+            "saved": {"title": f"Combined · {n} measurements", "image_url": _url(d, png.name)}}
 
 
 def aggregate_spectra_csv(date: str | None = None, names: list[str] | None = None,
@@ -333,7 +333,7 @@ def aggregate_spectra_csv(date: str | None = None, names: list[str] | None = Non
     열: 날짜/시각/제목/좌표/파워/노출/모드/최대세기/총세기/피크위치."""
     d, items = _select(date, names)
     if not items:
-        return {"ok": False, "error": f"{d}에 정리할 측정 결과가 없습니다."}
+        return {"ok": False, "error": f"No measurement results to summarize on {d}."}
     day_dir = RESULTS_ROOT / d
     day_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%H%M%S")
@@ -359,7 +359,7 @@ def aggregate_spectra_csv(date: str | None = None, names: list[str] | None = Non
                 f"{sum(inten):.1f}" if inten else "", peak,
             ])
     return {"ok": True, "count": len(items),
-            "saved": {"title": f"요약표 · {len(items)}개 측정", "csv_url": _url(d, csv_path.name)}}
+            "saved": {"title": f"Summary table · {len(items)} measurements", "csv_url": _url(d, csv_path.name)}}
 
 
 def save_scene(image, extent: list | None = None, meta: dict | None = None) -> dict:
@@ -392,7 +392,7 @@ def save_scene(image, extent: list | None = None, meta: dict | None = None) -> d
         return {"ok": True, "image_url": _url(day, png_path.name),
                 "scene_npz": str(npz_path), "extent": extent}
     except Exception as e:
-        return {"ok": False, "error": f"현미경 이미지 저장 실패: {e}"}
+        return {"ok": False, "error": f"Failed to save microscope image: {e}"}
 
 
 def latest_scene(date: str | None = None) -> str | None:
@@ -409,7 +409,7 @@ def bundle_results(date: str | None = None, names: list[str] | None = None,
     """저장된 측정 파일들을 zip 하나로 묶어 다운로드 URL 을 돌려준다(#4)."""
     d, items = _select(date, names)
     if not items:
-        return {"ok": False, "error": f"{d}에 묶을 측정 결과가 없습니다."}
+        return {"ok": False, "error": f"No measurement results to bundle on {d}."}
     day_dir = RESULTS_ROOT / d
     day_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%H%M%S")
@@ -424,5 +424,5 @@ def bundle_results(date: str | None = None, names: list[str] | None = None,
                     z.write(p, arcname=p.name)
                     n_files += 1
     return {"ok": True, "count": len(items), "files": n_files,
-            "saved": {"title": f"묶음(zip) · 측정 {len(items)}개 / 파일 {n_files}개",
+            "saved": {"title": f"Bundle (zip) · {len(items)} measurements / {n_files} files",
                       "zip_url": _url(d, zip_name)}}

@@ -7,13 +7,13 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "move_stage",
-            "description": "스테이지를 절대 좌표(mm)로 이동한다.",
+            "description": "Move the stage to an absolute position (mm).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "x": {"type": "number", "description": "X축 위치 (mm, 0~75.3)"},
-                    "y": {"type": "number", "description": "Y축 위치 (mm, 0~50.2)"},
-                    "z": {"type": "number", "description": "Z축 위치 (mm, -1.0~1.0). 생략 가능"},
+                    "x": {"type": "number", "description": "X-axis position (mm, 0-75.3)"},
+                    "y": {"type": "number", "description": "Y-axis position (mm, 0-50.2)"},
+                    "z": {"type": "number", "description": "Z-axis position (mm, -1.0-1.0). Optional"},
                 },
                 "required": ["x", "y"],
             },
@@ -24,23 +24,23 @@ RAMAN_TOOLS = [
         "function": {
             "name": "set_stage_speed",
             "description": (
-                "스테이지의 이동 속도를 설정한다. "
-                "x_speed_mm_s, y_speed_mm_s, z_speed_mm_s 필드로 각 축의 이동 속도가 포함된다."
+                "Set the stage movement speed. "
+                "The x_speed_mm_s, y_speed_mm_s, z_speed_mm_s fields carry the speed of each axis."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "x_speed_mm_s": {
                         "type": "number",
-                        "description": "X축 이동 속도 (mm/s), 최대 5.0mm/s",
+                        "description": "X-axis movement speed (mm/s), max 5.0 mm/s",
                     },
                     "y_speed_mm_s": {
                         "type": "number",
-                        "description": "Y축 이동 속도 (mm/s), 최대 5.0mm/s",
+                        "description": "Y-axis movement speed (mm/s), max 5.0 mm/s",
                     },
                     "z_speed_mm_s": {
                         "type": "number",
-                        "description": "Z축 이동 속도 (mm/s), 최대 0.1mm/s",
+                        "description": "Z-axis movement speed (mm/s), max 0.1 mm/s",
                     },
                 },
                 "required": ["x_speed_mm_s", "y_speed_mm_s"],
@@ -51,7 +51,7 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_stage_position",
-            "description": "현재 스테이지의 X, Y, Z 위치(mm)를 읽어온다.",
+            "description": "Read the current stage X, Y, Z position (mm).",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -59,13 +59,13 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "move_stage_relative",
-            "description": "현재 위치 기준으로 스테이지를 상대 이동한다.",
+            "description": "Move the stage relative to its current position.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "dx": {"type": "number", "description": "X 방향 이동량 (mm)"},
-                    "dy": {"type": "number", "description": "Y 방향 이동량 (mm)"},
-                    "dz": {"type": "number", "description": "Z 방향 이동량 (mm)"},
+                    "dx": {"type": "number", "description": "Displacement in X (mm)"},
+                    "dy": {"type": "number", "description": "Displacement in Y (mm)"},
+                    "dz": {"type": "number", "description": "Displacement in Z (mm)"},
                 },
                 "required": [],
             },
@@ -75,7 +75,7 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "laser_on",
-            "description": "레이저를 켠다.",
+            "description": "Turn the laser on.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -83,7 +83,7 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "laser_off",
-            "description": "레이저를 끈다.",
+            "description": "Turn the laser off.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -91,13 +91,13 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_laser_power",
-            "description": "레이저 출력(ND 필터 투과율)을 설정한다. 0.004~100 % 범위의 임의 실수.",
+            "description": "Set the laser power (ND filter transmittance). Any real value in the range 0.004-100 %.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "percent": {
                         "type": "number",
-                        "description": "출력 퍼센트 (투과율 %). 0.004~100 범위의 실수. 예: 1, 2.5, 40, 100.",
+                        "description": "Power percent (transmittance %). A real value in 0.004-100. e.g. 1, 2.5, 40, 100.",
                         "minimum": 0.004,
                         "maximum": 100,
                     }
@@ -111,80 +111,80 @@ RAMAN_TOOLS = [
         "function": {
             "name": "acquire_spectrum",
             "description": (
-                "현재 위치에서 라만 스펙트럼을 수집한다. "
-                "Single(1회) / Accumulate(누적 평균, 고SNR) / Kinetic(시계열 연속) 3가지 취득 모드를 지원한다. "
-                "레이저 ON → 출력 안정화 → CCD 촬영 → 레이저 OFF 흐름을 자동 처리한다. "
-                "캘리브레이터 연결 시 raman_shift_cm-1, wavelength_nm, laser_nm 필드가 포함된다. "
-                "Kinetic 모드는 frames 배열로 각 프레임 데이터를 반환한다."
+                "Acquire a Raman spectrum at the current position. "
+                "Supports three acquisition modes: Single (one shot) / Accumulate (averaged, high SNR) / Kinetic (continuous time series). "
+                "Automatically handles the laser ON -> power stabilization -> CCD acquisition -> laser OFF flow. "
+                "When a calibrator is connected, the raman_shift_cm-1, wavelength_nm, laser_nm fields are included. "
+                "Kinetic mode returns per-frame data in a frames array."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "exposure": {
                         "type": "number",
-                        "description": "CCD 노출 시간 (초). 기본값 0.2",
+                        "description": "CCD exposure time (seconds). Default 0.2",
                     },
                     "power": {
                         "type": "number",
-                        "description": "레이저 출력 (투과율 %). 0.004~100 범위의 실수. 기본값 40.",
+                        "description": "Laser power (transmittance %). A real value in 0.004-100. Default 40.",
                         "minimum": 0.004,
                         "maximum": 100,
                     },
                     "stabilize_sec": {
                         "type": "number",
-                        "description": "레이저 ON 후 출력 안정화 대기 시간 (초). 기본값 0.5",
+                        "description": "Wait time for power stabilization after laser ON (seconds). Default 0.5",
                     },
                     "acq_mode": {
                         "type": "string",
                         "enum": ["single", "accumulate", "kinetic"],
                         "description": (
-                            "CCD 취득 모드. "
-                            "'single': 1회 촬영(기본). "
-                            "'accumulate': num_accumulations회 누적 합산 → 고SNR 스펙트럼. "
-                            "'kinetic': kinetic_count개 프레임을 연속 취득 → 시계열 분석."
+                            "CCD acquisition mode. "
+                            "'single': single shot (default). "
+                            "'accumulate': sum num_accumulations shots -> high-SNR spectrum. "
+                            "'kinetic': acquire kinetic_count frames continuously -> time-series analysis."
                         ),
                     },
                     "num_accumulations": {
                         "type": "integer",
-                        "description": "accumulate/kinetic 모드에서 프레임당 누적 횟수. 기본값 1.",
+                        "description": "Accumulations per frame in accumulate/kinetic mode. Default 1.",
                         "minimum": 1,
                     },
                     "kinetic_count": {
                         "type": "integer",
-                        "description": "kinetic 모드에서 수집할 총 프레임 수. 기본값 1.",
+                        "description": "Total number of frames to acquire in kinetic mode. Default 1.",
                         "minimum": 1,
                     },
                     "kinetic_cycle_time": {
                         "type": "number",
-                        "description": "kinetic 모드 프레임 간격 (초). 생략하면 SDK가 최소값으로 자동 계산.",
+                        "description": "Frame interval in kinetic mode (seconds). If omitted, the SDK auto-computes the minimum.",
                     },
                     "read_mode": {
                         "type": "string",
                         "enum": ["fvb", "single_track"],
                         "description": (
-                            "CCD 읽기 모드. "
-                            "'fvb': Full Vertical Binning — 수직 전체 합산, 1D 스펙트럼(기본). "
-                            "'single_track': 특정 행만 읽기 — single_track_center 필수."
+                            "CCD readout mode. "
+                            "'fvb': Full Vertical Binning - sum all rows, 1D spectrum (default). "
+                            "'single_track': read only a specific track - single_track_center required."
                         ),
                     },
                     "hbin": {
                         "type": "integer",
-                        "description": "수평 비닝 픽셀 수. 기본값 1.",
+                        "description": "Horizontal binning pixel count. Default 1.",
                         "minimum": 1,
                     },
                     "single_track_center": {
                         "type": "integer",
-                        "description": "read_mode='single_track' 시 중심 픽셀 행 번호.",
+                        "description": "Center pixel row number when read_mode='single_track'.",
                     },
                     "single_track_width": {
                         "type": "integer",
-                        "description": "read_mode='single_track' 시 트랙 폭 (픽셀). 기본값 1.",
+                        "description": "Track width (pixels) when read_mode='single_track'. Default 1.",
                         "minimum": 1,
                     },
                     "trigger_mode": {
                         "type": "string",
                         "enum": ["internal", "external", "external_start", "external_exposure", "external_fvb_em", "software"],
-                        "description": "CCD 트리거 모드. 기본값 'internal'.",
+                        "description": "CCD trigger mode. Default 'internal'.",
                     },
                 },
                 "required": [],
@@ -195,7 +195,7 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "start_camera_stream",
-            "description": "카메라 실시간 스트리밍(미리보기)을 시작한다. 시편의 위치를 확인하거나 초점을 맞출 때 사용한다.",
+            "description": "Start real-time camera streaming (preview). Use it to check the sample position or to focus.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -203,7 +203,7 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "stop_camera_stream",
-            "description": "카메라 실시간 스트리밍을 중지한다.",
+            "description": "Stop real-time camera streaming.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -213,9 +213,9 @@ RAMAN_TOOLS = [
         "function": {
             "name": "get_ccd_info",
             "description": (
-                "현재 CCD의 모든 설정값과 상태를 조회한다. "
-                "온도, 냉각 상태, 노출 시간, 취득 모드, 읽기 모드, 이득, 시프트 속도, "
-                "픽셀 수 등을 한 번에 반환한다. 파라미터 변경 전후에 사용해 현재 상태를 확인한다."
+                "Query all current CCD settings and status. "
+                "Returns temperature, cooling status, exposure time, acquisition mode, readout mode, gain, shift speeds, "
+                "pixel count, etc. in one call. Use it before and after changing parameters to verify the current state."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -224,13 +224,13 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_ccd_exposure",
-            "description": "CCD 노출 시간(초)을 설정한다. 값이 클수록 신호가 강해지지만 측정 시간이 늘어난다.",
+            "description": "Set the CCD exposure time (seconds). Larger values give stronger signal but longer measurement time.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "exposure_time": {
                         "type": "number",
-                        "description": "노출 시간 [초]. 예: 0.1, 0.5, 1.0",
+                        "description": "Exposure time [seconds]. e.g. 0.1, 0.5, 1.0",
                     }
                 },
                 "required": ["exposure_time"],
@@ -242,27 +242,27 @@ RAMAN_TOOLS = [
         "function": {
             "name": "set_ccd_acquisition_mode",
             "description": (
-                "CCD 취득 모드를 설정한다. "
-                "'single': 1회 촬영. "
-                "'accumulate': num_accumulations 회 누적 후 합산. "
-                "'kinetic': num_kinetics 프레임을 연속 취득. "
-                "'run_till_abort': 중단 명령 전까지 연속 취득."
+                "Set the CCD acquisition mode. "
+                "'single': single shot. "
+                "'accumulate': sum after num_accumulations shots. "
+                "'kinetic': acquire num_kinetics frames continuously. "
+                "'run_till_abort': acquire continuously until an abort command."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "mode": {
                         "type": "string",
-                        "description": "취득 모드",
+                        "description": "Acquisition mode",
                         "enum": ["single", "accumulate", "kinetic", "run_till_abort"],
                     },
                     "num_accumulations": {
                         "type": "integer",
-                        "description": "누적 횟수 (accumulate/kinetic 모드에서 사용). 기본 1",
+                        "description": "Number of accumulations (used in accumulate/kinetic mode). Default 1",
                     },
                     "num_kinetics": {
                         "type": "integer",
-                        "description": "총 취득 프레임 수 (kinetic 모드에서 사용)",
+                        "description": "Total number of frames to acquire (used in kinetic mode)",
                     },
                 },
                 "required": ["mode"],
@@ -274,19 +274,19 @@ RAMAN_TOOLS = [
         "function": {
             "name": "set_ccd_trigger_mode",
             "description": (
-                "CCD 트리거 모드를 설정한다. "
-                "'internal': 소프트웨어로 취득 시작 (기본). "
-                "'external': 외부 TTL 신호로 취득 시작. "
-                "'external_start': 외부 트리거로 시작 후 내부 타이밍. "
-                "'external_exposure': 외부 TTL HIGH 동안 노출. "
-                "'software': SendSoftwareTrigger 사용."
+                "Set the CCD trigger mode. "
+                "'internal': start acquisition via software (default). "
+                "'external': start acquisition on an external TTL signal. "
+                "'external_start': start on external trigger then internal timing. "
+                "'external_exposure': expose while the external TTL is HIGH. "
+                "'software': use SendSoftwareTrigger."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "mode": {
                         "type": "string",
-                        "description": "트리거 모드",
+                        "description": "Trigger mode",
                         "enum": ["internal", "external", "external_start", "external_exposure", "software"],
                     }
                 },
@@ -299,30 +299,30 @@ RAMAN_TOOLS = [
         "function": {
             "name": "set_ccd_read_mode",
             "description": (
-                "CCD 읽기 모드(readout mode)를 설정한다. "
-                "'fvb': Full Vertical Binning — 수직 전체 합산 → 1D 스펙트럼 (기본, 라만에 사용). "
-                "'single_track': 특정 수직 행만 읽음. center 파라미터 필수. "
-                "'image': 2D 이미지 전체 또는 ROI."
+                "Set the CCD readout mode. "
+                "'fvb': Full Vertical Binning - sum all rows -> 1D spectrum (default, used for Raman). "
+                "'single_track': read only a specific vertical row. The center parameter is required. "
+                "'image': full 2D image or ROI."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "mode": {
                         "type": "string",
-                        "description": "읽기 모드",
+                        "description": "Readout mode",
                         "enum": ["fvb", "single_track", "image"],
                     },
                     "hbin": {
                         "type": "integer",
-                        "description": "수평 빈닝 계수 (기본 1 = 빈닝 없음)",
+                        "description": "Horizontal binning factor (default 1 = no binning)",
                     },
                     "center": {
                         "type": "integer",
-                        "description": "single_track 모드에서 읽을 행의 중심 번호 (1-based). single_track 모드 사용 시 반드시 지정 필요. 예: 256",
+                        "description": "Center row number to read in single_track mode (1-based). Must be specified when using single_track mode. e.g. 256",
                     },
                     "width": {
                         "type": "integer",
-                        "description": "single_track 모드에서 읽을 행 수 (기본 1)",
+                        "description": "Number of rows to read in single_track mode (default 1)",
                     },
                 },
                 "required": ["mode"],
@@ -333,13 +333,13 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_mcp_gain",
-            "description": "iStar ICCD 카메라의 MCP(Micro-Channel Plate) 이득을 설정한다. 허용 범위는 get_mcp_gain_range()로 확인한다.",
+            "description": "Set the MCP (Micro-Channel Plate) gain of the iStar ICCD camera. Check the allowed range with get_mcp_gain_range().",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "gain": {
                         "type": "integer",
-                        "description": "설정할 MCP 이득값"
+                        "description": "MCP gain value to set"
                     }
                 },
                 "required": ["gain"]
@@ -350,7 +350,7 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_mcp_gain_range",
-            "description": "iStar ICCD 카메라의 MCP 이득 허용 범위(min, max)를 반환한다.",
+            "description": "Return the allowed MCP gain range (min, max) of the iStar ICCD camera.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -363,16 +363,16 @@ RAMAN_TOOLS = [
         "function": {
             "name": "set_ccd_preamp_gain",
             "description": (
-                "프리앰프(Pre-Amplifier) 이득 인덱스를 설정한다. "
-                "사용 가능한 이득 목록은 get_ccd_info()의 preamp_gains_available 참조. "
-                "인덱스가 클수록 이득이 높아 미약한 신호 측정에 유리하지만 노이즈도 증가한다."
+                "Set the pre-amplifier gain index. "
+                "See preamp_gains_available in get_ccd_info() for the available gain list. "
+                "A larger index gives higher gain, which helps measure weak signals but also increases noise."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "index": {
                         "type": "integer",
-                        "description": "프리앰프 이득 인덱스 (0-based). 보통 0~2 범위",
+                        "description": "Pre-amplifier gain index (0-based). Typically in the range 0-2",
                     }
                 },
                 "required": ["index"],
@@ -384,15 +384,15 @@ RAMAN_TOOLS = [
         "function": {
             "name": "set_ccd_em_gain",
             "description": (
-                "EM(Electron Multiplication) 이득을 설정한다. EMCCD 전용. "
-                "높은 값일수록 신호를 크게 증폭하지만 과다 시 이미지가 포화될 수 있다."
+                "Set the EM (Electron Multiplication) gain. EMCCD only. "
+                "Higher values amplify the signal more, but too high may saturate the image."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "gain": {
                         "type": "integer",
-                        "description": "EM 이득값. get_ccd_info()의 em_gain_range 범위 내",
+                        "description": "EM gain value. Within the em_gain_range from get_ccd_info()",
                     }
                 },
                 "required": ["gain"],
@@ -404,16 +404,16 @@ RAMAN_TOOLS = [
         "function": {
             "name": "set_ccd_output_amp",
             "description": (
-                "출력 앰프를 선택한다. "
-                "0 = EMCCD 앰프 (EM 이득 활성화). "
-                "1 = Conventional 앰프 (EM 비활성, 저노이즈)."
+                "Select the output amplifier. "
+                "0 = EMCCD amp (EM gain enabled). "
+                "1 = Conventional amp (EM disabled, low noise)."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "amp": {
                         "type": "integer",
-                        "description": "앰프 선택: 0(EM) 또는 1(Conventional)",
+                        "description": "Amplifier selection: 0 (EM) or 1 (Conventional)",
                         "enum": [0, 1],
                     }
                 },
@@ -426,21 +426,21 @@ RAMAN_TOOLS = [
         "function": {
             "name": "set_ccd_shift_speeds",
             "description": (
-                "수직(VS) 및 수평(HS) 픽셀 시프트 속도를 설정한다. "
-                "VS: 인덱스가 클수록 느리지만 전하 전송 노이즈 감소. "
-                "HS: 인덱스가 클수록 느리지만 읽기 노이즈 감소. "
-                "둘 중 하나만 지정해도 된다. 사용 가능한 속도 목록은 get_ccd_info() 참조."
+                "Set the vertical (VS) and horizontal (HS) pixel shift speeds. "
+                "VS: a larger index is slower but reduces charge-transfer noise. "
+                "HS: a larger index is slower but reduces readout noise. "
+                "You may specify only one of them. See get_ccd_info() for the available speed list."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "vs_index": {
                         "type": "integer",
-                        "description": "수직 시프트 속도 인덱스",
+                        "description": "Vertical shift speed index",
                     },
                     "hs_index": {
                         "type": "integer",
-                        "description": "수평 시프트 속도 인덱스",
+                        "description": "Horizontal shift speed index",
                     },
                 },
                 "required": [],
@@ -452,17 +452,17 @@ RAMAN_TOOLS = [
         "function": {
             "name": "set_ccd_temperature",
             "description": (
-                "CCD 냉각 목표 온도(°C)를 설정한다. "
-                "낮은 온도일수록 암전류(dark current) 노이즈가 줄어든다. "
-                "실제 도달까지 수 분이 걸릴 수 있으며 get_ccd_info()로 진행 상태를 확인한다. "
-                "일반적 범위: -80 ~ 20°C."
+                "Set the CCD cooling target temperature (°C). "
+                "Lower temperature reduces dark-current noise. "
+                "It may take several minutes to reach; check progress with get_ccd_info(). "
+                "Typical range: -80 to 20°C."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "temp": {
                         "type": "integer",
-                        "description": "목표 온도 [°C]. 예: -40, -60, -80",
+                        "description": "Target temperature [°C]. e.g. -40, -60, -80",
                     }
                 },
                 "required": ["temp"],
@@ -473,13 +473,13 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_ccd_cooler",
-            "description": "CCD 펠티에 냉각기를 켜거나(true) 끈다(false). 종료 전에는 반드시 꺼야 한다.",
+            "description": "Turn the CCD Peltier cooler on (true) or off (false). It must be turned off before shutdown.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "on": {
                         "type": "boolean",
-                        "description": "true = 냉각기 ON, false = 냉각기 OFF",
+                        "description": "true = cooler ON, false = cooler OFF",
                     }
                 },
                 "required": ["on"],
@@ -491,17 +491,17 @@ RAMAN_TOOLS = [
         "function": {
             "name": "set_ccd_shutter",
             "description": (
-                "CCD 셔터 모드를 설정한다. "
-                "'auto'  — 취득 시 자동으로 열고 닫음 (정상 측정). "
-                "'open'  — 강제로 열어둠. "
-                "'close' — 강제로 닫아둠 (다크 프레임/배경 측정 시)."
+                "Set the CCD shutter mode. "
+                "'auto'  - open and close automatically during acquisition (normal measurement). "
+                "'open'  - force open. "
+                "'close' - force closed (for dark-frame / background measurement)."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "mode": {
                         "type": "string",
-                        "description": "셔터 모드",
+                        "description": "Shutter mode",
                         "enum": ["auto", "open", "close"],
                     }
                 },
@@ -513,17 +513,17 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_ccd_image_flip",
-            "description": "취득 이미지의 수평/수직 반전을 설정한다.",
+            "description": "Set horizontal/vertical flip of the acquired image.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "hflip": {
                         "type": "boolean",
-                        "description": "true = 수평 좌우 반전",
+                        "description": "true = flip horizontally (left-right)",
                     },
                     "vflip": {
                         "type": "boolean",
-                        "description": "true = 수직 상하 반전",
+                        "description": "true = flip vertically (up-down)",
                     },
                 },
                 "required": ["hflip", "vflip"],
@@ -535,7 +535,7 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_stage_speed",
-            "description": "현재 스테이지 이동 속도(mm/s)를 조회한다. x_speed_mm_s, y_speed_mm_s, z_speed_mm_s 필드가 반환된다.",
+            "description": "Query the current stage movement speed (mm/s). Returns the x_speed_mm_s, y_speed_mm_s, z_speed_mm_s fields.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -543,13 +543,13 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_stage_speed",
-            "description": "스테이지 이동 속도를 설정한다. X/Y 최대 5.0 mm/s, Z 최대 0.1 mm/s.",
+            "description": "Set the stage movement speed. X/Y max 5.0 mm/s, Z max 0.1 mm/s.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "x_speed_mm_s": {"type": "number", "description": "X축 이동 속도 (mm/s, 최대 5.0)"},
-                    "y_speed_mm_s": {"type": "number", "description": "Y축 이동 속도 (mm/s, 최대 5.0)"},
-                    "z_speed_mm_s": {"type": "number", "description": "Z축 이동 속도 (mm/s, 최대 0.1). 생략 가능"},
+                    "x_speed_mm_s": {"type": "number", "description": "X-axis movement speed (mm/s, max 5.0)"},
+                    "y_speed_mm_s": {"type": "number", "description": "Y-axis movement speed (mm/s, max 5.0)"},
+                    "z_speed_mm_s": {"type": "number", "description": "Z-axis movement speed (mm/s, max 0.1). Optional"},
                 },
                 "required": ["x_speed_mm_s", "y_speed_mm_s"],
             },
@@ -561,9 +561,9 @@ RAMAN_TOOLS = [
         "function": {
             "name": "set_guide_beam_mode",
             "description": (
-                "레이저를 가이드빔 대기 상태로 전환한다. "
-                "빔 스플리터를 대기 위치로, ND 필터를 메인 빔 차단 위치로 이동한다. "
-                "시편 정렬·초점 확인 시 사용한다."
+                "Switch the laser to guide-beam standby state. "
+                "Moves the beam splitter to the standby position and the ND filter to the main-beam blocking position. "
+                "Use it for sample alignment and focus checking."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -573,11 +573,11 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_camera_exposure",
-            "description": "카메라(TUCam) 노출 시간(ms)을 설정한다.",
+            "description": "Set the camera (TUCam) exposure time (ms).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "ms": {"type": "number", "description": "노출 시간 [ms]. 예: 10.0, 50.0, 100.0"},
+                    "ms": {"type": "number", "description": "Exposure time [ms]. e.g. 10.0, 50.0, 100.0"},
                 },
                 "required": ["ms"],
             },
@@ -587,11 +587,11 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_camera_auto_exposure",
-            "description": "카메라 자동 노출을 활성화(true) 또는 비활성화(false)한다.",
+            "description": "Enable (true) or disable (false) camera auto exposure.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "enabled": {"type": "boolean", "description": "true = 자동 노출 ON, false = 수동 노출"},
+                    "enabled": {"type": "boolean", "description": "true = auto exposure ON, false = manual exposure"},
                 },
                 "required": ["enabled"],
             },
@@ -602,10 +602,10 @@ RAMAN_TOOLS = [
         "function": {
             "name": "capture_camera_frame",
             "description": (
-                "카메라에서 최신 프레임 1장을 캡처하여 형태(shape), 강도 통계, "
-                "선명도 점수(sharpness_score, 라플라시안 분산)를 반환한다. "
-                "스트리밍이 활성화된 상태여야 한다. "
-                "오토포커스 시 Z 위치별 선명도 비교에 활용할 수 있다."
+                "Capture the latest single frame from the camera and return its shape, intensity statistics, "
+                "and sharpness score (sharpness_score, Laplacian variance). "
+                "Streaming must be active. "
+                "Useful for comparing sharpness across Z positions during autofocus."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -615,17 +615,17 @@ RAMAN_TOOLS = [
         "function": {
             "name": "analyze_microscope_image",
             "description": (
-                "TuCam 광학현미경 카메라의 현재 화면을 캡처해 이미지로 전달한다. "
-                "샘플 위치 확인, 타겟 식별, 이물질 탐지 등 시각적 판단이 필요할 때 사용해라. "
-                "스트리밍이 활성화된 상태여야 한다."
-                "반환 시 픽셀 좌표도 함께 반환하게 되며, 이는 스테이지의 좌표가 아니므로 해당 위치로 이동이 필요할 시 move_to_pixel 도구로 변환해 이동해야 한다."
+                "Capture the current view of the TuCam optical microscope camera and pass it as an image. "
+                "Use it when visual judgment is needed, e.g. checking sample position, identifying a target, or detecting debris. "
+                "Streaming must be active. "
+                "The return also includes pixel coordinates; these are not stage coordinates, so if you need to move to that location, convert and move with the move_to_pixel tool."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "이미지에서 확인하고 싶은 내용 (선택). 예: '샘플의 위치와 밝기를 설명해줘'",
+                        "description": "What you want to check in the image (optional). e.g. 'Describe the sample position and brightness'",
                     },
                 },
                 "required": [],
@@ -637,20 +637,20 @@ RAMAN_TOOLS = [
         "function": {
             "name": "move_to_pixel",
             "description": (
-                "카메라 이미지 내 픽셀 좌표(pixel_x, pixel_y)를 스테이지 mm 좌표로 변환해 이동한다. "
-                "이미지 중심이 현재 스테이지 위치에 대응한다. "
-                "analyze_microscope_image로 타겟 픽셀 좌표를 확인한 뒤 이 tool로 이동하세요."
+                "Convert pixel coordinates (pixel_x, pixel_y) within the camera image to stage mm coordinates and move there. "
+                "The image center corresponds to the current stage position. "
+                "After checking the target pixel coordinates with analyze_microscope_image, move with this tool."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "pixel_x": {
                         "type": "integer",
-                        "description": "이미지 X 픽셀 좌표 (0 ~ 1060)",
+                        "description": "Image X pixel coordinate (0 - 1060)",
                     },
                     "pixel_y": {
                         "type": "integer",
-                        "description": "이미지 Y 픽셀 좌표 (0 ~ 800)",
+                        "description": "Image Y pixel coordinate (0 - 800)",
                     },
                 },
                 "required": ["pixel_x", "pixel_y"],
@@ -663,29 +663,29 @@ RAMAN_TOOLS = [
         "function": {
             "name": "run_autofocus",
             "description": (
-                "가이드빔 레이저 스팟 면적 최소화 기반 힐클라이밍 오토포커스. "
-                "레이저 OFF/ON 차분 이미지에서 Otsu threshold로 스팟 픽셀 수(면적)를 계산하고, "
-                "면적이 최소인 Z 위치(레이저 스팟이 가장 날카로운 위치)로 스테이지를 이동한다. "
-                "적응형 힐클라이밍으로 보폭을 자동 조절하며 역대 최솟값 위치로 최종 귀환한다."
+                "Hill-climbing autofocus based on minimizing the guide-beam laser spot area. "
+                "Computes the spot pixel count (area) via Otsu thresholding on the laser OFF/ON difference image, "
+                "and moves the stage to the Z position with minimum area (where the laser spot is sharpest). "
+                "Adaptive hill-climbing auto-adjusts the step size and finally returns to the historical minimum position."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "initial_z": {
                         "type": "number",
-                        "description": "탐색 시작 Z 위치 (mm). 생략 시 현재 Z 유지",
+                        "description": "Starting Z position for the search (mm). If omitted, keep the current Z",
                     },
                     "step_size": {
                         "type": "number",
-                        "description": "초기 Z 이동 보폭 (mm). 기본 0.030 (30µm)",
+                        "description": "Initial Z step size (mm). Default 0.030 (30 um)",
                     },
                     "min_step": {
                         "type": "number",
-                        "description": "최소 보폭 (mm) — 이 이하면 탐색 종료. 기본 0.001 (1µm)",
+                        "description": "Minimum step size (mm) - the search ends below this. Default 0.001 (1 um)",
                     },
                     "max_steps": {
                         "type": "integer",
-                        "description": "최대 스텝 수 — 초과 시 강제 종료. 기본 100",
+                        "description": "Maximum number of steps - forced stop when exceeded. Default 100",
                     },
                 },
                 "required": [],
@@ -698,9 +698,9 @@ RAMAN_TOOLS = [
         "function": {
             "name": "save_spectrum",
             "description": (
-                "스펙트럼 강도 배열을 CSV 파일로 저장한다. "
-                "raman_shift를 함께 전달하면 캘리브레이션 정보도 포함된다. "
-                "파일은 프로젝트 루트/data/ 디렉토리에 저장된다."
+                "Save a spectrum intensity array to a CSV file. "
+                "If raman_shift is also passed, calibration information is included. "
+                "The file is saved to the <project root>/data/ directory."
             ),
             "parameters": {
                 "type": "object",
@@ -708,25 +708,25 @@ RAMAN_TOOLS = [
                     "data": {
                         "type": "array",
                         "items": {"type": "number"},
-                        "description": "강도(intensity) 배열",
+                        "description": "Intensity array",
                     },
                     "filename": {
                         "type": "string",
-                        "description": "저장 파일명 (.csv 확장자 없어도 됨). 예: 'polystyrene_01'",
+                        "description": "File name to save (the .csv extension is optional). e.g. 'polystyrene_01'",
                     },
                     "raman_shift": {
                         "type": "array",
                         "items": {"type": "number"},
-                        "description": "라만 시프트 축 [cm⁻¹]. 생략 가능",
+                        "description": "Raman shift axis [cm-1]. Optional",
                     },
                     "wavelength_nm": {
                         "type": "array",
                         "items": {"type": "number"},
-                        "description": "파장 축 [nm]. 생략 가능",
+                        "description": "Wavelength axis [nm]. Optional",
                     },
                     "metadata": {
                         "type": "object",
-                        "description": "추가 메타데이터 (노출 시간, 출력 등). 같은 이름의 .json으로 저장",
+                        "description": "Additional metadata (exposure time, power, etc.). Saved as a .json with the same name",
                     },
                 },
                 "required": ["data", "filename"],
@@ -738,15 +738,15 @@ RAMAN_TOOLS = [
         "function": {
             "name": "load_spectrum",
             "description": (
-                "저장된 스펙트럼 CSV 파일을 로드한다. "
-                "data/ 디렉토리 기준 상대 경로 또는 절대 경로 모두 허용."
+                "Load a saved spectrum CSV file. "
+                "Both a path relative to the data/ directory and an absolute path are allowed."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "filename": {
                         "type": "string",
-                        "description": "파일명 또는 경로. 예: 'polystyrene_01' 또는 'polystyrene_01.csv'",
+                        "description": "File name or path. e.g. 'polystyrene_01' or 'polystyrene_01.csv'",
                     }
                 },
                 "required": ["filename"],
@@ -759,15 +759,15 @@ RAMAN_TOOLS = [
         "function": {
             "name": "create_session",
             "description": (
-                "새 실험 세션 디렉토리를 생성하고 메타데이터를 초기화한다. "
-                "이후 save_point_data()로 포인트별 스펙트럼·위치 데이터를 저장할 수 있다."
+                "Create a new experiment session directory and initialize its metadata. "
+                "Afterwards you can save per-point spectrum/position data with save_point_data()."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "session_id": {
                         "type": "string",
-                        "description": "세션 식별자. 예: 'EXP_001'",
+                        "description": "Session identifier. e.g. 'EXP_001'",
                     }
                 },
                 "required": ["session_id"],
@@ -779,33 +779,33 @@ RAMAN_TOOLS = [
         "function": {
             "name": "save_point_data",
             "description": (
-                "실험 세션의 특정 측정 포인트에 스펙트럼·위치 데이터를 저장한다. "
-                "create_session()으로 세션을 먼저 생성해야 한다."
+                "Save spectrum/position data at a specific measurement point of an experiment session. "
+                "You must first create a session with create_session()."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "session_id": {
                         "type": "string",
-                        "description": "세션 ID. 예: 'EXP_001'",
+                        "description": "Session ID. e.g. 'EXP_001'",
                     },
                     "point_id": {
                         "type": "string",
-                        "description": "포인트 식별자. 예: 'P001'",
+                        "description": "Point identifier. e.g. 'P001'",
                     },
                     "spectrum_data": {
                         "type": "array",
                         "items": {"type": "number"},
-                        "description": "강도 배열. 생략 가능",
+                        "description": "Intensity array. Optional",
                     },
                     "raman_shift": {
                         "type": "array",
                         "items": {"type": "number"},
-                        "description": "라만 시프트 축 [cm⁻¹]. 생략 가능",
+                        "description": "Raman shift axis [cm-1]. Optional",
                     },
                     "position": {
                         "type": "object",
-                        "description": "스테이지 위치 {'x': ..., 'y': ..., 'z': ...}. 생략 가능",
+                        "description": "Stage position {'x': ..., 'y': ..., 'z': ...}. Optional",
                     },
                 },
                 "required": ["session_id", "point_id"],
@@ -818,51 +818,51 @@ RAMAN_TOOLS = [
         "function": {
             "name": "apply_background_subtraction",
             "description": (
-                "IPBSA(반복 다항식 배경 제거 알고리즘)로 라만 스펙트럼의 형광 배경을 제거한다. "
-                "가장 최근에 수집한 스펙트럼(source='last') 또는 저장된 파일 경로를 소스로 사용한다. "
-                "결과는 version_label로 저장되며 list_bg_versions()로 여러 버전을 비교할 수 있다. "
-                "poly_order를 높이면 더 복잡한 배경을 제거할 수 있지만 과적합 위험이 있다. "
-                "사용자가 다항식 차수를 지정하지 않으면 기본값 5를 사용하라."
+                "Remove the fluorescence background of a Raman spectrum using IPBSA (iterative polynomial background subtraction). "
+                "Uses the most recently acquired spectrum (source='last') or a saved file path as the source. "
+                "The result is saved under version_label, and you can compare multiple versions with list_bg_versions(). "
+                "Increasing poly_order removes more complex backgrounds but risks overfitting. "
+                "If the user does not specify a polynomial order, use the default value 5."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "poly_order": {
                         "type": "integer",
-                        "description": "다항식 차수 (2~10). 기본값 5. 낮을수록 부드러운 배경, 높을수록 복잡한 배경 추정.",
+                        "description": "Polynomial order (2-10). Default 5. Lower is a smoother background; higher estimates a more complex background.",
                         "minimum": 2,
                         "maximum": 10,
                     },
                     "max_iterations": {
                         "type": "integer",
-                        "description": "최대 반복 횟수 (10~500). 기본값 100.",
+                        "description": "Maximum number of iterations (10-500). Default 100.",
                         "minimum": 10,
                         "maximum": 500,
                     },
                     "threshold": {
                         "type": "number",
-                        "description": "수렴 기준 — 반복 간 배경 곡선 상대 L2 변화량 (0.001~1.0). 기본값 0.001. 작을수록 엄격한 수렴.",
+                        "description": "Convergence criterion - relative L2 change of the background curve between iterations (0.001-1.0). Default 0.001. Smaller means stricter convergence.",
                         "minimum": 0.001,
                         "maximum": 1.0,
                     },
                     "source": {
                         "type": "string",
                         "description": (
-                            "배경 제거할 스펙트럼 소스. "
-                            "'last': 가장 최근 acquire_spectrum() 결과 사용 (기본). "
-                            "그 외: 파일 경로 (JSON 또는 CSV, data/ 기준 상대경로 허용)."
+                            "Source spectrum to background-subtract. "
+                            "'last': use the most recent acquire_spectrum() result (default). "
+                            "Otherwise: a file path (JSON or CSV, a path relative to data/ is allowed)."
                         ),
                     },
                     "version_label": {
                         "type": "string",
                         "description": (
-                            "이 결과에 붙일 버전 이름. 예: 'v1_poly5', 'v2_poly7'. "
-                            "같은 이름으로 다시 호출하면 덮어쓴다. 기본값 'default'."
+                            "Version name to attach to this result. e.g. 'v1_poly5', 'v2_poly7'. "
+                            "Calling again with the same name overwrites it. Default 'default'."
                         ),
                     },
                     "save_result": {
                         "type": "boolean",
-                        "description": "True이면 보정 스펙트럼을 data/ 디렉토리에 CSV로 저장한다. 기본값 false.",
+                        "description": "If True, save the corrected spectrum as a CSV in the data/ directory. Default false.",
                     },
                 },
                 "required": [],
@@ -874,9 +874,9 @@ RAMAN_TOOLS = [
         "function": {
             "name": "list_bg_versions",
             "description": (
-                "저장된 모든 배경 제거 결과 버전의 목록과 파라미터, 주요 통계를 반환한다. "
-                "데이터 배열은 포함되지 않는다. 전체 데이터는 get_bg_version()을 사용하라. "
-                "apply_background_subtraction()을 여러 번 호출해 비교할 때 사용한다."
+                "Return the list of all saved background-subtraction result versions with their parameters and key statistics. "
+                "Data arrays are not included. Use get_bg_version() for the full data. "
+                "Use it when calling apply_background_subtraction() several times to compare."
             ),
             "parameters": {
                 "type": "object",
@@ -890,15 +890,15 @@ RAMAN_TOOLS = [
         "function": {
             "name": "get_bg_version",
             "description": (
-                "특정 버전의 배경 제거 결과 전체 데이터(보정 스펙트럼, 배경 곡선, 라만 시프트 축)를 반환한다. "
-                "version_label은 list_bg_versions()에서 확인한다."
+                "Return the full data of a specific background-subtraction result version (corrected spectrum, background curve, Raman shift axis). "
+                "Check version_label with list_bg_versions()."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "version_label": {
                         "type": "string",
-                        "description": "조회할 버전 이름. 예: 'v1_poly5'",
+                        "description": "Version name to query. e.g. 'v1_poly5'",
                     },
                 },
                 "required": ["version_label"],
@@ -910,16 +910,16 @@ RAMAN_TOOLS = [
         "function": {
             "name": "list_results",
             "description": (
-                "acquire_spectrum 으로 자동 저장된 측정 결과 목록을 조회한다. "
-                "각 항목의 base(파일 식별자)·title·timestamp·meta(좌표 등)를 돌려준다. "
-                "combine_spectra / aggregate_spectra_csv / bundle_results 에 넘길 base 를 여기서 얻는다."
+                "Query the list of measurement results auto-saved by acquire_spectrum. "
+                "Returns each item's base (file identifier), title, timestamp, and meta (coordinates, etc.). "
+                "Get the base to pass to combine_spectra / aggregate_spectra_csv / bundle_results here."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "date": {
                         "type": "string",
-                        "description": "조회할 날짜 'YYYY-MM-DD'. 생략하면 오늘.",
+                        "description": "Date to query 'YYYY-MM-DD'. If omitted, today.",
                     },
                 },
                 "required": [],
@@ -931,19 +931,19 @@ RAMAN_TOOLS = [
         "function": {
             "name": "combine_spectra",
             "description": (
-                "저장된 여러 측정 스펙트럼을 한 장의 격자 이미지로 합쳐 렌더한다. "
-                "각 칸 제목은 저장 시 자동 생성된 제목(스캔 좌표·파워·노출)을 그대로 쓴다. "
-                "예: 10x10 스캔이면 좌표별로 배치. names 를 생략하면 해당 날짜 전체를 합친다."
+                "Combine several saved measurement spectra into a single grid image and render it. "
+                "Each cell title uses the title auto-generated at save time (scan coordinates, power, exposure) as is. "
+                "e.g. for a 10x10 scan, arranged by coordinate. If names is omitted, combine everything from that date."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "date": {"type": "string", "description": "대상 날짜 'YYYY-MM-DD'. 생략 시 오늘."},
+                    "date": {"type": "string", "description": "Target date 'YYYY-MM-DD'. If omitted, today."},
                     "names": {
                         "type": "array", "items": {"type": "string"},
-                        "description": "합칠 측정 base 목록(list_results 로 확인). 생략 시 날짜 전체.",
+                        "description": "List of measurement bases to combine (check with list_results). If omitted, the whole date.",
                     },
-                    "max_cols": {"type": "integer", "description": "격자 열 수. 기본 4.", "minimum": 1},
+                    "max_cols": {"type": "integer", "description": "Number of grid columns. Default 4.", "minimum": 1},
                 },
                 "required": [],
             },
@@ -954,16 +954,16 @@ RAMAN_TOOLS = [
         "function": {
             "name": "aggregate_spectra_csv",
             "description": (
-                "저장된 여러 측정을 실험당 한 행으로 요약한 CSV(날짜·시각·제목·좌표·파워·노출·"
-                "최대세기·총세기·피크위치)를 만든다. 여러 실험을 한 표로 정리할 때 쓴다."
+                "Build a CSV summarizing several saved measurements, one row per experiment (date, time, title, coordinates, power, exposure, "
+                "max intensity, total intensity, peak position). Use it to organize multiple experiments into one table."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "date": {"type": "string", "description": "대상 날짜 'YYYY-MM-DD'. 생략 시 오늘."},
+                    "date": {"type": "string", "description": "Target date 'YYYY-MM-DD'. If omitted, today."},
                     "names": {
                         "type": "array", "items": {"type": "string"},
-                        "description": "정리할 측정 base 목록. 생략 시 날짜 전체.",
+                        "description": "List of measurement bases to organize. If omitted, the whole date.",
                     },
                 },
                 "required": [],
@@ -975,10 +975,10 @@ RAMAN_TOOLS = [
         "function": {
             "name": "capture_scene",
             "description": (
-                "현재 현미경(카메라) 화면을 저장한다. 스테이지 위치·렌즈 FOV로 이미지의 스테이지 좌표 "
-                "범위(extent)까지 계산해 함께 저장하므로, 이후 run_analysis 에서 microscope_image / "
-                "image_extent 로 불러 피크맵을 현미경 이미지 위에 오버레이할 수 있다. "
-                "스캔 측정 전에 한 번 호출해 두면 좋다(카메라 스트리밍 필요)."
+                "Save the current microscope (camera) view. It also computes and saves the stage-coordinate "
+                "extent of the image from the stage position and lens FOV, so later in run_analysis you can load it via microscope_image / "
+                "image_extent and overlay a peak map on top of the microscope image. "
+                "It is good to call this once before a scan measurement (camera streaming required)."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -988,16 +988,16 @@ RAMAN_TOOLS = [
         "function": {
             "name": "web_search",
             "description": (
-                "외부 웹을 검색해 상위 결과(제목·URL·요약)를 가져온다. 내부 지식/KB(search_kb)로 "
-                "답할 수 없는 최신·전문 정보(문헌, 파라미터 권장값, 방법론 등)를 찾을 때 쓴다. "
-                "먼저 search_kb로 로컬 지식을 확인하고, 부족할 때 이 도구로 외부를 찾는 것을 권장한다. "
-                "인터넷이 안 되면 실패를 반환하므로 그때는 로컬 지식으로 판단한다."
+                "Search the external web and fetch the top results (title, URL, summary). Use it to find recent/specialist information "
+                "(literature, recommended parameter values, methodology, etc.) that internal knowledge/KB (search_kb) cannot answer. "
+                "It is recommended to first check local knowledge with search_kb and use this tool for external search when that is insufficient. "
+                "If there is no internet it returns a failure, in which case decide from local knowledge."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "검색어. 예: 'raman baseline correction asymmetric least squares'"},
-                    "max_results": {"type": "integer", "description": "가져올 결과 수(1~10). 기본 5.", "minimum": 1, "maximum": 10},
+                    "query": {"type": "string", "description": "Search query. e.g. 'raman baseline correction asymmetric least squares'"},
+                    "max_results": {"type": "integer", "description": "Number of results to fetch (1-10). Default 5.", "minimum": 1, "maximum": 10},
                 },
                 "required": ["query"],
             },
@@ -1008,35 +1008,35 @@ RAMAN_TOOLS = [
         "function": {
             "name": "run_analysis",
             "description": (
-                "저장된 측정 데이터에 대한 '계산·시각화' 파이썬 코드를 안전 샌드박스에서 실행한다. "
-                "도구로 제공되지 않는 분석(baseline 보정, 피크 검출, 좌표별 피크맵/히트맵 등)을 코드로 직접 처리할 때 쓴다. "
-                "실행 환경에 이미 주입된 것: "
-                "spectra(list[dict] — 각 항목에 base, title, x, y, power, exposure, mode, "
-                "raman_shift(np.ndarray 또는 None), intensity(np.ndarray)), "
-                "np(numpy), plt(matplotlib.pyplot). "
-                "capture_scene 를 먼저 호출했다면 microscope_image(np.ndarray|None)와 "
-                "image_extent([xmin,xmax,ymin,ymax] 스테이지 mm|None)도 주입된다 — "
-                "ax.imshow(microscope_image, extent=image_extent) 후 측정 (x,y)에 피크를 오버레이하면 "
-                "현미경 이미지 위 피크맵이 된다. "
-                "plt 로 그림을 만들면 자동 저장되어 채팅에 표시된다. 수치 결과는 print() 로 출력하면 관측된다. "
-                "제약(안전): 하드웨어(레이저/스테이지/CCD) 제어 불가, 파일/네트워크 접근 불가, "
-                "import 는 numpy/scipy/matplotlib/math 등 계산 라이브러리만 허용. "
-                "3x3 스캔 같은 '측정'은 이 도구가 아니라 move_stage + acquire_spectrum 으로 먼저 수행하고, "
-                "그 저장 결과를 여기서 분석·시각화한다. 실패 시 error/trace 를 보고 코드를 고쳐 다시 호출한다."
+                "Run 'computation/visualization' Python code on saved measurement data in a safe sandbox. "
+                "Use it to handle analyses not provided as tools (baseline correction, peak detection, per-coordinate peak maps/heatmaps, etc.) directly in code. "
+                "Already injected into the runtime: "
+                "spectra (list[dict] - each item has base, title, x, y, power, exposure, mode, "
+                "raman_shift (np.ndarray or None), intensity (np.ndarray)), "
+                "np (numpy), plt (matplotlib.pyplot). "
+                "If you called capture_scene first, microscope_image (np.ndarray|None) and "
+                "image_extent ([xmin,xmax,ymin,ymax] stage mm|None) are also injected - "
+                "after ax.imshow(microscope_image, extent=image_extent), overlaying peaks at the measurement (x,y) "
+                "makes a peak map on top of the microscope image. "
+                "A figure created with plt is auto-saved and shown in the chat. Numeric results are observed if you print() them. "
+                "Constraints (safety): no hardware (laser/stage/CCD) control, no file/network access, "
+                "imports limited to computation libraries such as numpy/scipy/matplotlib/math. "
+                "A 'measurement' like a 3x3 scan is done first with move_stage + acquire_spectrum, not this tool, "
+                "and the saved result is analyzed/visualized here. On failure, read error/trace, fix the code, and call again."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "code": {
                         "type": "string",
-                        "description": "실행할 파이썬 분석 코드. spectra, np, plt 를 바로 사용. 예: 각 스펙트럼 피크 세기를 구해 (x,y) 산점도로 피크맵을 그린다.",
+                        "description": "Python analysis code to run. Use spectra, np, plt directly. e.g. compute each spectrum's peak intensity and draw a peak map as an (x,y) scatter.",
                     },
-                    "date": {"type": "string", "description": "분석 대상 측정 날짜 'YYYY-MM-DD'. 생략 시 오늘."},
+                    "date": {"type": "string", "description": "Measurement date to analyze 'YYYY-MM-DD'. If omitted, today."},
                     "names": {
                         "type": "array", "items": {"type": "string"},
-                        "description": "분석할 측정 base 목록(list_results 로 확인). 생략 시 날짜 전체.",
+                        "description": "List of measurement bases to analyze (check with list_results). If omitted, the whole date.",
                     },
-                    "title": {"type": "string", "description": "결과 그림에 붙일 제목."},
+                    "title": {"type": "string", "description": "Title to attach to the result figure."},
                 },
                 "required": ["code"],
             },
@@ -1047,16 +1047,16 @@ RAMAN_TOOLS = [
         "function": {
             "name": "bundle_results",
             "description": (
-                "저장된 측정 파일들(png/csv/json)을 zip 하나로 묶어 다운로드 링크를 제공한다. "
-                "사용자가 결과 전체를 내려받고 싶어 할 때 쓴다."
+                "Bundle saved measurement files (png/csv/json) into a single zip and provide a download link. "
+                "Use it when the user wants to download all the results."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "date": {"type": "string", "description": "대상 날짜 'YYYY-MM-DD'. 생략 시 오늘."},
+                    "date": {"type": "string", "description": "Target date 'YYYY-MM-DD'. If omitted, today."},
                     "names": {
                         "type": "array", "items": {"type": "string"},
-                        "description": "묶을 측정 base 목록. 생략 시 날짜 전체.",
+                        "description": "List of measurement bases to bundle. If omitted, the whole date.",
                     },
                 },
                 "required": [],

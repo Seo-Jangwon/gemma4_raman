@@ -73,7 +73,7 @@ def web_search(query: str, max_results: int = 5) -> dict:
     """
     query = (query or "").strip()
     if not query:
-        return {"ok": False, "error": "검색어(query)가 비어 있습니다."}
+        return {"ok": False, "error": "The search query is empty."}
     max_results = max(1, min(int(max_results or 5), 10))
 
     use_google = bool(os.environ.get("GOOGLE_API_KEY") and os.environ.get("GOOGLE_CSE_ID"))
@@ -82,11 +82,11 @@ def web_search(query: str, max_results: int = 5) -> dict:
             else _search_duckduckgo(query, max_results)
     except httpx.HTTPError as e:
         return {"ok": False,
-                "error": f"웹 검색 실패(네트워크): {type(e).__name__}. "
-                         "장비 PC가 인터넷에 연결되어 있는지 확인하세요. "
-                         "오프라인이면 search_kb(로컬 지식)로 대체하세요."}
+                "error": f"Web search failed (network): {type(e).__name__}. "
+                         "Check that the instrument PC is connected to the internet. "
+                         "If offline, fall back to search_kb (local knowledge)."}
     except Exception as e:
-        return {"ok": False, "error": f"웹 검색 실패: {e}"}
+        return {"ok": False, "error": f"Web search failed: {e}"}
 
     if not result.get("results"):
         result["note"] = "검색 결과가 없습니다. 질의를 바꾸거나 search_kb를 시도하세요."

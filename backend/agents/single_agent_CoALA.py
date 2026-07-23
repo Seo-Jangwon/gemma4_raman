@@ -72,6 +72,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from backend.agents.detail_log import new_turn
 from backend.agents.knowledge import search_kb
 from backend.hw_tools.raman_tool_schemas import RAMAN_TOOLS
 from backend.spectrum_store import spectrum_event
@@ -151,8 +152,8 @@ def _recall_experiences(args: dict) -> dict:
     episodes = _load_json_list(_EPISODIC_PATH)
     if not episodes:
         return {"ok": True, "results": [],
-                "note": "축적된 과거 실험 경험이 아직 없습니다. 이번 측정을 마친 뒤 "
-                        "record_experience로 경험을 남기면 다음 실험에서 조회됩니다."}
+                "note": "No past experiments accumulated yet. After finishing this measurement, "
+                        "leave one with record_experience and it will be retrievable in future experiments."}
     if not query:
         # 질의가 없으면 최근 경험을 반환한다(그래도 유용한 컨텍스트).
         ranked = list(reversed(episodes))
@@ -162,7 +163,7 @@ def _recall_experiences(args: dict) -> dict:
         ranked = [e for e, s in sorted(scored, key=lambda x: x[1], reverse=True) if s > 0]
         if not ranked:
             return {"ok": True, "results": [],
-                    "note": f"'{query}'와 관련된 과거 경험을 찾지 못했습니다. 스스로 판단하세요."}
+                    "note": f"No past experience related to '{query}'. Decide on your own."}
     return {"ok": True, "results": ranked[:top_k]}
 
 
@@ -175,7 +176,7 @@ def _record_experience(ctx: dict, args: dict) -> dict:
     """
     sample = str(args.get("sample", "")).strip()
     if not sample:
-        return {"ok": False, "error": "sample(시편 종류)은 필수입니다."}
+        return {"ok": False, "error": "sample (sample type) is required."}
     entry = {
         "id": uuid.uuid4().hex[:12],
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -189,7 +190,7 @@ def _record_experience(ctx: dict, args: dict) -> dict:
     try:
         _append_json_list(_EPISODIC_PATH, entry)
     except OSError as e:
-        return {"ok": False, "error": f"경험 저장 실패: {e}"}
+        return {"ok": False, "error": f"Failed to save experience: {e}"}
     ctx["learned"] = True
     return {"ok": True, "recorded": entry["id"], "sample": sample}
 
@@ -203,7 +204,7 @@ def _record_insight(ctx: dict, args: dict) -> dict:
     topic = str(args.get("topic", "")).strip()
     insight = str(args.get("insight", "")).strip()
     if not topic or not insight:
-        return {"ok": False, "error": "topic과 insight 모두 필요합니다."}
+        return {"ok": False, "error": "Both topic and insight are required."}
     entry = {
         "id": uuid.uuid4().hex[:12],
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -213,7 +214,7 @@ def _record_insight(ctx: dict, args: dict) -> dict:
     try:
         _append_json_list(_SEMANTIC_PATH, entry)
     except OSError as e:
-        return {"ok": False, "error": f"통찰 저장 실패: {e}"}
+        return {"ok": False, "error": f"Failed to save insight: {e}"}
     ctx["learned"] = True
     return {"ok": True, "recorded": entry["id"], "topic": topic}
 
@@ -232,8 +233,8 @@ def _recall_insights(args: dict) -> dict:
     insights = _load_json_list(_SEMANTIC_PATH)
     if not insights:
         return {"ok": True, "results": [],
-                "note": "축적된 일반화 지식(insight)이 아직 없습니다. record_insight로 "
-                        "남기면 이후 실험에서 조회됩니다."}
+                "note": "No generalized knowledge (insights) accumulated yet. Leave one with "
+                        "record_insight and it will be retrievable in future experiments."}
     if not query:
         ranked = list(reversed(insights))
     else:
@@ -241,7 +242,7 @@ def _recall_insights(args: dict) -> dict:
         ranked = [e for e, s in sorted(scored, key=lambda x: x[1], reverse=True) if s > 0]
         if not ranked:
             return {"ok": True, "results": [],
-                    "note": f"'{query}'와 관련된 일반화 지식을 찾지 못했습니다. 스스로 판단하세요."}
+                    "note": f"No generalized knowledge related to '{query}'. Decide on your own."}
     return {"ok": True, "results": ranked[:top_k]}
 
 
@@ -253,12 +254,12 @@ def _search_knowledge_base(args: dict) -> dict:
     """
     query = str(args.get("query", "")).strip()
     if not query:
-        return {"ok": False, "error": "query가 비어 있습니다. 시편/재료 키워드를 주세요."}
+        return {"ok": False, "error": "query is empty. Provide a sample/material keyword."}
     hits = search_kb(query, top_k=3)
     if not hits:
         return {"ok": True, "results": [],
-                "note": f"'{query}'에 해당하는 프로토콜이 지식베이스에 없습니다. "
-                        "직접 판단해 파라미터를 정하고 보고서에 그 사실을 밝히세요."}
+                "note": f"No protocol matching '{query}' in the knowledge base. "
+                        "Decide the parameters yourself and state that in the report."}
     return {"ok": True, "results": hits}
 
 
@@ -271,16 +272,17 @@ _KB_TOOL_SCHEMA = {
     "function": {
         "name": "search_knowledge_base",
         "description": (
-            "[semantic 기억 조회 · planning] 시편 종류(graphene, cell, exosome, silicon, "
-            "CNT 등)로 라만 측정 프로토콜과 권장 파라미터(레이저 파워 %, 노출 시간 초, 주요 "
-            "피크 위치)를 검색한다. 측정 파라미터를 정하기 전에 호출하라. 레이저를 켜지 않으므로 "
-            "무해하며, 이 호출은 사이클을 끝내지 않는다(정보 수집 후 계속 계획한다)."
+            "[semantic memory read - planning] Search the Raman measurement protocol and recommended "
+            "parameters (laser power %, exposure time in seconds, main peak positions) by sample type "
+            "(graphene, cell, exosome, silicon, CNT, etc.). Call it before deciding measurement parameters. "
+            "It does not turn on the laser, so it is harmless, and this call does not end the cycle "
+            "(keep planning after gathering information)."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {"type": "string",
-                          "description": "검색할 시편/재료 키워드. 예: 'graphene', 'silicon'."},
+                          "description": "Sample/material keyword to search. e.g. 'graphene', 'silicon'."},
             },
             "required": ["query"],
         },
@@ -292,17 +294,17 @@ _RECALL_TOOL_SCHEMA = {
     "function": {
         "name": "recall_experiences",
         "description": (
-            "[episodic 기억 조회 · planning] 과거에 수행한 유사 실험의 경험(사용한 파라미터, "
-            "결과, 교훈)을 조회한다. 새 측정을 계획하기 전에 호출하면 지난 노하우를 재사용할 수 "
-            "있다. 레이저를 켜지 않으므로 무해하며, 이 호출은 사이클을 끝내지 않는다. 아직 경험이 "
-            "없으면 빈 결과가 온다(정상)."
+            "[episodic memory read - planning] Query experiences from past similar experiments (parameters "
+            "used, results, lessons). Calling it before planning a new measurement lets you reuse past "
+            "know-how. It does not turn on the laser, so it is harmless, and this call does not end the cycle. "
+            "If there is no experience yet, an empty result is returned (normal)."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {"type": "string",
-                          "description": "시편/상황 키워드. 예: 'graphene 포화', 'exosome SNR'."},
-                "top_k": {"type": "integer", "description": "가져올 경험 수(기본 3)."},
+                          "description": "Sample/situation keyword. e.g. 'graphene saturation', 'exosome SNR'."},
+                "top_k": {"type": "integer", "description": "Number of experiences to fetch (default 3)."},
             },
             "required": ["query"],
         },
@@ -314,16 +316,16 @@ _RECALL_INSIGHT_TOOL_SCHEMA = {
     "function": {
         "name": "recall_insights",
         "description": (
-            "[semantic 기억 조회 · planning] 과거에 record_insight로 남긴 일반화 지식(재사용 "
-            "가능한 규칙/원리)을 조회한다. 큐레이션 KB(search_knowledge_base)와 달리 '내가 "
-            "직접 축적한' 통찰을 본다. 레이저를 켜지 않으며 사이클을 끝내지 않는다."
+            "[semantic memory read - planning] Query generalized knowledge (reusable rules/principles) "
+            "previously left with record_insight. Unlike the curated KB (search_knowledge_base), this views "
+            "insights 'I accumulated myself'. It does not turn on the laser and does not end the cycle."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {"type": "string",
-                          "description": "주제 키워드. 예: 'graphene 광손상', '785nm 형광'."},
-                "top_k": {"type": "integer", "description": "가져올 통찰 수(기본 3)."},
+                          "description": "Topic keyword. e.g. 'graphene photodamage', '785nm fluorescence'."},
+                "top_k": {"type": "integer", "description": "Number of insights to fetch (default 3)."},
             },
             "required": ["query"],
         },
@@ -335,20 +337,21 @@ _RECORD_EXP_TOOL_SCHEMA = {
     "function": {
         "name": "record_experience",
         "description": (
-            "[episodic 기억 기록/학습 · execution] 방금 수행한 실험의 경험을 장기기억에 남긴다. "
-            "측정을 마치고 보고서를 쓰기 직전에 호출하라 — 이 기록은 다음 세션의 "
-            "recall_experiences로 조회되어 노하우로 재사용된다. 하드웨어를 만지지 않는다."
+            "[episodic memory write/learning - execution] Record the experience of the experiment just "
+            "performed into long-term memory. Call it after finishing the measurement and just before writing "
+            "the report - this record is retrieved via recall_experiences in the next session and reused as "
+            "know-how. It does not touch hardware."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "sample": {"type": "string", "description": "시편 종류(필수). 예: 'graphene'."},
+                "sample": {"type": "string", "description": "Sample type (required). e.g. 'graphene'."},
                 "params": {"type": "object",
-                           "description": "사용한 측정 파라미터. 예: {'power':20,'exposure':2.0}."},
-                "outcome": {"type": "string", "description": "결과 요약. 예: 'G/2D 밴드 양호'."},
-                "metrics": {"type": "string", "description": "정량 지표. 예: 'SNR 8.3, 포화 없음'."},
+                           "description": "Measurement parameters used. e.g. {'power':20,'exposure':2.0}."},
+                "outcome": {"type": "string", "description": "Result summary. e.g. 'G/2D bands good'."},
+                "metrics": {"type": "string", "description": "Quantitative metrics. e.g. 'SNR 8.3, no saturation'."},
                 "lesson": {"type": "string",
-                           "description": "다음에 쓸 교훈. 예: '30%↑ 파워는 포화 위험'."},
+                           "description": "Lesson for next time. e.g. 'power above 30% risks saturation'."},
             },
             "required": ["sample"],
         },
@@ -360,16 +363,16 @@ _RECORD_INSIGHT_TOOL_SCHEMA = {
     "function": {
         "name": "record_insight",
         "description": (
-            "[semantic 기억 기록/학습 · execution] 여러 경험에서 일반화한 재사용 가능한 지식을 "
-            "남긴다. 개별 실험(record_experience)과 달리 '규칙/원리'를 저장한다. 하드웨어를 "
-            "만지지 않는다."
+            "[semantic memory write/learning - execution] Leave reusable knowledge generalized from several "
+            "experiences. Unlike an individual experiment (record_experience), this stores 'rules/principles'. "
+            "It does not touch hardware."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "topic": {"type": "string", "description": "주제. 예: 'graphene 광손상'."},
+                "topic": {"type": "string", "description": "Topic. e.g. 'graphene photodamage'."},
                 "insight": {"type": "string",
-                            "description": "일반화 지식. 예: '532nm에서 30%↑는 결함 유발'."},
+                            "description": "Generalized knowledge. e.g. 'above 30% at 532nm induces defects'."},
             },
             "required": ["topic", "insight"],
         },
@@ -401,60 +404,63 @@ _INTERNAL_LEARNING = {"record_experience", "record_insight"}
 # ══════════════════════════════════════════════════════════════════════════════
 
 SYSTEM_PROMPT = """\
-당신은 라만 분광기를 제어하는 단일 AI 에이전트이며, CoALA(Cognitive Architectures for
-Language Agents) 구조로 동작합니다. 당신은 명시적인 작업기억과 장기기억을 가지며,
-아래의 의사결정 사이클(계획 → 실행)에 따라 행동합니다.
+You are a single AI agent that controls a Raman spectrometer, operating under the CoALA (Cognitive
+Architectures for Language Agents) architecture. You have explicit working memory and long-term
+memory, and you act according to the decision cycle below (planning -> execution).
 
-[기억 구조]
-- 작업기억(working memory): 현재 목표, 조회한 지식, 최근 관측이 프롬프트에 함께 제공됩니다.
-- semantic 기억: search_knowledge_base(큐레이션 프로토콜)·recall_insights(내가 남긴 통찰)로
-  읽고, record_insight로 씁니다(재사용 규칙).
-- episodic 기억: recall_experiences로 과거 실험을 읽고, record_experience로 씁니다(노하우).
+[Memory structure]
+- Working memory: the current goal, retrieved knowledge, and recent observations are provided in the prompt.
+- Semantic memory: read with search_knowledge_base (curated protocols) and recall_insights (insights I left),
+  and write with record_insight (reusable rules).
+- Episodic memory: read past experiments with recall_experiences and write with record_experience (know-how).
 
-[의사결정 사이클 — 계획(planning)과 실행(execution)을 구분하라]
-당신의 행동은 두 종류입니다. 이 둘의 성격이 완전히 다릅니다.
+[Decision cycle - distinguish planning from execution]
+Your actions are of two kinds, and their nature is completely different.
 
-  · 계획 행동(정보 수집): search_knowledge_base, recall_experiences, recall_insights.
-    - 이 행동들은 레이저를 켜지 않고 '근거를 모으는' 행동입니다. 필요한 만큼 여러 번
-      연달아 호출해 작업기억을 충분히 채우세요. 이 행동은 아무것도 되돌릴 수 없게 만들지
-      않으므로 마음껏 쓰되, 같은 것을 반복 조회하지는 마세요.
+  · Planning actions (information gathering): search_knowledge_base, recall_experiences, recall_insights.
+    - These do not turn on the laser; they 'gather evidence'. Call them several times in a row as needed
+      to fill working memory sufficiently. They make nothing irreversible, so use them freely, but do not
+      repeat the same lookup.
 
-  · 실행 행동(commit): 하드웨어 도구(스테이지 이동, 레이저, acquire_spectrum, 카메라 등)와
-    기록 도구(record_experience, record_insight).
-    - 이 행동들은 실제로 세상이나 장기기억을 바꿉니다. 특히 acquire_spectrum은 시편에
-      레이저를 조사하며, 광손상은 되돌릴 수 없습니다.
-    - 반드시 '한 번에 하나만' 실행합니다. 실행이 필요하면 지금 상황에서 가장 가치 있는
-      단 하나의 실행 행동을 고르세요. 그 결과(관측)를 본 뒤 다음 사이클에서 다음 실행을
-      다시 정합니다.
+  · Execution actions (commit): hardware tools (stage move, laser, acquire_spectrum, camera, etc.) and
+    recording tools (record_experience, record_insight).
+    - These actually change the world or long-term memory. In particular, acquire_spectrum irradiates the
+      sample with the laser, and photodamage is irreversible.
+    - Always execute 'only one at a time'. When execution is needed, choose the single most valuable
+      execution action in the current situation. After seeing its result (observation), decide the next
+      execution in the following cycle.
 
-  · 원칙: 실행 행동을 고르기 '전에' 필요한 계획 행동(정보 수집)을 먼저 끝내세요. 레이저는
-    근거를 충분히 모은 뒤에만 발사되어야 합니다.
+  · Principle: finish the necessary planning actions (information gathering) 'before' choosing an execution
+    action. The laser should only be fired after enough evidence is gathered.
 
-  · finish: 더 호출할 도구가 없으면 도구 없이 한국어 최종 보고서를 작성하면 이번 턴이 끝납니다.
+  · finish: if there are no more tools to call, write the final report in English without tools and this turn ends.
 
-[측정 절차 — 사이클을 거치며 스스로 진행]
-1. 시편/기판/목표 위치를 모르면 레이저를 켜기 전에 사용자에게 먼저 묻습니다.
-2. 시편을 알면 먼저 recall_experiences로 과거 노하우를, recall_insights로 축적된 규칙을,
-   search_knowledge_base로 프로토콜을 조회해 작업기억을 채웁니다(계획 행동). 파라미터는
-   추측하지 말고 이 근거로 정합니다.
-3. 위치를 모르면 analyze_microscope_image로 화면을 보고 좌표를 읽어 move_to_pixel로 이동,
-   필요하면 run_autofocus로 초점을 맞춥니다(실행 행동, 한 번에 하나).
-4. 목표 신호를 기판 배경과 구분하려면 목표와 '완전히 동일한' 파워·노출로 빈 영역을 한 번
-   측정해 기준선을 잡고, 원래 위치로 되돌아옵니다.
-5. SNR·포화·신호대배경비를 평가해 필요하면 위치/파라미터를 바꿔 재측정합니다. 단 1~2회
-   재시도해도 개선이 없으면 기존 데이터로 진행하고 한계를 보고서에 명시합니다.
-6. 측정을 마치면 보고서를 쓰기 전에 record_experience로 이번 경험을(가능하면 record_insight로
-   일반화 지식도) 장기기억에 남깁니다 — 이것이 다음 실험을 위한 노하우 축적입니다.
-7. 마지막으로 도구 호출 없이 한국어 최종 보고서를 작성합니다:
-   실험 목적 / 측정 조건(조정 내역 포함) / 결과 요약(목표 vs 배경) / 스펙트럼의 물리적 분석
-   (피크 위치·귀속, SNR, 포화; 배경과 겹치는 피크는 기판 유래로 제외) / 도메인 해석과 결론 /
-   진행 중 문제와 대처 / 결론 및 권고.
+[Measurement procedure - proceed on your own through the cycles]
+1. If you do not know the sample/substrate/target location, ask the user first before turning on the laser.
+2. Once you know the sample, first query past know-how with recall_experiences, accumulated rules with
+   recall_insights, and protocols with search_knowledge_base to fill working memory (planning actions).
+   Do not guess parameters - set them from this evidence.
+3. If you do not know the location, view the image with analyze_microscope_image, read the coordinates,
+   move with move_to_pixel, and focus with run_autofocus if needed (execution actions, one at a time).
+4. To distinguish the target signal from the substrate background, measure a blank area once with the
+   'exactly identical' power and exposure as the target to set a baseline, then return to the original position.
+5. Evaluate SNR, saturation, and signal-to-background ratio, and re-measure by changing position/parameters
+   if needed. But if 1-2 retries show no improvement, proceed with the existing data and state the limitation
+   in the report.
+6. When the measurement is done, before writing the report, record this experience with record_experience
+   (and, if possible, generalized knowledge with record_insight) into long-term memory - this is how know-how
+   accumulates for the next experiment.
+7. Finally, write the final report in English without tool calls:
+   Experiment objective / measurement conditions (including adjustments) / results summary (target vs background) /
+   physical analysis of the spectrum (peak positions and assignments, SNR, saturation; peaks overlapping the
+   background are excluded as substrate-derived) / domain interpretation and conclusion / problems and handling
+   during the process / conclusion and recommendations.
 
-[안전 규칙]
-- 도구가 오류나 안전 차단을 반환하면 우회하지 말고 상황을 그대로 사용자에게 보고합니다.
-- 모르는 것을 추측하지 않습니다 — 도구로 확인하거나 사용자에게 묻습니다.
-- 인사/잡담/능력 질문은 도구 없이 즉시 한국어로 답합니다.
-- 스테이지 좌표 단위: mm (X: 0~75.3, Y: 0~50.2, Z: -1.0~1.0, 원점은 x=37.8759, y=25.24805, z는 해당없음)
+[Safety rules]
+- If a tool returns an error or safety block, do not bypass it; report the situation to the user as is.
+- Do not guess what you do not know - verify with a tool or ask the user.
+- Answer greetings/small talk/capability questions immediately in English without tools.
+- Stage coordinate units: mm (X: 0-75.3, Y: 0-50.2, Z: -1.0-1.0; origin at x=37.8759, y=25.24805, z n/a)
 """
 
 
@@ -564,10 +570,10 @@ def _call_tool(ctx: dict, name: str, args: dict) -> dict:
     # ── external grounding actions ────────────────────────────────────────────
     dispatch = ctx["dispatch"]
     if dispatch is None:
-        return {"ok": False, "error": "하드웨어가 연결되어 있지 않습니다."}
+        return {"ok": False, "error": "Hardware is not connected."}
     fn = dispatch.get(name)
     if fn is None:
-        return {"ok": False, "error": f"알 수 없는 도구: {name}"}
+        return {"ok": False, "error": f"Unknown tool: {name}"}
 
     if name == "acquire_spectrum":
         power = float(args.get("power", 40.0))
@@ -575,9 +581,9 @@ def _call_tool(ctx: dict, name: str, args: dict) -> dict:
         dose_inc = power * exposure * 0.01
         if ctx["dose"] + dose_inc > _MAX_DOSE_MJ_PER_TURN:
             return {"ok": False,
-                    "error": (f"안전 차단: 이번 턴 누적 조사량이 상한"
-                              f"({_MAX_DOSE_MJ_PER_TURN}mJ)을 초과합니다. "
-                              "측정을 마무리하거나 새 요청으로 다시 시작하세요.")}
+                    "error": (f"Safety block: this turn's cumulative dose would exceed the limit "
+                              f"({_MAX_DOSE_MJ_PER_TURN} mJ). "
+                              "Wrap up the measurement or start again with a new request.")}
         try:
             result = fn(dict(args))
         except Exception as e:
@@ -611,15 +617,15 @@ class WorkingMemory:
 
     def render(self) -> str:
         """작업기억을 planning 프롬프트에 넣을 텍스트 블록으로 직렬화한다."""
-        lines = ["[작업기억]"]
-        lines.append(f"- 현재 목표: {self.goal or '(아직 명확한 측정 목표 없음)'}")
+        lines = ["[Working memory]"]
+        lines.append(f"- Current goal: {self.goal or '(no clear measurement goal yet)'}")
         if self.retrieved:
-            lines.append("- 조회한 지식(기억):")
+            lines.append("- Retrieved knowledge (memory):")
             lines += [f"    · {s}" for s in self.retrieved[-6:]]
         else:
-            lines.append("- 조회한 지식(기억): 아직 없음 (필요하면 계획 행동으로 조회하세요)")
+            lines.append("- Retrieved knowledge (memory): none yet (query with a planning action if needed)")
         if self.observations:
-            lines.append("- 최근 관측:")
+            lines.append("- Recent observations:")
             lines += [f"    · {s}" for s in self.observations[-6:]]
         return "\n".join(lines)
 
@@ -635,21 +641,21 @@ def _update_working_memory(wm: WorkingMemory, name: str, args: dict,
             for h in hits[:3]:
                 title = h.get("title") or h.get("sample") or h.get("topic") or "?"
                 rp = h.get("recommended_params") or h.get("params")
-                extra = f" 권장 {rp}" if rp else ""
+                extra = f" recommended {rp}" if rp else ""
                 wm.retrieved.append(f"[{name}] {title}{extra}")
         else:
-            note = result.get("note", "해당 없음")
+            note = result.get("note", "no match")
             wm.retrieved.append(f"[{name}] {note}")
     else:
         ok = result.get("ok", True)
         if not ok:
-            wm.observations.append(f"⚠️ {name} 실패: {result.get('error', '')}")
+            wm.observations.append(f"⚠️ {name} failed: {result.get('error', '')}")
         elif name == "acquire_spectrum":
-            wm.observations.append(f"스펙트럼 획득 (max {result.get('max_intensity', 0)} ADU)")
+            wm.observations.append(f"Spectrum acquired (max {result.get('max_intensity', 0)} ADU)")
         elif action == "learning":
-            wm.observations.append(f"기억 기록: {name} → {result.get('sample') or result.get('topic', '')}")
+            wm.observations.append(f"Memory recorded: {name} → {result.get('sample') or result.get('topic', '')}")
         else:
-            wm.observations.append(f"{name} 실행 완료")
+            wm.observations.append(f"{name} executed")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -720,15 +726,15 @@ def _plan_progress_note(round_no: int, retrieval_count: int, repeated: bool) -> 
     세션에 남지 않는다(다음 턴 오염 없음).
     """
     left = _MAX_PLANNING_STEPS - round_no
-    note = (f"[계획 진행] 이번 사이클에서 {round_no}번째 계획(정보 수집) 라운드입니다"
-            f"(연속 조회 {retrieval_count}회, 남은 계획 라운드 {left}회).")
+    note = (f"[Planning progress] This is planning (information gathering) round {round_no} in this cycle "
+            f"({retrieval_count} consecutive lookups, {left} planning rounds left).")
     if repeated:
-        note += (" 방금 직전과 같은 조회를 반복하고 있습니다 — 같은 조회를 또 하지 말고, "
-                 "지금까지 모은 근거로 실행 행동(grounding/learning) 하나를 고르거나 보고서를 쓰세요.")
+        note += (" You are repeating the same lookup as just before - do not repeat the same lookup; "
+                 "with the evidence gathered so far, choose one execution action (grounding/learning) or write the report.")
     elif round_no >= _SOFT_PLAN_LIMIT:
-        note += " 정보는 충분해 보입니다. 이제 실행 행동 하나를 고르거나 최종 보고서를 작성하세요."
+        note += " Information looks sufficient. Now choose one execution action or write the final report."
     if left <= 0:
-        note += " 이번이 마지막 계획 라운드입니다 — 다음엔 반드시 실행하거나 보고서를 써야 합니다."
+        note += " This is the last planning round - next you must execute or write the report."
     return note
 
 
@@ -759,20 +765,21 @@ def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
     후보로 폴백해 사이클이 멈추지 않게 한다.
     """
     if len(candidates) == 1:
-        return candidates[0], {"scores": [1.0], "reason": "실행 후보 단일 — 평가 생략"}
+        return candidates[0], {"scores": [1.0], "reason": "single execution candidate - evaluation skipped"}
 
     listing = "\n".join(
         f"{i}. {_candidate_label(c)}" for i, c in enumerate(candidates)
     )
-    dose_note = (f"현재 누적 조사량 {dose:.1f}/{_MAX_DOSE_MJ_PER_TURN}mJ. "
-                 "레이저 조사(acquire_spectrum)는 이 예산과 광손상(비가역)을 함께 고려하라.")
+    dose_note = (f"Current cumulative dose {dose:.1f}/{_MAX_DOSE_MJ_PER_TURN} mJ. "
+                 "For laser irradiation (acquire_spectrum), consider this budget together with photodamage (irreversible).")
     prompt = (
-        "당신은 라만 실험 에이전트의 '실행 행동 평가자'입니다. 아래 작업기억과 실행 후보들을 "
-        "보고, 지금 실행하기에 각 후보가 얼마나 가치 있는지 0.0~1.0으로 점수화하세요. "
-        "유용성(목표 진전), 안전성(광손상/조사량), 근거성(작업기억·기억에 부합)을 함께 보세요.\n\n"
-        f"{wm.render()}\n\n{dose_note}\n\n[실행 후보]\n{listing}\n\n"
-        "반드시 다음 JSON만 출력하세요(설명 금지): "
-        '{"scores": [숫자, ...], "reason": "가장 높은 후보를 고른 이유 한 문장"}'
+        "You are the 'execution-action evaluator' of a Raman experiment agent. Looking at the working memory "
+        "and execution candidates below, score how valuable each candidate is to execute right now from 0.0 to 1.0. "
+        "Consider usefulness (progress toward the goal), safety (photodamage/dose), and groundedness "
+        "(consistency with working memory/memory).\n\n"
+        f"{wm.render()}\n\n{dose_note}\n\n[Execution candidates]\n{listing}\n\n"
+        "Output only the following JSON (no explanation): "
+        '{"scores": [number, ...], "reason": "one sentence on why the highest candidate was chosen"}'
     )
     scores = None
     reason = ""
@@ -790,7 +797,7 @@ def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
 
     if not scores or len(scores) != len(candidates):
         # 평가 실패 → 첫 후보로 폴백(사이클 진행 보장).
-        return candidates[0], {"scores": [], "reason": "평가 파싱 실패 — 첫 후보 선택"}
+        return candidates[0], {"scores": [], "reason": "evaluation parse failed - first candidate chosen"}
 
     best_idx = max(range(len(candidates)), key=lambda i: scores[i])
     return candidates[best_idx], {"scores": scores, "reason": reason}
@@ -833,7 +840,7 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory,
             ai_msg = _propose(llm_tools, wm, plan_note)
         except Exception as e:
             outcome["kind"] = "error"
-            outcome["detail"] = f"LLM 호출 실패(propose): {type(e).__name__}: {e}"
+            outcome["detail"] = f"LLM call failed (propose): {type(e).__name__}: {e}"
             return
         propose_state[0] -= 1
 
@@ -843,7 +850,7 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory,
         if not candidates:
             wm.messages.append(ai_msg)
             outcome["kind"] = "finish"
-            outcome["final_text"] = _msg_text(ai_msg).strip() or "응답을 생성하지 못했습니다."
+            outcome["final_text"] = _msg_text(ai_msg).strip() or "Failed to generate a response."
             return
 
         planning_actions, commit_actions = _partition_candidates(candidates)
@@ -861,8 +868,9 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory,
                 for c in planning_actions)))
 
             yield {"type": "phase", "phase": "plan",
-                   "message": "정보 수집(retrieval): "
-                              + " / ".join(_candidate_label(c) for c in planning_actions)}
+                   "message": "Information gathering (retrieval): "
+                              + " / ".join(_candidate_label(c) for c in planning_actions),
+                   "candidates": [_candidate_label(c) for c in planning_actions]}
 
             for tc in planning_actions:
                 ex = _execute_one(ctx, tc["name"], dict(tc.get("args") or {}), tc.get("id") or "")
@@ -877,7 +885,7 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory,
                 if ex["img_b64"]:
                     wm.messages.append(HumanMessage(
                         content=[
-                            {"type": "text", "text": ex["question"] or "이미지:"},
+                            {"type": "text", "text": ex["question"] or "Image:"},
                             {"type": "image_url",
                              "image_url": f"data:image/png;base64,{ex['img_b64']}"},
                         ],
@@ -919,8 +927,8 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
     """
     if llm_tools is None or llm_plain is None:
         yield {"type": "error",
-               "detail": "Ollama LLM이 연결되지 않았습니다. "
-                         "(langchain-ollama 설치 및 Ollama 서버 상태를 확인하세요)"}
+               "detail": "Ollama LLM is not connected. "
+                         "(Check that langchain-ollama is installed and the Ollama server is running)"}
         return
 
     ctx = {"dispatch": _get_dispatch(), "dose": 0.0, "session_id": session_id,
@@ -938,7 +946,7 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
         kind = outcome.get("kind")
 
         if kind == "error":
-            yield {"type": "error", "detail": outcome.get("detail", "planning 실패")}
+            yield {"type": "error", "detail": outcome.get("detail", "planning failed")}
             return
 
         if kind == "finish":
@@ -949,27 +957,35 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
         if kind != "commit":
             # stuck — 계획만 반복하고 실행/종료를 못 정함. 안전하게 턴을 닫는다.
             yield {"type": "final",
-                   "text": "계획 단계 예산에 도달해 이번 턴을 마칩니다. "
-                           "진행 상황을 확인하고 다시 요청해 주세요.",
+                   "text": "Reached the planning-stage budget, ending this turn. "
+                           "Please check the progress and request again.",
                    "ctx": ctx, "messages": wm.messages}
             return
 
         commit_candidates = outcome["commit"]
 
         # ── 2) EVALUATE + SELECT (grounding/learning 후보에 한해서) ────────────
+        commit_labels = [_candidate_label(c) for c in commit_candidates]
         if len(commit_candidates) > 1:
             yield {"type": "phase", "phase": "evaluate",
-                   "message": f"실행 후보 {len(commit_candidates)}개 평가 중…"}
+                   "message": f"Evaluating {len(commit_candidates)} execution candidates…",
+                   "candidates": commit_labels}
         try:
             chosen, meta = _evaluate_and_select(llm_plain, wm, commit_candidates, ctx["dose"])
         except Exception as e:
             yield {"type": "error",
-                   "detail": f"LLM 호출 실패(evaluate): {type(e).__name__}: {e}"}
+                   "detail": f"LLM call failed (evaluate): {type(e).__name__}: {e}"}
             return
 
+        # select 이벤트에 propose→evaluate→select의 전 과정을 실어 벤치마크 로그
+        # ("planning evaluation process")가 후보/점수/이유/선택을 다 담게 한다.
         yield {"type": "phase", "phase": "select",
-               "message": f"선택 → {_candidate_label(chosen)}"
-                          + (f"  ({meta['reason']})" if meta.get("reason") else "")}
+               "message": f"Selected → {_candidate_label(chosen)}"
+                          + (f"  ({meta['reason']})" if meta.get("reason") else ""),
+               "candidates": commit_labels,
+               "scores": meta.get("scores") or None,
+               "reason": meta.get("reason") or None,
+               "chosen": _candidate_label(chosen)}
 
         # ── 3) EXECUTE + OBSERVE ─────────────────────────────────────────────
         # 선택된 실행 후보 '하나만' 담은 AIMessage를 히스토리에 남긴다(나머지는 버림).
@@ -990,7 +1006,7 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
         if ex["img_b64"]:
             wm.messages.append(HumanMessage(
                 content=[
-                    {"type": "text", "text": ex["question"] or "현미경 카메라 이미지:"},
+                    {"type": "text", "text": ex["question"] or "Microscope camera image:"},
                     {"type": "image_url",
                      "image_url": f"data:image/png;base64,{ex['img_b64']}"},
                 ],
@@ -999,8 +1015,8 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
         # 다음 사이클로 (관측을 반영해 다시 planning)
 
     yield {"type": "final",
-           "text": f"최대 사이클({_MAX_CYCLES}회)에 도달해 중단했습니다. "
-                   "진행 상황을 확인하고 다시 요청해 주세요.",
+           "text": f"Stopped after reaching the maximum number of cycles ({_MAX_CYCLES}). "
+                   "Please check the progress and request again.",
            "ctx": ctx, "messages": wm.messages}
 
 
@@ -1039,33 +1055,33 @@ def _describe_tool(name: str, args: dict, result: dict, action: str) -> str:
     """tool 호출 1건을 사람이 읽는 한 줄로 — SSE "node" 이벤트 메시지."""
     ok = result.get("ok", True) if isinstance(result, dict) else True
     if not ok:
-        return f"⚠️ {name} 실패: {result.get('error', '')}"
+        return f"⚠️ {name} failed: {result.get('error', '')}"
     if name == "acquire_spectrum":
-        return f"📈 스펙트럼 획득 (max {result.get('max_intensity', 0):.0f} ADU)"
+        return f"📈 Spectrum acquired (max {result.get('max_intensity', 0):.0f} ADU)"
     if name in ("move_stage", "move_stage_relative", "move_to_pixel"):
         pos = result.get("position", {})
-        return f"🧭 이동 → ({pos.get('x', '?')}, {pos.get('y', '?')})"
+        return f"🧭 Moved → ({pos.get('x', '?')}, {pos.get('y', '?')})"
     if name == "analyze_microscope_image":
-        return "👁️ 현미경 이미지 확인"
+        return "👁️ Microscope image checked"
     if name == "run_autofocus":
-        return "🔬 오토포커스 완료"
+        return "🔬 Autofocus complete"
     if name == "apply_background_subtraction":
-        return "🧹 형광 배경 제거 적용"
+        return "🧹 Fluorescence background subtraction applied"
     if name == "search_knowledge_base":
         hits = result.get("results", [])
-        titles = ", ".join(h.get("title", "?") for h in hits) if hits else "해당 없음"
-        return f"📚 지식(semantic) 조회 → {titles}"
+        titles = ", ".join(h.get("title", "?") for h in hits) if hits else "no match"
+        return f"📚 Knowledge (semantic) lookup → {titles}"
     if name == "recall_experiences":
         hits = result.get("results", [])
-        return f"🧠 경험(episodic) 조회 → {len(hits)}건"
+        return f"🧠 Experience (episodic) lookup → {len(hits)} item(s)"
     if name == "recall_insights":
         hits = result.get("results", [])
-        return f"🔎 통찰(semantic) 조회 → {len(hits)}건"
+        return f"🔎 Insight (semantic) lookup → {len(hits)} item(s)"
     if name == "record_experience":
-        return f"💾 경험 기록(episodic) → {result.get('sample', '')}"
+        return f"💾 Experience recorded (episodic) → {result.get('sample', '')}"
     if name == "record_insight":
-        return f"💡 통찰 기록(semantic) → {result.get('topic', '')}"
-    return f"🔧 {name} 호출"
+        return f"💡 Insight recorded (semantic) → {result.get('topic', '')}"
+    return f"🔧 {name} called"
 
 
 def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]:
@@ -1083,6 +1099,10 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
         d["session_id"] = sid
         return d
 
+    # 벤치마크 로그: resolved sid를 넘겨 세션별로 파일이 갈리게 한다. run_stream 소비 전에
+    # 만들어 phase/tool 이벤트를 전부 관측한다(로깅 실패는 detail_log가 내부에서 삼킨다).
+    turn = new_turn("CoALA", sid, user_message)
+
     try:
         llm_tools = _get_llm_tools()
         llm_plain = _get_llm_plain()
@@ -1093,6 +1113,7 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
         final_messages = history
 
         for event in run_stream(llm_tools, llm_plain, history, user_message, session_id=sid):
+            turn.observe(event)
             etype = event["type"]
             if etype == "phase":
                 yield ev({"type": "node", "node": f"cycle:{event['phase']}",
@@ -1105,6 +1126,7 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
                 if sp:
                     yield ev(sp)
             elif etype == "error":
+                turn.fail(event["detail"])
                 yield ev({"type": "error", "detail": event["detail"]})
                 return
             elif etype == "final":
@@ -1113,30 +1135,47 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
                 final_messages = event["messages"]
 
         if final_ctx is None:
-            yield ev({"type": "error", "detail": "에이전트가 응답을 생성하지 못했습니다."})
+            turn.fail("The agent failed to generate a response.")
+            yield ev({"type": "error", "detail": "The agent failed to generate a response."})
             return
 
         _SESSIONS[sid] = _trim_history(final_messages)
 
         # 측정(레이저 조사)이 실제로 있었는지로 "실험 보고서" vs "일반 대화"를 가른다.
         used_measurement = "acquire_spectrum" in final_ctx.get("tool_call_order", [])
+        turn.complete("done" if used_measurement else "chat", final_text, final_ctx)
         if used_measurement:
             yield ev({"type": "done", "final_report": final_text})
         else:
             yield ev({"type": "chat", "reply": final_text})
 
     except Exception as e:
+        turn.fail(str(e))
         yield ev({"type": "error", "detail": str(e)})
 
 
 def run_experiment(user_message: str, session_id: str = "") -> dict:
     """동기 1회 실행 — 벤치마크/레거시용 (세션 히스토리 없이 매번 새로 시작)."""
+    # 벤치마크 로그: 빈 session_id면 실행마다 uuid를 새로 만들어 실행 1회 = 파일 1개로
+    # 분리한다(안 그러면 모든 벤치마크 질의가 'nosession' 한 파일에 뭉친다).
+    sid = session_id or str(uuid.uuid4())
+    turn = new_turn("CoALA", sid, user_message)
     llm_tools = _get_llm_tools()
     llm_plain = _get_llm_plain()
     final_text = ""
-    for event in run_stream(llm_tools, llm_plain, [], user_message, session_id=session_id):
+    final_ctx = None
+    error_detail = None
+    for event in run_stream(llm_tools, llm_plain, [], user_message, session_id=sid):
+        turn.observe(event)
         if event["type"] == "final":
             final_text = event["text"]
+            final_ctx = event["ctx"]
         elif event["type"] == "error":
-            final_text = f"[오류] {event['detail']}"
+            error_detail = event["detail"]
+            final_text = f"[Error] {event['detail']}"
+    if error_detail is not None:
+        turn.fail(error_detail, final_ctx)
+    else:
+        used_measurement = "acquire_spectrum" in (final_ctx or {}).get("tool_call_order", [])
+        turn.complete("done" if used_measurement else "chat", final_text, final_ctx)
     return {"final_report": final_text}

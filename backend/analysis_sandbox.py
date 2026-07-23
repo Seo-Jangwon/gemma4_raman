@@ -60,26 +60,26 @@ def validate_code(code: str) -> None:
     try:
         tree = ast.parse(code)
     except SyntaxError as e:
-        raise ValueError(f"문법 오류: {e}")
+        raise ValueError(f"Syntax error: {e}")
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for a in node.names:
                 if a.name.split(".")[0] not in _ALLOWED_IMPORT_ROOTS:
-                    raise ValueError(f"허용되지 않은 import: '{a.name}'. "
-                                     f"허용: {sorted(_ALLOWED_IMPORT_ROOTS)}")
+                    raise ValueError(f"Disallowed import: '{a.name}'. "
+                                     f"Allowed: {sorted(_ALLOWED_IMPORT_ROOTS)}")
         elif isinstance(node, ast.ImportFrom):
             root = (node.module or "").split(".")[0]
             if root not in _ALLOWED_IMPORT_ROOTS:
-                raise ValueError(f"허용되지 않은 import: '{node.module}'")
+                raise ValueError(f"Disallowed import: '{node.module}'")
         elif isinstance(node, ast.Attribute):
             if isinstance(node.attr, str) and node.attr.startswith("__"):
-                raise ValueError(f"허용되지 않은 속성 접근: '{node.attr}' "
-                                 "(던더 속성 금지)")
+                raise ValueError(f"Disallowed attribute access: '{node.attr}' "
+                                 "(dunder attributes forbidden)")
         elif isinstance(node, ast.Name):
             if node.id in _BANNED_NAMES:
-                raise ValueError(f"허용되지 않은 이름 사용: '{node.id}'")
+                raise ValueError(f"Disallowed name use: '{node.id}'")
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
-            raise ValueError("global/nonlocal 사용 불가")
+            raise ValueError("global/nonlocal not allowed")
 
 
 def _safe_builtins() -> dict:
@@ -90,7 +90,7 @@ def _safe_builtins() -> dict:
     # __import__ 를 화이트리스트 기반으로 제공 — import 문이 동작하되 허용 모듈만.
     def _guarded_import(name, *args, **kwargs):
         if name.split(".")[0] not in _ALLOWED_IMPORT_ROOTS:
-            raise ImportError(f"허용되지 않은 import: {name}")
+            raise ImportError(f"Disallowed import: {name}")
         return _builtins.__import__(name, *args, **kwargs)
     d["__import__"] = _guarded_import
     return d
@@ -208,8 +208,8 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
     try:
         validate_code(code)
     except ValueError as e:
-        return {"ok": False, "error": f"코드 정책 위반: {e}",
-                "hint": "분석은 numpy/scipy/matplotlib 로만. 하드웨어·파일·네트워크 접근 불가."}
+        return {"ok": False, "error": f"Code policy violation: {e}",
+                "hint": "Analysis only with numpy/scipy/matplotlib. No hardware/file/network access."}
 
     payload = {"code": code, "spectra": spectra, "scene_path": latest_scene(date)}
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
@@ -224,7 +224,7 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
             cwd=str(_PROJECT_ROOT),
         )
     except subprocess.TimeoutExpired:
-        return {"ok": False, "error": f"실행 시간 초과({timeout_sec}s) — 무한 루프이거나 계산이 과합니다."}
+        return {"ok": False, "error": f"Execution timed out ({timeout_sec}s) - infinite loop or too heavy a computation."}
     finally:
         try:
             Path(payload_path).unlink()
@@ -236,18 +236,18 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
     if marker not in out:
         # 결과 마커 없이 죽음 — 프로세스 자체 크래시(예: 세그폴트)나 정책 외 종료
         tail = (proc.stderr or out)[-800:]
-        return {"ok": False, "error": "분석 프로세스가 결과 없이 종료됨.", "detail": tail}
+        return {"ok": False, "error": "The analysis process exited without a result.", "detail": tail}
     payload = json.loads(out.split(marker, 1)[1])
 
     if not payload.get("ok"):
-        return {"ok": False, "error": payload.get("error", "분석 실패"),
+        return {"ok": False, "error": payload.get("error", "Analysis failed"),
                 "stdout": payload.get("stdout", ""), "trace": payload.get("trace", "")}
 
     images = payload.get("images", [])
     resp = {"ok": True, "stdout": payload.get("stdout", ""),
             "image_count": len(images), "images": images}
     if images:
-        resp["saved"] = {"title": title or "분석 결과", "image_url": images[0]}
+        resp["saved"] = {"title": title or "Analysis result", "image_url": images[0]}
     return resp
 
 

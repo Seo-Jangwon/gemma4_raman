@@ -160,7 +160,7 @@ def _warn_once(key: str, msg: str) -> None:
     if key in _warned:
         return
     _warned.add(key)
-    print(f"[knowledge][경고] {msg}", file=sys.stderr, flush=True)
+    print(f"[knowledge][WARNING] {msg}", file=sys.stderr, flush=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -193,14 +193,14 @@ def embed_texts(texts: Sequence[str]) -> list[list[float]]:
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        raise RuntimeError(f"임베딩 실패({url}, model={EMBED_MODEL}): {e}") from e
+        raise RuntimeError(f"Embedding failed ({url}, model={EMBED_MODEL}): {e}") from e
 
     # /api/embed는 {"embeddings": [[...], ...]} 형태.
     embs = data.get("embeddings")
     if not embs:
         raise RuntimeError(
-            f"임베딩 응답에 embeddings가 없음. 모델이 없을 수 있다 → "
-            f"계측 PC에서 `ollama pull {EMBED_MODEL}` 실행 필요. 응답: {str(data)[:200]}"
+            f"No embeddings in the response. The model may be missing -> "
+            f"run `ollama pull {EMBED_MODEL}` on the instrument PC. Response: {str(data)[:200]}"
         )
     return embs
 
@@ -234,8 +234,8 @@ def get_client() -> Any:
         _client_failed = True
         _warn_once(
             "no_chromadb",
-            "chromadb가 설치되어 있지 않습니다 → 키워드 매칭으로 폴백합니다. "
-            "벡터 검색을 쓰려면: pip install chromadb",
+            "chromadb is not installed -> falling back to keyword matching. "
+            "To use vector search: pip install chromadb",
         )
         return None
 
@@ -249,7 +249,7 @@ def get_client() -> Any:
         )
     except Exception as e:
         _client_failed = True
-        _warn_once("chroma_open_fail", f"Chroma 열기 실패 → 키워드 폴백: {e}")
+        _warn_once("chroma_open_fail", f"Failed to open Chroma -> keyword fallback: {e}")
         return None
     return _client_cache
 
@@ -275,7 +275,7 @@ def get_collection(name: str, dim_hint: int | None = None) -> Any:
             meta["dim"] = dim_hint
         return client.get_or_create_collection(name=name, metadata=meta)
     except Exception as e:
-        _warn_once(f"coll_fail_{name}", f"컬렉션 '{name}' 열기 실패 → 폴백: {e}")
+        _warn_once(f"coll_fail_{name}", f"Failed to open collection '{name}' -> fallback: {e}")
         return None
 
 
@@ -306,12 +306,12 @@ def load_kb() -> list[dict]:
                 _kb_cache = json.load(f)
         else:
             _kb_cache = []
-            _warn_once("no_kb_json", f"{_KB_JSON_PATH.name} 없음 → KB가 비었습니다.")
+            _warn_once("no_kb_json", f"{_KB_JSON_PATH.name} missing -> KB is empty.")
     except Exception as e:
         # JSON 문법 오류(트레일링 콤마 등)가 여기로 온다. 예전엔 완전히 조용해서
         # KB가 통째로 사라져도 아무도 몰랐다 — 그게 벤치마크 최악의 시나리오다.
         _kb_cache = []
-        _warn_once("kb_json_broken", f"{_KB_JSON_PATH.name} 파싱 실패 → KB가 비었습니다: {e}")
+        _warn_once("kb_json_broken", f"{_KB_JSON_PATH.name} failed to parse -> KB is empty: {e}")
     return _kb_cache
 
 
@@ -432,8 +432,8 @@ def search_kb(query: str, top_k: int = 3) -> list[dict]:
         if coll.count() == 0:
             _warn_once(
                 "empty_index",
-                "Chroma 인덱스가 비어 있습니다 → 키워드 폴백. "
-                "색인하려면: python -m backend.agents.kb_ingest",
+                "The Chroma index is empty -> keyword fallback. "
+                "To index: python -m backend.agents.kb_ingest",
             )
             return _keyword_search(query, top_k)
 
@@ -445,7 +445,7 @@ def search_kb(query: str, top_k: int = 3) -> list[dict]:
         )
     except Exception as e:
         # 임베딩 서버가 죽었거나 모델이 없는 경우가 대부분. 측정을 막지 않고 폴백.
-        _warn_once("vec_search_fail", f"벡터 검색 실패 → 키워드 폴백: {e}")
+        _warn_once("vec_search_fail", f"Vector search failed -> keyword fallback: {e}")
         return _keyword_search(query, top_k)
 
     docs = (res.get("documents") or [[]])[0]
@@ -485,7 +485,7 @@ def search_spectra(
         if coll.count() == 0:
             _warn_once(
                 "empty_spectra_index",
-                "스펙트럼 인덱스가 비어 있습니다 → python -m backend.agents.kb_ingest",
+                "The spectra index is empty -> python -m backend.agents.kb_ingest",
             )
             return []
         vec = preprocess_spectrum(wavenumbers, intensities)
@@ -495,7 +495,7 @@ def search_spectra(
             include=["documents", "metadatas", "distances"],
         )
     except Exception as e:
-        _warn_once("spectra_search_fail", f"스펙트럼 검색 실패: {e}")
+        _warn_once("spectra_search_fail", f"Spectra search failed: {e}")
         return []
 
     docs = (res.get("documents") or [[]])[0]
@@ -542,7 +542,7 @@ def preprocess_spectrum(
     y = np.asarray(intensities, dtype=float)
 
     if x.size == 0 or x.size != y.size:
-        raise ValueError(f"스펙트럼 축 길이 불일치: x={x.size}, y={y.size}")
+        raise ValueError(f"Spectrum axis length mismatch: x={x.size}, y={y.size}")
 
     # np.interp는 x가 오름차순이어야 한다. 장비에 따라 내림차순으로 저장된다.
     order = np.argsort(x)

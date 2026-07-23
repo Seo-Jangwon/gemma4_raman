@@ -69,6 +69,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from backend.agents.detail_log import new_turn
 from backend.agents.knowledge import search_kb
 from backend.hw_tools.raman_tool_schemas import RAMAN_TOOLS
 from backend.spectrum_store import spectrum_event
@@ -100,10 +101,11 @@ _KB_TOOL_SCHEMA = {
     "function": {
         "name": "search_knowledge_base",
         "description": (
-            "시편 종류(graphene, cell, exosome, silicon, CNT 등)로 라만 측정 프로토콜과 "
-            "권장 파라미터(레이저 파워 %, 노출 시간 초, 주요 피크 위치와 귀속)를 검색한다. "
-            "측정 파라미터를 정하기 전에 호출하라 — 추측하지 말고 이 결과를 근거로 삼는다. "
-            "레이저를 켜지 않으므로 시편에 무해하고, 여러 번 호출해도 된다."
+            "Search the Raman measurement protocol and recommended parameters (laser power %, "
+            "exposure time in seconds, main peak positions and assignments) by sample type "
+            "(graphene, cell, exosome, silicon, CNT, etc.). "
+            "Call it before deciding measurement parameters - do not guess; base them on this result. "
+            "It does not turn on the laser, so it is harmless to the sample, and may be called multiple times."
         ),
         "parameters": {
             "type": "object",
@@ -111,8 +113,8 @@ _KB_TOOL_SCHEMA = {
                 "query": {
                     "type": "string",
                     "description": (
-                        "검색할 시편/재료 키워드. 예: 'graphene', 'exosome cell', 'silicon'. "
-                        "영문 키워드가 더 잘 매칭된다(키워드 부분문자열 매칭 방식)."
+                        "Sample/material keyword to search. e.g. 'graphene', 'exosome cell', 'silicon'. "
+                        "English keywords match better (keyword substring matching)."
                     ),
                 },
             },
@@ -131,49 +133,49 @@ ALL_TOOLS = RAMAN_TOOLS + [_KB_TOOL_SCHEMA]
 # ══════════════════════════════════════════════════════════════════════════════
 
 SYSTEM_PROMPT = """\
-당신은 라만 분광기를 처음부터 끝까지 직접 제어하는 단일 AI 에이전트입니다.
-계획 수립, 측정, 파라미터 조정, 스펙트럼 해석, 보고서 작성까지 전부 스스로 판단하고
-실행합니다. 당신을 검증해 줄 별도의 검증자나 보조자는 없습니다 — 당신의 판단이 곧
-최종 판단입니다.
+You are a single AI agent that directly controls a Raman spectrometer from start to finish.
+You plan, measure, adjust parameters, interpret spectra, and write the report entirely by your
+own judgment. There is no separate validator or assistant to check you - your judgment is the
+final judgment.
 
-[대화 유형 판단 — 모든 메시지에서 가장 먼저 수행]
-- 인사 / 잡담 / 시스템 능력 질문: 도구를 호출하지 말고 즉시 한국어로 답한다.
-- 장비 상태 질문("화면 보여?", "스테이지 어디야?"): 관측 도구(get_stage_position,
-  capture_camera_frame, analyze_microscope_image, get_ccd_info)로 실제 확인한 뒤에만
-  답한다. 레이저는 켜지 않는다.
-- 라만 측정 요청: 아래 측정 절차를 스스로 계획해 실행한다.
+[Conversation-type decision - do this first on every message]
+- Greeting / small talk / questions about system capabilities: do not call tools; answer immediately in English.
+- Instrument-status questions ("can you see the view?", "where is the stage?"): answer only after
+  actually checking with observation tools (get_stage_position, capture_camera_frame,
+  analyze_microscope_image, get_ccd_info). Do not turn the laser on.
+- Raman measurement requests: plan and execute the measurement procedure below yourself.
 
-[측정 절차 — 단계별로 스스로 판단하며 진행]
-1. 시편 종류, 기판, 목표 위치(좌표나 외형)를 모르면 도구를 호출하기 전에 사용자에게
-   먼저 묻는다. 시편을 특정하지 못한 상태로 레이저를 켜지 않는다.
-2. 시편 종류를 파악했으면 search_knowledge_base로 해당 시편의 측정 프로토콜과 권장
-   파라미터(레이저 파워, 노출 시간, 주요 피크 위치)를 조회한다. 파라미터를 추측으로
-   정하지 말고 조회 결과를 근거로 삼되, KB에 없는 시편이면 스스로 판단하고 그 사실을
-   보고서에 밝힌다.
-3. 목표 위치를 모르면 analyze_microscope_image로 현미경 화면을 보고(이미지가 제공된다)
-   목표의 픽셀 좌표를 스스로 읽어 move_to_pixel로 이동한다. 필요하면 run_autofocus로
-   초점을 맞춘다.
-4. 목표 신호를 기판 배경과 구분해야 한다면, 목표와 "완전히 동일한" 파워와 노출로 빈
-   영역을 한 번 측정해 배경 기준선으로 삼는다. 측정 후 원래 목표 위치로 되돌아가는 것을
-   잊지 않는다.
-5. 신호 대 배경비, 포화, SNR 등을 평가하고 필요하면 위치를 옮기거나 파라미터를 조정해
-   재측정한다. 단 무한히 반복하지 않는다 — 1~2회 재시도해도 개선이 없으면 기존 데이터로
-   진행하고 한계를 보고서에 명시한다.
-6. 측정이 끝나면 더 이상 도구를 호출하지 말고 한국어로 최종 보고서를 작성한다:
-   6.1. 실험 목적
-   6.2. 측정 조건 (어떻게 조정했는지 포함)
-   6.3. 측정 결과 요약 (목표 vs 배경)
-   6.4. 스펙트럼의 물리적 분석 (주요 피크 위치와 귀속, SNR, 포화 여부. 배경과 겹치는
-        피크는 기판 유래로 보고 제외)
-   6.5. 시편 종류에 맞는 도메인 전문가 수준의 해석과 결론
-   6.6. 진행 중 발생한 문제와 대처 방법
-   6.7. 결론 및 권고사항
+[Measurement procedure - proceed step by step, using your own judgment]
+1. If you do not know the sample type, substrate, or target location (coordinates or appearance),
+   ask the user first before calling any tool. Do not turn the laser on without identifying the sample.
+2. Once you know the sample type, use search_knowledge_base to look up the measurement protocol and
+   recommended parameters (laser power, exposure time, main peak positions) for that sample. Do not
+   guess parameters - base them on the lookup result; if the sample is not in the KB, decide yourself
+   and state that in the report.
+3. If you do not know the target location, use analyze_microscope_image to view the microscope image
+   (the image is provided), read the target's pixel coordinates yourself, and move with move_to_pixel.
+   Focus with run_autofocus if needed.
+4. If you must distinguish the target signal from the substrate background, measure a blank area once
+   with the "exactly identical" power and exposure as the target to use as a background baseline. Do
+   not forget to return to the original target location after measuring.
+5. Evaluate signal-to-background ratio, saturation, SNR, etc., and if needed move the position or
+   adjust parameters and re-measure. But do not repeat indefinitely - if 1-2 retries show no
+   improvement, proceed with the existing data and state the limitation in the report.
+6. When the measurement is done, stop calling tools and write the final report in English:
+   6.1. Experiment objective
+   6.2. Measurement conditions (including how they were adjusted)
+   6.3. Summary of measurement results (target vs background)
+   6.4. Physical analysis of the spectrum (main peak positions and assignments, SNR, saturation.
+        Peaks overlapping the background are treated as substrate-derived and excluded)
+   6.5. Domain-expert-level interpretation and conclusion appropriate to the sample type
+   6.6. Problems encountered during the process and how they were handled
+   6.7. Conclusion and recommendations
 
-[안전 규칙 — 반드시 준수]
-- 도구가 오류를 반환하거나 안전 차단이 걸리면 즉시 사용자에게 상황을 그대로 보고한다.
-  우회하거나 강제로 재시도하지 않는다.
-- 모르는 것을 추측하지 않는다 — 도구로 확인하거나 사용자에게 묻는다.
-- 스테이지 좌표 단위: mm (X: 0~75.3, Y: 0~50.2, Z: -1.0~1.0, 원점은 x=37.8759, y=25.24805, z는 해당없음)
+[Safety rules - must be followed]
+- If a tool returns an error or a safety block is triggered, immediately report the situation to the
+  user as is. Do not bypass it or force a retry.
+- Do not guess what you do not know - verify with a tool or ask the user.
+- Stage coordinate units: mm (X: 0-75.3, Y: 0-50.2, Z: -1.0-1.0; origin at x=37.8759, y=25.24805, z n/a)
 """
 
 
@@ -253,7 +255,7 @@ def _search_knowledge_base(args: dict) -> dict:
     """
     query = str(args.get("query", "")).strip()
     if not query:
-        return {"ok": False, "error": "query가 비어 있습니다. 시편/재료 키워드를 주세요."}
+        return {"ok": False, "error": "query is empty. Provide a sample/material keyword."}
 
     hits = search_kb(query, top_k=3)
     if not hits:
@@ -261,8 +263,8 @@ def _search_knowledge_base(args: dict) -> dict:
         # 모델은 이때 스스로 파라미터를 판단해야 한다(시스템 프롬프트 2번 참고).
         # 에러로 주면 모델이 재시도 루프에 빠지거나 측정을 포기할 수 있다.
         return {"ok": True, "results": [],
-                "note": f"'{query}'에 해당하는 프로토콜이 지식베이스에 없습니다. "
-                        "직접 판단해 파라미터를 정하고 보고서에 그 사실을 밝히세요."}
+                "note": f"No protocol matching '{query}' in the knowledge base. "
+                        "Decide the parameters yourself and state that in the report."}
     return {"ok": True, "results": hits}
 
 
@@ -278,10 +280,10 @@ def _call_tool(ctx: dict, name: str, args: dict) -> dict:
 
     dispatch = ctx["dispatch"]
     if dispatch is None:
-        return {"ok": False, "error": "하드웨어가 연결되어 있지 않습니다."}
+        return {"ok": False, "error": "Hardware is not connected."}
     fn = dispatch.get(name)
     if fn is None:
-        return {"ok": False, "error": f"알 수 없는 도구: {name}"}
+        return {"ok": False, "error": f"Unknown tool: {name}"}
 
     if name == "acquire_spectrum":
         power = float(args.get("power", 40.0))
@@ -289,9 +291,9 @@ def _call_tool(ctx: dict, name: str, args: dict) -> dict:
         dose_inc = power * exposure * 0.01
         if ctx["dose"] + dose_inc > _MAX_DOSE_MJ_PER_TURN:
             return {"ok": False,
-                    "error": (f"안전 차단: 이번 턴 누적 조사량이 상한"
-                              f"({_MAX_DOSE_MJ_PER_TURN}mJ)을 초과합니다. "
-                              "측정을 마무리하거나 새 요청으로 다시 시작하세요.")}
+                    "error": (f"Safety block: this turn's cumulative dose would exceed the limit "
+                              f"({_MAX_DOSE_MJ_PER_TURN} mJ). "
+                              "Wrap up the measurement or start again with a new request.")}
         try:
             result = fn(dict(args))
         except Exception as e:
@@ -363,8 +365,8 @@ def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
     """
     if llm is None:
         yield {"type": "error",
-               "detail": "Ollama LLM이 연결되지 않았습니다. "
-                         "(langchain-ollama 설치 및 Ollama 서버 상태를 확인하세요)"}
+               "detail": "Ollama LLM is not connected. "
+                         "(Check that langchain-ollama is installed and the Ollama server is running)"}
         return
 
     ctx = {"dispatch": _get_dispatch(), "dose": 0.0, "tool_call_order": []}
@@ -376,12 +378,12 @@ def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
             # history에 넣으면 턴마다 중복 누적된다.
             ai_msg: AIMessage = llm.invoke([SystemMessage(content=SYSTEM_PROMPT)] + messages)
         except Exception as e:
-            yield {"type": "error", "detail": f"LLM 호출 실패: {type(e).__name__}: {e}"}
+            yield {"type": "error", "detail": f"LLM call failed: {type(e).__name__}: {e}"}
             return
 
         # 도구 호출이 없으면 = 모델이 할 말을 다 했다 = 이번 턴 종료.
         if not ai_msg.tool_calls:
-            final_text = _msg_text(ai_msg).strip() or "응답을 생성하지 못했습니다."
+            final_text = _msg_text(ai_msg).strip() or "Failed to generate a response."
             messages.append(ai_msg)
             yield {"type": "final", "text": final_text, "ctx": ctx, "messages": messages}
             return
@@ -419,7 +421,7 @@ def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
                 # 변환해 준다. data URI의 base64 부분만 잘라 보내므로 접두사가 필요하다.
                 messages.append(HumanMessage(
                     content=[
-                        {"type": "text", "text": question or "현미경 카메라 이미지:"},
+                        {"type": "text", "text": question or "Microscope camera image:"},
                         {"type": "image_url",
                          "image_url": f"data:image/png;base64,{img_b64}"},
                     ],
@@ -429,7 +431,7 @@ def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
                 ))
 
     yield {"type": "final",
-          "text": f"최대 처리 단계({_MAX_AGENT_STEPS}회)에 도달해 중단했습니다. 진행 상황을 확인하고 다시 요청해 주세요.",
+          "text": f"Stopped after reaching the maximum number of steps ({_MAX_AGENT_STEPS}). Please check the progress and request again.",
           "ctx": ctx, "messages": messages}
 
 
@@ -475,25 +477,25 @@ def _describe_tool(name: str, args: dict, result: dict) -> str:
     """tool 호출 1건을 사람이 읽는 한 줄로 요약 — SSE "node" 이벤트 메시지."""
     ok = result.get("ok", True)
     if not ok:
-        return f"⚠️ {name} 실패: {result.get('error', '')}"
+        return f"⚠️ {name} failed: {result.get('error', '')}"
     if name == "acquire_spectrum":
-        return f"📈 스펙트럼 획득 (max {result.get('max_intensity', 0):.0f} ADU)"
+        return f"📈 Spectrum acquired (max {result.get('max_intensity', 0):.0f} ADU)"
     if name in ("move_stage", "move_stage_relative", "move_to_pixel"):
         pos = result.get("position", {})
-        return f"🧭 이동 → ({pos.get('x', '?')}, {pos.get('y', '?')})"
+        return f"🧭 Moved → ({pos.get('x', '?')}, {pos.get('y', '?')})"
     if name == "analyze_microscope_image":
-        return "👁️ 현미경 이미지 확인"
+        return "👁️ Microscope image checked"
     if name == "run_autofocus":
-        return "🔬 오토포커스 완료"
+        return "🔬 Autofocus complete"
     if name == "apply_background_subtraction":
-        return "🧹 형광 배경 제거 적용"
+        return "🧹 Fluorescence background subtraction applied"
     if name == "search_knowledge_base":
         hits = result.get("results", [])
         if not hits:
-            return f"📚 지식베이스 조회 — '{args.get('query', '')}' 해당 없음"
+            return f"📚 KB lookup — no match for '{args.get('query', '')}'"
         titles = ", ".join(h.get("title", "?") for h in hits)
-        return f"📚 지식베이스 조회 → {titles}"
-    return f"🔧 {name} 호출"
+        return f"📚 KB lookup → {titles}"
+    return f"🔧 {name} called"
 
 
 def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]:
@@ -511,6 +513,11 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
         d["session_id"] = sid
         return d
 
+    # 벤치마크 로그: resolved sid(빈 값이면 위에서 uuid로 확정한 것)를 넘겨야 서로 다른
+    # 세션이 'nosession' 파일 하나로 뭉치지 않는다. run_stream 소비 전에 만들어 첫
+    # tool 이벤트부터 관측한다. 로깅 실패는 detail_log가 내부에서 삼키므로 여기선 그냥 먹인다.
+    turn = new_turn("AILA", sid, user_message)
+
     try:
         llm = _get_llm()
         history = _SESSIONS.get(sid, [])
@@ -520,6 +527,7 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
         final_messages = history
 
         for event in run_stream(llm, history, user_message):
+            turn.observe(event)
             etype = event["type"]
             if etype == "tool":
                 yield ev({"type": "node", "node": event["name"],
@@ -528,6 +536,7 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
                 if sp:
                     yield ev(sp)
             elif etype == "error":
+                turn.fail(event["detail"])
                 yield ev({"type": "error", "detail": event["detail"]})
                 return
             elif etype == "final":
@@ -536,29 +545,46 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
                 final_messages = event["messages"]
 
         if final_ctx is None:
-            yield ev({"type": "error", "detail": "에이전트가 응답을 생성하지 못했습니다."})
+            turn.fail("The agent failed to generate a response.")
+            yield ev({"type": "error", "detail": "The agent failed to generate a response."})
             return
 
         _SESSIONS[sid] = _trim_history(final_messages)
 
         # 측정(레이저 조사)이 실제로 있었는지로 "실험 보고서" vs "일반 대화"를 가른다.
         used_measurement = "acquire_spectrum" in final_ctx.get("tool_call_order", [])
+        turn.complete("done" if used_measurement else "chat", final_text, final_ctx)
         if used_measurement:
             yield ev({"type": "done", "final_report": final_text})
         else:
             yield ev({"type": "chat", "reply": final_text})
 
     except Exception as e:
+        turn.fail(str(e))
         yield ev({"type": "error", "detail": str(e)})
 
 
 def run_experiment(user_message: str, session_id: str = "") -> dict:
     """동기 1회 실행 — 벤치마크/레거시용 (세션 히스토리 없이 매번 새로 시작)."""
+    # 벤치마크 로그: 빈 session_id면 매 실행마다 uuid를 새로 만들어 실행 1회 = 파일 1개로
+    # 분리한다(안 그러면 모든 벤치마크 질의가 'nosession' 한 파일에 뭉친다).
+    sid = session_id or str(uuid.uuid4())
+    turn = new_turn("AILA", sid, user_message)
     llm = _get_llm()
     final_text = ""
+    final_ctx = None
+    error_detail = None
     for event in run_stream(llm, [], user_message):
+        turn.observe(event)
         if event["type"] == "final":
             final_text = event["text"]
+            final_ctx = event["ctx"]
         elif event["type"] == "error":
-            final_text = f"[오류] {event['detail']}"
+            error_detail = event["detail"]
+            final_text = f"[Error] {event['detail']}"
+    if error_detail is not None:
+        turn.fail(error_detail, final_ctx)
+    else:
+        used_measurement = "acquire_spectrum" in (final_ctx or {}).get("tool_call_order", [])
+        turn.complete("done" if used_measurement else "chat", final_text, final_ctx)
     return {"final_report": final_text}

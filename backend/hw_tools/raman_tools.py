@@ -68,7 +68,7 @@ def init_hardware(stage=None, laser=None, ccd=None, camera=None):
 def get_stage_speed() -> dict:
     """현재 스테이지 이동 속도를 반환한다. 단위는 mm/s."""
     if _stage is None:
-        return {"ok": False, "error": "스테이지가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Stage is not initialized."}
     try:
         speeds = _stage.get_velocity()
         return {"ok": True, "x_speed_mm_s": speeds[0], "y_speed_mm_s": speeds[1], "z_speed_mm_s": speeds[2]}
@@ -78,7 +78,7 @@ def get_stage_speed() -> dict:
 def set_stage_speed(x_speed_mm_s: float, y_speed_mm_s: float, z_speed_mm_s: float = None) -> dict:
     """스테이지 이동 속도를 설정한다. x_speed_mm_s, y_speed_mm_s, z_speed_mm_s는 각 축의 이동 속도."""
     if _stage is None:
-        return {"ok": False, "error": "스테이지가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Stage is not initialized."}
     try:
         _stage.set_velocity(x_speed_mm_s, y_speed_mm_s, z_speed_mm_s)
         return {"ok": True, "x_speed_mm_s": x_speed_mm_s, "y_speed_mm_s": y_speed_mm_s, "z_speed_mm_s": z_speed_mm_s}
@@ -88,15 +88,15 @@ def set_stage_speed(x_speed_mm_s: float, y_speed_mm_s: float, z_speed_mm_s: floa
 def move_stage(x: float, y: float, z: float = None) -> dict:
     """스테이지를 절대 좌표(mm)로 이동."""
     if _stage is None:
-        return {"ok": False, "error": "스테이지가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Stage is not initialized."}
 
     # 범위 검증
     if not (0 <= x <= STAGE_MAX_X):
-        return {"ok": False, "error": f"X 범위 초과: {x} (허용: 0~{STAGE_MAX_X})"}
+        return {"ok": False, "error": f"X out of range: {x} (allowed: 0-{STAGE_MAX_X})"}
     if not (0 <= y <= STAGE_MAX_Y):
-        return {"ok": False, "error": f"Y 범위 초과: {y} (허용: 0~{STAGE_MAX_Y})"}
+        return {"ok": False, "error": f"Y out of range: {y} (allowed: 0-{STAGE_MAX_Y})"}
     if z is not None and not (STAGE_MIN_Z <= z <= STAGE_MAX_Z):
-        return {"ok": False, "error": f"Z 범위 초과: {z} (허용: {STAGE_MIN_Z}~{STAGE_MAX_Z})"}
+        return {"ok": False, "error": f"Z out of range: {z} (allowed: {STAGE_MIN_Z}-{STAGE_MAX_Z})"}
 
     try:
         kw = {"x": x, "y": y, "wait": True}
@@ -114,7 +114,7 @@ def move_stage(x: float, y: float, z: float = None) -> dict:
 def get_stage_position() -> dict:
     """현재 스테이지 위치를 반환."""
     if _stage is None:
-        return {"ok": False, "error": "스테이지가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Stage is not initialized."}
     try:
         pos = _stage.get_position()
         return {"ok": True, "x": pos[0], "y": pos[1], "z": pos[2]}
@@ -125,7 +125,7 @@ def get_stage_position() -> dict:
 def move_stage_relative(dx: float = 0.0, dy: float = 0.0, dz: float = 0.0) -> dict:
     """스테이지를 현재 위치 기준 상대 이동(mm)."""
     if _stage is None:
-        return {"ok": False, "error": "스테이지가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Stage is not initialized."}
     try:
         _stage.move_relative(dx, dy, dz, 0)
         pos = _stage.get_position()
@@ -141,10 +141,10 @@ def move_stage_relative(dx: float = 0.0, dy: float = 0.0, dz: float = 0.0) -> di
 def laser_on() -> dict: 
     """레이저를 켠다."""
     if _laser is None:
-        return {"ok": False, "error": "레이저가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Laser is not initialized."}
     try:
         _laser.laser_on()
-        return {"ok": True, "status": "레이저 ON"}
+        return {"ok": True, "status": "Laser ON"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -152,10 +152,10 @@ def laser_on() -> dict:
 def laser_off() -> dict:
     """레이저를 끈다."""
     if _laser is None:
-        return {"ok": False, "error": "레이저가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Laser is not initialized."}
     try:
         _laser.laser_off()
-        return {"ok": True, "status": "레이저 OFF"}
+        return {"ok": True, "status": "Laser OFF"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -163,15 +163,15 @@ def laser_off() -> dict:
 def set_laser_power(percent: float) -> dict:
     """레이저 출력 설정. percent: ND 필터 투과율 0.004~100 (실수 허용)."""
     if _laser is None:
-        return {"ok": False, "error": "레이저가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Laser is not initialized."}
     try:
         percent = float(percent)
     except (TypeError, ValueError):
-        return {"ok": False, "error": "percent는 숫자여야 합니다."}
+        return {"ok": False, "error": "percent must be a number."}
     lo = getattr(_laser, "ND_MIN_PCT", 0.004)
     hi = getattr(_laser, "ND_MAX_PCT", 100.0)
     if not (lo <= percent <= hi):
-        return {"ok": False, "error": f"유효 범위: {lo}~{hi} %"}
+        return {"ok": False, "error": f"Valid range: {lo}-{hi} %"}
     try:
         _laser.set_power(percent)
         time.sleep(0.15)  # ND 필터 광학 settling (모터 정지 후 잔류 진동)
@@ -272,25 +272,25 @@ def acquire_spectrum(
                          sum_intensity, calibrated, [raman_shift_cm-1, ...]}
     """
     if _ccd is None:
-        return {"ok": False, "error": "분광기(CCD)가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화 후 자동으로 측정 가능합니다."}
+        return {"ok": False, "error": "The spectrometer (CCD) is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. Measurement becomes available automatically once stabilized."}
     if _laser is None:
-        return {"ok": False, "error": "레이저가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Laser is not initialized."}
 
     # 레이저 파워는 연속 조절(ND 필터, 0.004~100%). 드라이버 set_power가
     # 임의 %를 펄스 위치로 보간하며, 범위를 벗어나면 스스로 clamp한다.
     if not isinstance(power, (int, float)):
-        return {"ok": False, "error": "power는 숫자(%)여야 합니다."}
+        return {"ok": False, "error": "power must be a number (%)."}
     if not (0.004 <= power <= 100):
-        return {"ok": False, "error": "유효한 출력 범위: 0.004 ~ 100 (%)"}
+        return {"ok": False, "error": "Valid power range: 0.004 - 100 (%)"}
 
     if acq_mode not in ('single', 'accumulate', 'kinetic'):
-        return {"ok": False, "error": "acq_mode는 'single' | 'accumulate' | 'kinetic'"}
+        return {"ok": False, "error": "acq_mode must be 'single' | 'accumulate' | 'kinetic'"}
 
     if read_mode not in ('fvb', 'single_track'):
-        return {"ok": False, "error": "read_mode는 'fvb' | 'single_track'"}
+        return {"ok": False, "error": "read_mode must be 'fvb' | 'single_track'"}
 
     if read_mode == 'single_track' and single_track_center is None:
-        return {"ok": False, "error": "read_mode='single_track' 사용 시 single_track_center 필요"}
+        return {"ok": False, "error": "single_track_center is required when read_mode='single_track'"}
 
     raw = None
     try:
@@ -355,7 +355,7 @@ def acquire_spectrum(
                     except Exception:
                         pass
                     raise TimeoutError(
-                        f"kinetic 취득 타임아웃: {_timeout_s:.1f}초 초과 "
+                        f"kinetic acquisition timeout: exceeded {_timeout_s:.1f} s "
                         f"(trigger={trigger_mode}, frames={kinetic_count})"
                     )
                 time.sleep(0.05)
@@ -383,7 +383,7 @@ def acquire_spectrum(
             pass
 
     if raw is None:
-        return {"ok": False, "error": "CCD 데이터 수집 실패"}
+        return {"ok": False, "error": "CCD data acquisition failed"}
 
     # ── 결과 조립 ──
     if acq_mode == 'kinetic':
@@ -450,7 +450,7 @@ def acquire_spectrum(
 def get_ccd_info() -> dict:
     """현재 CCD 설정값 및 상태를 한 번에 조회한다."""
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     try:
         t           = _ccd.get_temperature()
         temp_status = _ccd.get_temperature_status()
@@ -493,9 +493,9 @@ def get_ccd_info() -> dict:
 def set_ccd_exposure(exposure_time: float) -> dict:
     """CCD 노출 시간(초)을 설정한다."""
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     if exposure_time <= 0:
-        return {"ok": False, "error": "노출 시간은 0보다 커야 합니다."}
+        return {"ok": False, "error": "Exposure time must be greater than 0."}
     try:
         actual = _ccd.set_exposure_time(exposure_time)
         return {"ok": True, "exposure_time_s": actual}
@@ -516,10 +516,10 @@ def set_ccd_acquisition_mode(
     num_kinetics: kinetic 모드에서 총 프레임 수
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     valid = {'single', 'accumulate', 'kinetic', 'run_till_abort'}
     if mode not in valid:
-        return {"ok": False, "error": f"유효한 모드: {valid}"}
+        return {"ok": False, "error": f"Valid modes: {valid}"}
     try:
         _ccd.set_aq_mode(mode)
         if num_accumulations is not None:
@@ -544,10 +544,10 @@ def set_ccd_trigger_mode(mode: str) -> dict:
           'external_exposure' | 'software'
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     valid = {'internal', 'external', 'external_start', 'external_exposure', 'software'}
     if mode not in valid:
-        return {"ok": False, "error": f"유효한 모드: {valid}"}
+        return {"ok": False, "error": f"Valid modes: {valid}"}
     try:
         _ccd.set_trigger_mode(mode)
         return {"ok": True, "trigger_mode": mode}
@@ -574,16 +574,16 @@ def set_ccd_read_mode(
     width:  single_track 모드의 행 폭 (기본 1)
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     valid = {'fvb', 'single_track', 'image'}
     if mode not in valid:
-        return {"ok": False, "error": f"유효한 모드: {valid}"}
+        return {"ok": False, "error": f"Valid modes: {valid}"}
     try:
         if mode == 'fvb':
             _ccd.set_ro_full_vertical_binning(hbin=hbin)
         elif mode == 'single_track':
             if center is None:
-                return {"ok": False, "error": "single_track 모드는 center 파라미터가 필요합니다."}
+                return {"ok": False, "error": "single_track mode requires the center parameter."}
             _ccd.set_ro_single_track(center=center, width=width, hbin=hbin)
         elif mode == 'image':
             _ccd.set_ro_image_mode(hbin=hbin)
@@ -604,7 +604,7 @@ def set_ccd_preamp_gain(index: int) -> dict:
     사용 가능한 이득 목록은 get_ccd_info()의 preamp_gains_available 참조.
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     try:
         _ccd.set_preamp_gain(index)
         gain_val = _ccd.preamp_gains[index] if _ccd.preamp_gains else None
@@ -619,9 +619,9 @@ def set_ccd_em_gain(gain: int) -> dict:
     EM CCD 전용. get_ccd_info()의 em_gain_range 참조.
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     if not getattr(_ccd, 'em_mode', False):
-        return {"ok": False, "error": "이 카메라는 EM CCD가 아닙니다."}
+        return {"ok": False, "error": "This camera is not an EM CCD."}
     try:
         _ccd.set_EMCCD_gain(gain)
         return {"ok": True, "em_gain": gain}
@@ -635,11 +635,11 @@ def set_mcp_gain(gain: int) -> dict:
     허용 범위는 get_mcp_gain_range()로 확인.
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     try:
         low, high = _ccd.get_mcp_gain_range()
         if not (low <= gain <= high):
-            return {"ok": False, "error": f"MCP 이득 범위 초과: {gain} (허용: {low}~{high})"}
+            return {"ok": False, "error": f"MCP gain out of range: {gain} (allowed: {low}-{high})"}
         _ccd.set_mcp_gain(gain)
         return {"ok": True, "mcp_gain": gain}
     except Exception as e:
@@ -649,7 +649,7 @@ def set_mcp_gain(gain: int) -> dict:
 def get_mcp_gain_range() -> dict:
     """iStar ICCD 카메라의 MCP 이득 허용 범위(min, max)를 반환한다."""
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     try:
         low, high = _ccd.get_mcp_gain_range()
         return {"ok": True, "min": low, "max": high}
@@ -663,9 +663,9 @@ def set_ccd_output_amp(amp: int) -> dict:
     0 = EMCCD 앰프, 1 = 일반(Conventional) 앰프.
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     if amp not in (0, 1):
-        return {"ok": False, "error": "amp는 0(EM) 또는 1(Conventional)이어야 합니다."}
+        return {"ok": False, "error": "amp must be 0 (EM) or 1 (Conventional)."}
     try:
         _ccd.set_output_amp(amp)
         return {"ok": True, "output_amp": amp, "mode": "EM" if amp == 0 else "Conventional"}
@@ -680,7 +680,7 @@ def set_ccd_shift_speeds(vs_index: int = None, hs_index: int = None) -> dict:
     둘 중 하나만 지정해도 됩니다.
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     result = {"ok": True}
     try:
         if vs_index is not None:
@@ -703,7 +703,7 @@ def set_ccd_temperature(temp: int) -> dict:
     일반적 범위: -80 ~ 20°C.
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     try:
         _ccd.set_temperature(temp)
         return {"ok": True, "target_temperature_C": temp}
@@ -714,7 +714,7 @@ def set_ccd_temperature(temp: int) -> dict:
 def set_ccd_cooler(on: bool) -> dict:
     """CCD 냉각기를 켜거나(True) 끈다(False)."""
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     try:
         _ccd.set_cooler(on)
         return {"ok": True, "cooler": "ON" if on else "OFF"}
@@ -730,9 +730,9 @@ def set_ccd_shutter(mode: str) -> dict:
     'close' — 강제로 닫아둠 (다크/배경 측정 시)
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     if mode not in ('auto', 'open', 'close'):
-        return {"ok": False, "error": "mode는 'auto', 'open', 'close' 중 하나여야 합니다."}
+        return {"ok": False, "error": "mode must be one of 'auto', 'open', 'close'."}
     try:
         if mode == 'auto':
             _ccd.set_shutter_auto()
@@ -752,7 +752,7 @@ def set_ccd_image_flip(hflip: bool, vflip: bool) -> dict:
     vflip: 수직 상하 반전 여부
     """
     if _ccd is None:
-        return {"ok": False, "error": "CCD가 아직 준비되지 않았습니다 — 냉각(-40°C 안정화) 중이거나 미연결 상태입니다. 안정화가 끝나면 자동으로 사용 가능합니다."}
+        return {"ok": False, "error": "CCD is not ready yet - it is cooling (stabilizing at -40 degC) or not connected. It becomes available automatically once stabilized."}
     try:
         _ccd.set_image_flip(hflip=hflip, vflip=vflip)
         return {"ok": True, "hflip": hflip, "vflip": vflip}
@@ -770,20 +770,20 @@ def start_camera_stream() -> dict:
     스트림을 내가 끄면 그쪽 화면이 죽는다. already_streaming=True면 끄지 말 것.
     """
     if _camera is None:
-        return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Camera is not initialized."}
 
     try:
         # 이미 스트리밍 중인지 확인 (StreamingTUCam 내부 속성 활용)
         if getattr(_camera, 'is_streaming', False):
             return {"ok": True, "already_streaming": True,
-                    "status": "카메라는 이미 스트리밍 중입니다."}
+                    "status": "Camera is already streaming."}
 
         _camera.start_stream()
         return {"ok": True, "already_streaming": False,
-                "status": "카메라 스트리밍이 성공적으로 시작되었습니다."}
+                "status": "Camera streaming started successfully."}
 
     except Exception as e:
-        return {"ok": False, "error": f"스트리밍 시작 실패: {str(e)}"}
+        return {"ok": False, "error": f"Failed to start streaming: {str(e)}"}
 
 def stop_camera_stream() -> dict:
     """
@@ -791,25 +791,25 @@ def stop_camera_stream() -> dict:
     USE_camera_stream.py의 StreamingTUCam.stop_stream()을 호출합니다.
     """
     if _camera is None:
-        return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Camera is not initialized."}
 
     try:
         if not getattr(_camera, 'is_streaming', False):
-            return {"ok": True, "status": "카메라는 현재 스트리밍 중이 아닙니다."}
+            return {"ok": True, "status": "Camera is not currently streaming."}
 
         _camera.stop_stream()
-        return {"ok": True, "status": "카메라 스트리밍이 성공적으로 중지되었습니다."}
+        return {"ok": True, "status": "Camera streaming stopped successfully."}
 
     except Exception as e:
-        return {"ok": False, "error": f"스트리밍 중지 실패: {str(e)}"}
+        return {"ok": False, "error": f"Failed to stop streaming: {str(e)}"}
 
 
 def set_camera_exposure(ms: float) -> dict:
     """카메라(TUCam) 노출 시간(ms)을 설정한다."""
     if _camera is None:
-        return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Camera is not initialized."}
     if ms <= 0:
-        return {"ok": False, "error": "노출 시간은 0보다 커야 합니다."}
+        return {"ok": False, "error": "Exposure time must be greater than 0."}
     try:
         _camera.set_exposure(ms)
         return {"ok": True, "exposure_ms": ms}
@@ -820,7 +820,7 @@ def set_camera_exposure(ms: float) -> dict:
 def set_camera_auto_exposure(enabled: bool) -> dict:
     """카메라 자동 노출을 활성화(True) 또는 비활성화(False)한다."""
     if _camera is None:
-        return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Camera is not initialized."}
     try:
         from backend.TuCam.TUCam import TUCAM_Capa_SetValue, TUCAM_IDCAPA
         TUCAM_Capa_SetValue(
@@ -840,13 +840,13 @@ def capture_camera_frame() -> dict:
     선명도 점수(sharpness_score)는 라플라시안 분산으로 계산된다 — 오토포커스 시 활용 가능.
     """
     if _camera is None:
-        return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Camera is not initialized."}
     try:
         import numpy as np
         import cv2
         frame = _camera.get_latest_frame()
         if frame is None:
-            return {"ok": False, "error": "프레임 획득 실패 (스트리밍 중인지 확인)"}
+            return {"ok": False, "error": "Failed to acquire frame (check whether streaming is active)"}
 
         gray = (frame.astype(np.float32)
                 if frame.ndim == 2
@@ -878,10 +878,10 @@ def set_guide_beam_mode() -> dict:
     측정 레이저 미사용 시 시편 정렬·초점 확인에 활용한다.
     """
     if _laser is None:
-        return {"ok": False, "error": "레이저가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Laser is not initialized."}
     try:
         _laser.set_guide_beam()
-        return {"ok": True, "status": "가이드빔 모드로 전환 완료"}
+        return {"ok": True, "status": "Switched to guide-beam mode"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -924,11 +924,11 @@ def run_autofocus(
         optimal_z, best_area_px, step_count, z_scores, current_position
     """
     if _stage is None:
-        return {"ok": False, "error": "스테이지가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Stage is not initialized."}
     if _camera is None:
-        return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Camera is not initialized."}
     if _laser is None:
-        return {"ok": False, "error": "레이저가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Laser is not initialized."}
 
     try:
         import numpy as np
@@ -1092,11 +1092,11 @@ def apply_background_subtraction(
     global _bg_versions
 
     if not (2 <= poly_order <= 10):
-        return {"ok": False, "error": f"poly_order는 2~10이어야 합니다 (입력: {poly_order})"}
+        return {"ok": False, "error": f"poly_order must be 2-10 (got: {poly_order})"}
     if not (10 <= max_iterations <= 500):
-        return {"ok": False, "error": f"max_iterations는 10~500이어야 합니다 (입력: {max_iterations})"}
+        return {"ok": False, "error": f"max_iterations must be 10-500 (got: {max_iterations})"}
     if not (0.001 <= threshold <= 1.0):
-        return {"ok": False, "error": f"threshold는 0.001~1.0이어야 합니다 (입력: {threshold})"}
+        return {"ok": False, "error": f"threshold must be 0.001-1.0 (got: {threshold})"}
 
     intensity: list = []
     raman_shift = None
@@ -1105,12 +1105,12 @@ def apply_background_subtraction(
         if _last_spectrum is None:
             return {
                 "ok": False,
-                "error": "저장된 스펙트럼이 없습니다. 먼저 acquire_spectrum()을 호출하세요.",
+                "error": "No saved spectrum. Call acquire_spectrum() first.",
             }
         if "data" not in _last_spectrum:
             return {
                 "ok": False,
-                "error": "마지막 스펙트럼이 Kinetic 모드입니다. Single/Accumulate 스펙트럼에만 적용 가능합니다.",
+                "error": "The last spectrum is in Kinetic mode. This applies only to Single/Accumulate spectra.",
             }
         intensity = _last_spectrum["data"]
         raman_shift = _last_spectrum.get("raman_shift_cm-1")
@@ -1119,7 +1119,7 @@ def apply_background_subtraction(
         if not filepath.is_absolute():
             filepath = _DATA_DIR / source
         if not filepath.exists():
-            return {"ok": False, "error": f"파일을 찾을 수 없습니다: {filepath}"}
+            return {"ok": False, "error": f"File not found: {filepath}"}
         try:
             if filepath.suffix.lower() == ".json":
                 with open(filepath, "r", encoding="utf-8") as f:
@@ -1129,35 +1129,35 @@ def apply_background_subtraction(
                 elif "corrected_data" in loaded:
                     intensity = loaded["corrected_data"]
                 else:
-                    return {"ok": False, "error": "JSON 파일에 'data' 또는 'corrected_data' 키가 없습니다."}
+                    return {"ok": False, "error": "The JSON file has no 'data' or 'corrected_data' key."}
                 raman_shift = loaded.get("raman_shift_cm-1")
             elif filepath.suffix.lower() == ".csv":
                 with open(filepath, "r", encoding="utf-8") as f:
                     reader = csv.DictReader(f)
                     rows = list(reader)
                 if not rows:
-                    return {"ok": False, "error": "CSV 파일이 비어 있습니다."}
+                    return {"ok": False, "error": "The CSV file is empty."}
                 if "corrected_intensity" in rows[0]:
                     intensity = [float(r["corrected_intensity"]) for r in rows]
                 elif "intensity" in rows[0]:
                     intensity = [float(r["intensity"]) for r in rows]
                 else:
-                    return {"ok": False, "error": "CSV에 'intensity' 컬럼이 없습니다."}
+                    return {"ok": False, "error": "The CSV has no 'intensity' column."}
                 if "raman_shift_cm-1" in rows[0]:
                     raman_shift = [float(r["raman_shift_cm-1"]) for r in rows]
             else:
-                return {"ok": False, "error": "지원되지 않는 파일 형식입니다 (JSON 또는 CSV만 허용)."}
+                return {"ok": False, "error": "Unsupported file format (only JSON or CSV allowed)."}
         except Exception as e:
-            return {"ok": False, "error": f"파일 로드 오류: {e}"}
+            return {"ok": False, "error": f"File load error: {e}"}
 
     if not intensity:
-        return {"ok": False, "error": "스펙트럼 강도 배열이 비어 있습니다."}
+        return {"ok": False, "error": "The spectrum intensity array is empty."}
     if len(intensity) < poly_order + 1:
         return {
             "ok": False,
             "error": (
-                f"스펙트럼 길이({len(intensity)})가 poly_order+1({poly_order + 1})보다 작습니다. "
-                "다항식 차수를 낮추세요."
+                f"Spectrum length ({len(intensity)}) is smaller than poly_order+1 ({poly_order + 1}). "
+                "Lower the polynomial order."
             ),
         }
 
@@ -1169,7 +1169,7 @@ def apply_background_subtraction(
             threshold=threshold,
         )
     except Exception as e:
-        return {"ok": False, "error": f"IPBSA 알고리즘 오류: {e}"}
+        return {"ok": False, "error": f"IPBSA algorithm error: {e}"}
 
     saved_path = None
     if save_result:
@@ -1219,7 +1219,7 @@ def list_bg_versions() -> dict:
             "ok": True,
             "count": 0,
             "versions": [],
-            "message": "저장된 버전이 없습니다. apply_background_subtraction()을 먼저 호출하세요.",
+            "message": "No saved versions. Call apply_background_subtraction() first.",
         }
     summaries = []
     for label, v in _bg_versions.items():
@@ -1243,7 +1243,7 @@ def get_bg_version(version_label: str) -> dict:
     if version_label not in _bg_versions:
         return {
             "ok": False,
-            "error": f"버전 '{version_label}'을 찾을 수 없습니다.",
+            "error": f"Version '{version_label}' not found.",
             "available_versions": list(_bg_versions.keys()),
         }
     return {"ok": True, **_bg_versions[version_label]}
@@ -1319,7 +1319,7 @@ def load_spectrum(filename: str) -> dict:
         if not filepath.is_absolute():
             filepath = _DATA_DIR / filename
         if not filepath.exists():
-            return {"ok": False, "error": f"파일을 찾을 수 없습니다: {filepath}"}
+            return {"ok": False, "error": f"File not found: {filepath}"}
 
         with open(filepath, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -1397,7 +1397,7 @@ def save_point_data(
     try:
         session_dir = _DATA_DIR / "sessions" / session_id
         if not session_dir.exists():
-            return {"ok": False, "error": f"세션이 없습니다: {session_id}. create_session을 먼저 호출하세요."}
+            return {"ok": False, "error": f"No such session: {session_id}. Call create_session first."}
 
         saved_files: list[str] = []
 
@@ -1463,12 +1463,12 @@ def capture_scene() -> dict:
     측정 (x,y)를 그 위에 정합해 찍을 수 있다. 카메라 스트리밍이 켜져 있어야 한다.
     """
     if _camera is None:
-        return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Camera is not initialized."}
     import numpy as np
     import cv2
     frame = _camera.get_latest_frame()
     if frame is None:
-        return {"ok": False, "error": "카메라 프레임이 없습니다. 먼저 스트리밍을 시작하세요."}
+        return {"ok": False, "error": "No camera frame. Start streaming first."}
     img = frame.copy()
     if img.dtype == np.uint16:
         img = (img / 256).astype(np.uint8)
@@ -1491,11 +1491,11 @@ def capture_scene() -> dict:
     return {"ok": True, "image_url": saved["image_url"], "extent": extent,
             "shape": list(img.shape),
             # saved 를 실으면 spectrum_event 배선을 타 캡처한 화면이 채팅에 바로 표시된다.
-            "saved": {"title": "현미경 화면 캡처", "image_url": saved["image_url"]},
-            "note": "이후 run_analysis 에서 microscope_image / image_extent 로 사용 가능."}
+            "saved": {"title": "Microscope view capture", "image_url": saved["image_url"]},
+            "note": "Usable later in run_analysis via microscope_image / image_extent."}
 
 
-def analyze_microscope_image(question: str = "샘플의 특정 물체(예: 세포)를 찾고 중심점 픽셀 좌표를 알려주세요.") -> dict:
+def analyze_microscope_image(question: str = "Find a specific object in the sample (e.g. a cell) and report its center-point pixel coordinates.") -> dict:
     """
     TuCam 현미경 카메라 화면을 PNG (Base64)로 캡처하여 반환.
 
@@ -1517,14 +1517,14 @@ def analyze_microscope_image(question: str = "샘플의 특정 물체(예: 세�
        상한 이하라 다운스케일이 없어 좌표가 보낸 그대로 유지된다.
     """
     if _camera is None:
-        return {"ok": False, "error": "카메라가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Camera is not initialized."}
     try:
         import base64
         import numpy as np
         import cv2
         frame = _camera.get_latest_frame()
         if frame is None:
-            return {"ok": False, "error": "프레임 획득 실패 (스트리밍 중인지 확인)"}
+            return {"ok": False, "error": "Failed to acquire frame (check whether streaming is active)"}
 
         if frame.dtype == np.uint16:
             frame = (frame >> 8).astype(np.uint8)
@@ -1541,10 +1541,10 @@ def analyze_microscope_image(question: str = "샘플의 특정 물체(예: 세�
 
         height, width = frame_bgr.shape[:2]
         ret, buf = cv2.imencode('.png', frame_bgr)
-        enhanced_question = f"{question}\n\n[현재 첨부된 이미지의 원본 해상도는 가로 {width}px, 세로 {height}px 입니다. 픽셀 좌표를 반환할 때 이 해상도를 기준으로 정확한 픽셀 값을 제시하세요.][주의: 당신은 픽셀 좌표를 반환하게 되며, 이는 스테이지 좌표가 아닙니다. 스테이지를 해당 위치로 이동하려면, move_to_pixel(pixel_x, pixel_y) 함수를 사용해야 합니다.]"
+        enhanced_question = f"{question}\n\n[The attached image has an original resolution of {width}px wide by {height}px tall. When returning pixel coordinates, give exact pixel values based on this resolution.][Note: you return pixel coordinates, which are NOT stage coordinates. To move the stage to that location, you must use the move_to_pixel(pixel_x, pixel_y) function.]"
 
         if not ret:
-            return {"ok": False, "error": "PNG 인코딩 실패"}
+            return {"ok": False, "error": "PNG encoding failed"}
         img_b64 = base64.b64encode(buf).decode('utf-8')
 
         return {
@@ -1570,11 +1570,11 @@ def move_to_pixel(pixel_x: int, pixel_y: int) -> dict:
     이미지 중심(CAMERA_WIDTH/2, CAMERA_HEIGHT/2)이 현재 스테이지 위치에 대응한다.
     """
     if _stage is None:
-        return {"ok": False, "error": "스테이지가 초기화되지 않았습니다."}
+        return {"ok": False, "error": "Stage is not initialized."}
     try:
         pos = _stage.get_position()
         if pos is None:
-            return {"ok": False, "error": "스테이지 위치 조회 실패"}
+            return {"ok": False, "error": "Failed to query stage position"}
         
         dx_px = pixel_x - (CAMERA_WIDTH  / 2.0)
         dy_px = pixel_y - (CAMERA_HEIGHT / 2.0)
