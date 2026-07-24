@@ -26,6 +26,7 @@ from backend.spectrum_store import (
     aggregate_spectra_csv as _store_aggregate_csv,
     bundle_results as _store_bundle_results,
     save_scene as _store_save_scene,
+    save_preview_png as _store_save_preview,
 )
 from backend.analysis_sandbox import run_analysis as _run_analysis
 from backend.web_search import web_search as _web_search
@@ -1602,6 +1603,268 @@ def move_to_pixel(pixel_x: int, pixel_y: int) -> dict:
 
 
 # ─────────────────────────────────────────
+# 그리드 매핑 — 5×5 같은 격자 스캔을 도구 1~2개로 압축
+# ──────────────────────────────────────────
+# [배경] 예전엔 에이전트가 25점 격자를 move→autofocus→acquire "직접" 75회로 돌렸다.
+# 매 스텝 커지는 히스토리를 매번 통째로 재전송해 토큰이 사실상 제곱으로 불고(1턴 ~8.5k
+# 토큰), 스텝마다 LLM 추론이 끼어 633초가 걸렸다. 아래 두 도구는 그 루프를 파이썬으로
+# 내려 토큰·지연·재전송을 없앤다:
+#   preview_grid_scan : 격자 위치를 '현재 카메라 화면'에 원으로 오버레이해 에이전트에게
+#                       보여주기만 한다(이동·조사 없음). 에이전트가 눈으로 보고 승인/수정.
+#   run_grid_scan     : 승인 후 실제 격자 스캔을 내부 루프로 수행, 압축 요약 1개만 반환.
+
+# 오버레이 원 크기 — 프론트 카메라 뷰의 '레이저 조사점' 빨간 링(CameraView.tsx: w-4 ≈ 16px)과
+# 대략 같은 크기로 그린다. 물리적 빔 지름이 아니라 조사점 표식이다(사용자 지시: 대충 그 크기).
+_GRID_SPOT_RADIUS_PX = 14
+
+# run_grid_scan 한 번이 낼 수 있는 누적 조사량 상한(mJ). 에이전트 층의 per-turn 회로차단기는
+# 도구 이름이 acquire_spectrum일 때만 도는데 run_grid_scan은 내부에서 N번 조사하므로,
+# 여기서 독립적으로 한 번 더 막는다(방어적 이중화). 에이전트 층에도 별도 누계 반영을 둔다.
+_GRID_MAX_DOSE_MJ = 1000.0
+
+# 격자 점 개수 안전 상한(폭주 방지).
+_GRID_MAX_POINTS = 400
+
+# mm/px 크기(양수). move_to_pixel과 동일 상수에서 유도 — 부호는 _SIGN_*로 따로 적용한다.
+_MM_PER_PX_X = _UM_PER_PX_X * CALIB_FACTOR_X / 1000.0
+_MM_PER_PX_Y = _UM_PER_PX_Y * CALIB_FACTOR_Y / 1000.0
+
+
+def _grid_stage_coords(center_x: float, center_y: float,
+                       rows: int, cols: int, spacing_mm: float) -> list:
+    """(center_x,center_y) 중심 대칭 rows×cols 격자의 스테이지 좌표를 행 우선(raster)으로.
+    반환 각 항목: (index, row, col, x_mm, y_mm)."""
+    pts = []
+    idx = 0
+    for i in range(rows):
+        dy = (i - (rows - 1) / 2.0) * spacing_mm
+        for j in range(cols):
+            dx = (j - (cols - 1) / 2.0) * spacing_mm
+            pts.append((idx, i, j, round(center_x + dx, 4), round(center_y + dy, 4)))
+            idx += 1
+    return pts
+
+
+def _mm_to_pixel(sx: float, sy: float, cx: float, cy: float):
+    """스테이지 mm 좌표(sx,sy)를, 현재 위치(cx,cy)가 화면 중심에 오는 카메라
+    이미지(CAMERA_WIDTH×CAMERA_HEIGHT) 픽셀로 투영한다. move_to_pixel의 역변환."""
+    px = CAMERA_WIDTH  / 2.0 + (sx - cx) * _SIGN_X / _MM_PER_PX_X
+    py = CAMERA_HEIGHT / 2.0 + (sy - cy) * _SIGN_Y / _MM_PER_PX_Y
+    return px, py
+
+
+def _validate_grid_args(rows, cols, spacing_mm):
+    """preview/run 공통 인자 검증 — 실패 시 error dict, 통과 시 None."""
+    if not isinstance(rows, int) or not isinstance(cols, int) or rows < 1 or cols < 1:
+        return {"ok": False, "error": "rows and cols must be integers >= 1."}
+    if rows * cols > _GRID_MAX_POINTS:
+        return {"ok": False, "error": f"Too many points ({rows*cols}); max {_GRID_MAX_POINTS}."}
+    try:
+        if float(spacing_mm) <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "spacing_mm must be a number > 0."}
+    return None
+
+
+def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
+                      center_x: float = None, center_y: float = None) -> dict:
+    """격자 스캔 '미리보기'. 스테이지 이동·레이저 조사 없이, rows×cols 격자 위치를 현재
+    카메라 화면에 원으로 오버레이한 이미지를 반환한다(에이전트가 보고 승인/수정하도록).
+
+    center_* 미지정 시 현재 스테이지 위치를 격자 중심으로 쓴다. 화면 중심 = 현재 스테이지
+    위치이므로, 중심을 현재 위치로 두면 격자가 화면 중앙에 대칭으로 그려진다. 카메라 시야(FOV)는
+    좁아(≈0.43×0.30mm) 격자가 넓으면 일부 점은 화면 밖이다 — 화면 안 점만 세어 함께 알려준다.
+    """
+    err = _validate_grid_args(rows, cols, spacing_mm)
+    if err:
+        return err
+    if _stage is None:
+        return {"ok": False, "error": "Stage is not initialized."}
+    if _camera is None:
+        return {"ok": False, "error": "Camera is not initialized."}
+    try:
+        import base64
+        import numpy as np
+        import cv2
+
+        spacing_mm = float(spacing_mm)
+        pos = _stage.get_position()
+        if pos is None:
+            return {"ok": False, "error": "Failed to query stage position"}
+        cur_x, cur_y = float(pos[0]), float(pos[1])          # 화면 중심 = 현재 위치
+        cx = cur_x if center_x is None else float(center_x)  # 격자 중심
+        cy = cur_y if center_y is None else float(center_y)
+
+        frame = _camera.get_latest_frame()
+        if frame is None:
+            return {"ok": False, "error": "Failed to acquire frame (check whether streaming is active)"}
+        if frame.dtype == np.uint16:
+            frame = (frame >> 8).astype(np.uint8)
+        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) if frame.ndim == 2 else frame.copy()
+        if frame_bgr.shape[:2] != (CAMERA_HEIGHT, CAMERA_WIDTH):
+            frame_bgr = cv2.resize(frame_bgr, (CAMERA_WIDTH, CAMERA_HEIGHT),
+                                   interpolation=cv2.INTER_AREA)
+
+        pts = _grid_stage_coords(cx, cy, rows, cols, spacing_mm)
+        n_in_view = 0
+        for idx, i, j, sx, sy in pts:
+            px, py = _mm_to_pixel(sx, sy, cur_x, cur_y)
+            ipx, ipy = int(round(px)), int(round(py))
+            if 0 <= ipx < CAMERA_WIDTH and 0 <= ipy < CAMERA_HEIGHT:
+                n_in_view += 1
+            # 화면 밖 점도 cv2.circle이 자동 클립하므로 그냥 그린다(가장자리 힌트).
+            cv2.circle(frame_bgr, (ipx, ipy), _GRID_SPOT_RADIUS_PX, (0, 255, 0), 2)      # green: 스캔 점
+        # 화면 중심(현재 조사점) — 프론트 빨간 링과 같은 위치·색으로.
+        cv2.circle(frame_bgr, (CAMERA_WIDTH // 2, CAMERA_HEIGHT // 2),
+                   _GRID_SPOT_RADIUS_PX, (0, 0, 255), 2)                                 # red: 현재 조사점
+
+        ret, buf = cv2.imencode('.png', frame_bgr)
+        if not ret:
+            return {"ok": False, "error": "PNG encoding failed"}
+        img_b64 = base64.b64encode(buf).decode('utf-8')
+        # 같은 오버레이를 파일로도 저장해 image_url을 실으면, spectrum_event 배선을 타고
+        # 이 미리보기가 채팅창에 그대로 인라인 표시된다(프론트 수정 불필요). 에이전트는 위의
+        # image_base64로 '보고' 판단하고, 사람은 채팅에서 같은 그림을 본다.
+        saved_img = _store_save_preview(buf.tobytes(), tag="grid_preview")
+
+        fov_x, fov_y = CAMERA_WIDTH * _MM_PER_PX_X, CAMERA_HEIGHT * _MM_PER_PX_Y
+        span_x, span_y = (cols - 1) * spacing_mm, (rows - 1) * spacing_mm
+        question = (
+            f"Grid scan PREVIEW (not executed yet): {rows}x{cols} = {rows*cols} points, "
+            f"{spacing_mm} mm spacing, centered at stage (X={cx:.4f}, Y={cy:.4f}) mm. "
+            f"Cyan circles mark points to be scanned; the red circle is the current laser spot at the "
+            f"view center. Grid span {span_x:.3f}x{span_y:.3f} mm vs camera view ~{fov_x:.3f}x{fov_y:.3f} mm; "
+            f"{n_in_view}/{rows*cols} points fall within the current view (the rest are outside the frame "
+            f"but will still be measured). If this layout looks right, call run_grid_scan with the SAME "
+            f"parameters. If not, call preview_grid_scan again with adjusted rows/cols/spacing_mm/center."
+        )
+        out = {
+            "ok": True,
+            "rows": rows, "cols": cols, "spacing_mm": spacing_mm,
+            "center": {"x": round(cx, 4), "y": round(cy, 4)},
+            "n_points": rows * cols, "n_in_view": n_in_view,
+            "fov_mm": {"x": round(fov_x, 4), "y": round(fov_y, 4)},
+            "image_base64": img_b64,
+            "question": question,
+        }
+        if saved_img.get("ok"):
+            out["saved"] = {"title": f"Grid preview {rows}x{cols} @ {spacing_mm}mm",
+                            "image_url": saved_img["image_url"]}
+        return out
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def run_grid_scan(rows: int, cols: int, spacing_mm: float,
+                  center_x: float = None, center_y: float = None,
+                  autofocus: str = "each", exposure: float = 0.2, power: float = 40) -> dict:
+    """격자 스캔 '실행'. rows×cols 격자를 내부 루프로 순회하며 각 점에서
+    이동→(오토포커스)→스펙트럼 측정·자동저장하고, 압축 요약 1개만 반환한다.
+
+    autofocus:
+      "each"   — 매 점에서 오토포커스(가장 정확, 느림; 예전 수동 방식과 동일)
+      "center" — 격자 중심에서 1회만 오토포커스 후 그 Z로 전체 측정(빠름, 평탄 시료용)
+      "none"   — 오토포커스 없이 현재 Z로 측정
+    레이저 조사가 실제로 일어나므로, 예상 누적 조사량이 상한을 넘으면 시작 전에 거부한다.
+    """
+    err = _validate_grid_args(rows, cols, spacing_mm)
+    if err:
+        return err
+    if autofocus not in ("each", "center", "none"):
+        return {"ok": False, "error": "autofocus must be one of: each, center, none."}
+    if _stage is None:
+        return {"ok": False, "error": "Stage is not initialized."}
+    if _ccd is None:
+        return {"ok": False, "error": "CCD is not initialized (cooling or not connected)."}
+    if _laser is None:
+        return {"ok": False, "error": "Laser is not initialized."}
+    if autofocus != "none" and _camera is None:
+        return {"ok": False, "error": "Camera is not initialized (required for autofocus). "
+                                      "Use autofocus='none' to skip."}
+
+    spacing_mm = float(spacing_mm)
+    exposure, power = float(exposure), float(power)
+    n = rows * cols
+    dose_total = n * power * exposure * 0.01
+    if dose_total > _GRID_MAX_DOSE_MJ:
+        return {"ok": False, "error": (
+            f"Safety block: estimated cumulative dose {dose_total:.1f} mJ exceeds the grid limit "
+            f"({_GRID_MAX_DOSE_MJ} mJ). Reduce point count, power, or exposure.")}
+
+    try:
+        pos = _stage.get_position()
+        if pos is None:
+            return {"ok": False, "error": "Failed to query stage position"}
+        cx = float(pos[0]) if center_x is None else float(center_x)
+        cy = float(pos[1]) if center_y is None else float(center_y)
+
+        pts = _grid_stage_coords(cx, cy, rows, cols, spacing_mm)
+        # 범위 사전 검증 — 한 점이라도 벗어나면 시작조차 하지 않는다.
+        for idx, i, j, sx, sy in pts:
+            if not (0 <= sx <= STAGE_MAX_X and 0 <= sy <= STAGE_MAX_Y):
+                return {"ok": False, "error": (
+                    f"Point {idx} (row {i}, col {j}) at X={sx}, Y={sy} mm is outside the stage range "
+                    f"(0..{STAGE_MAX_X} x 0..{STAGE_MAX_Y}). Adjust center/spacing/size.")}
+
+        # center 모드: 격자 중심으로 이동 후 1회 오토포커스(이후 Z 유지).
+        if autofocus == "center":
+            mv = move_stage(x=cx, y=cy)
+            if not mv.get("ok"):
+                return {"ok": False, "error": f"Failed to move to grid center: {mv.get('error')}"}
+            af = run_autofocus()
+            if not af.get("ok"):
+                return {"ok": False, "error": f"Autofocus at grid center failed: {af.get('error')}"}
+
+        results = []
+        n_ok = 0
+        for idx, i, j, sx, sy in pts:
+            mv = move_stage(x=sx, y=sy)
+            if not mv.get("ok"):
+                results.append({"i": idx, "row": i, "col": j, "x": sx, "y": sy,
+                                "ok": False, "error": mv.get("error")})
+                continue
+            if autofocus == "each":
+                run_autofocus()   # 실패해도 치명적이지 않다 — 현재 Z로 측정을 이어간다.
+            res = _cache_and_return(acquire_spectrum(exposure=exposure, power=power))
+            if res.get("ok"):
+                n_ok += 1
+                files = (res.get("saved") or {}).get("files") or {}
+                ref = files.get("csv") or files.get("png") or ""
+                fname = ref.replace("\\", "/").rsplit("/", 1)[-1]
+                results.append({"i": idx, "x": sx, "y": sy,
+                                "max_intensity": res.get("max_intensity"), "file": fname})
+            else:
+                results.append({"i": idx, "row": i, "col": j, "x": sx, "y": sy,
+                                "ok": False, "error": res.get("error")})
+
+        # 압축 반환 — 큰 격자에서 per-point 리스트가 에이전트 _slim(길이>32 리스트 폐기)에
+        # 통째로 걸리지 않도록, 집계 통계는 항상 싣고 per-point는 32점 이하일 때만 인라인.
+        oks = [r for r in results if "max_intensity" in r]
+        fails = [r for r in results if r.get("ok") is False]
+        inten = [r["max_intensity"] for r in oks if r.get("max_intensity") is not None]
+        out = {
+            "ok": True,
+            "rows": rows, "cols": cols, "spacing_mm": spacing_mm,
+            "center": {"x": round(cx, 4), "y": round(cy, 4)},
+            "autofocus": autofocus, "exposure": exposure, "power": power,
+            "n_points": n, "n_measured": n_ok, "n_failed": len(fails),
+            "estimated_dose_mj": round(dose_total, 2),
+            "intensity": ({"min": min(inten), "max": max(inten),
+                           "mean": round(sum(inten) / len(inten), 1)} if inten else None),
+            "note": ("Each point was auto-saved with its (x,y) tag. Use aggregate_spectra_csv / "
+                     "combine_spectra / bundle_results / run_analysis to merge or inspect per-point data."),
+        }
+        if fails:
+            out["failed_points"] = fails[:10]
+        if n <= 32:
+            out["points"] = oks
+        return out
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# ─────────────────────────────────────────
 # tool dispatch 테이블 (agent loop에서 사용)
 # ──────────────────────────────────────────
 
@@ -1630,6 +1893,9 @@ TOOL_DISPATCH = {
     "capture_scene":            lambda a: capture_scene(),
     # ── 오토포커스 ───────────────────────────────────────────────────────────
     "run_autofocus":            lambda a: run_autofocus(**a),
+    # ── 그리드 매핑(미리보기 + 실행) ─────────────────────────────────────────
+    "preview_grid_scan":        lambda a: preview_grid_scan(**a),
+    "run_grid_scan":            lambda a: run_grid_scan(**a),
     # ── CCD 설정 ─────────────────────────────────────────────────────────────
     "get_ccd_info":             lambda a: get_ccd_info(),
     "set_ccd_exposure":         lambda a: set_ccd_exposure(**a),

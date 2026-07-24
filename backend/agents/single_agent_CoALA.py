@@ -93,6 +93,11 @@ _MAX_PLANNING_STEPS = 6     # 한 사이클 내 planning(정보수집) 라운드
 _SOFT_PLAN_LIMIT = 4        # 이 라운드부터 "이제 실행/보고서로" 진행 문구를 강화
 _MAX_AGENT_STEPS = 150       # 턴 전체 propose() 호출 총량 가드(무한 루프 방지)
 
+# Ollama 컨텍스트 윈도우(토큰) — AILA와 동일한 이유·값. 명시하지 않으면 Ollama가
+# 호스트 기본값으로 프롬프트 앞부분(시스템 프롬프트+도구 스키마)을 조용히 잘라 빈 응답이 난다.
+# (원격 GPU 32GB VRAM 기준. VRAM 부족으로 OOM이면 낮출 것.)
+_NUM_CTX = 32768
+
 # 조사량 하드 상한 (대화 한 턴 기준). AILA와 동일한 물리적 회로차단기 —
 # "판단"이 아니라 폭주 방지용 최후 안전장치.
 _MAX_DOSE_MJ_PER_TURN = 1000.0
@@ -566,6 +571,7 @@ def _get_llm_tools():
         _llm_tools_cache = ChatOllama(
             model=OLLAMA_MODEL,
             base_url=OLLAMA_HOST,
+            num_ctx=_NUM_CTX,
         ).bind_tools(ALL_TOOLS)
     except Exception:
         return None
@@ -583,7 +589,7 @@ def _get_llm_plain():
         return _llm_plain_cache
     try:
         from langchain_ollama import ChatOllama
-        _llm_plain_cache = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_HOST)
+        _llm_plain_cache = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_HOST, num_ctx=_NUM_CTX)
     except Exception:
         return None
     return _llm_plain_cache
@@ -680,6 +686,27 @@ def _call_tool(ctx: dict, name: str, args: dict) -> dict:
             ctx["dose"] += dose_inc   # 실패한 조사는 누계에 넣지 않는다
         return result
 
+    # run_grid_scan은 내부에서 rows*cols번 조사하므로 acquire_spectrum과 동일한 per-turn
+    # 회로차단기에 편입한다(예상 총량으로 사전 판정, 성공 시 누계 반영).
+    if name == "run_grid_scan":
+        rows = int(args.get("rows", 0) or 0)
+        cols = int(args.get("cols", 0) or 0)
+        power = float(args.get("power", 40.0))
+        exposure = float(args.get("exposure", 0.2))
+        dose_inc = rows * cols * power * exposure * 0.01
+        if ctx["dose"] + dose_inc > _MAX_DOSE_MJ_PER_TURN:
+            return {"ok": False,
+                    "error": (f"Safety block: this turn's cumulative dose would exceed the limit "
+                              f"({_MAX_DOSE_MJ_PER_TURN} mJ) after this grid scan. "
+                              "Reduce the grid size, power, or exposure, or start a new request.")}
+        try:
+            result = fn(dict(args))
+        except Exception as e:
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        if isinstance(result, dict) and result.get("ok"):
+            ctx["dose"] += dose_inc
+        return result
+
     try:
         return fn(dict(args))
     except Exception as e:
@@ -740,6 +767,9 @@ def _update_working_memory(wm: WorkingMemory, name: str, args: dict,
             wm.observations.append(f"⚠️ {name} failed: {result.get('error', '')}")
         elif name == "acquire_spectrum":
             wm.observations.append(f"Spectrum acquired (max {result.get('max_intensity', 0)} ADU)")
+        elif name == "run_grid_scan":
+            wm.observations.append(
+                f"Grid scan: {result.get('n_measured', 0)}/{result.get('n_points', 0)} points measured")
         elif action == "learning":
             wm.observations.append(f"Memory recorded: {name} → {result.get('sample') or result.get('topic', '')}")
         else:
@@ -1114,7 +1144,10 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
 
 # 세션별 LangChain 메시지 히스토리(대화 기억). cross-session 노하우는 별도로 JSON에 축적.
 _SESSIONS: dict[str, list] = {}
-_HISTORY_MAX_TURNS = 100
+# 보존할 최대 사용자 턴 수. AILA와 동일한 이유·값(30). 이건 서버 RAM이 아니라 매 호출
+# 프롬프트 토큰 수(=num_ctx 예산)를 좌우한다 — 100은 문항 맥락 누적으로 컨텍스트를
+# 폭주시켜 무응답을 냈고, 30이면 num_ctx(32768) 아래에 들어오면서 되묻기 맥락도 유지된다.
+_HISTORY_MAX_TURNS = 30
 
 
 def _is_user_turn(msg) -> bool:
@@ -1153,6 +1186,12 @@ def _describe_tool(name: str, args: dict, result: dict, action: str) -> str:
         return "👁️ Microscope image checked"
     if name == "run_autofocus":
         return "🔬 Autofocus complete"
+    if name == "preview_grid_scan":
+        return (f"🔲 Grid preview {result.get('rows', '?')}×{result.get('cols', '?')} "
+                f"({result.get('n_in_view', '?')}/{result.get('n_points', '?')} in view)")
+    if name == "run_grid_scan":
+        return (f"🗺️ Grid scan done "
+                f"({result.get('n_measured', '?')}/{result.get('n_points', '?')} points)")
     if name == "apply_background_subtraction":
         return "🧹 Fluorescence background subtraction applied"
     if name == "search_knowledge_base":
@@ -1240,7 +1279,8 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
         _SESSIONS[sid] = _trim_history(final_messages)
 
         # 측정(레이저 조사)이 실제로 있었는지로 "실험 보고서" vs "일반 대화"를 가른다.
-        used_measurement = "acquire_spectrum" in final_ctx.get("tool_call_order", [])
+        used_measurement = bool({"acquire_spectrum", "run_grid_scan"}
+                                 & set(final_ctx.get("tool_call_order", [])))
         turn.complete("done" if used_measurement else "chat", final_text, final_ctx)
         if used_measurement:
             yield ev({"type": "done", "final_report": final_text})
@@ -1274,6 +1314,7 @@ def run_experiment(user_message: str, session_id: str = "") -> dict:
     if error_detail is not None:
         turn.fail(error_detail, final_ctx)
     else:
-        used_measurement = "acquire_spectrum" in (final_ctx or {}).get("tool_call_order", [])
+        used_measurement = bool({"acquire_spectrum", "run_grid_scan"}
+                                 & set((final_ctx or {}).get("tool_call_order", [])))
         turn.complete("done" if used_measurement else "chat", final_text, final_ctx)
     return {"final_report": final_text}

@@ -395,6 +395,25 @@ def save_scene(image, extent: list | None = None, meta: dict | None = None) -> d
         return {"ok": False, "error": f"Failed to save microscope image: {e}"}
 
 
+def save_preview_png(png_bytes: bytes, tag: str = "preview") -> dict:
+    """이미 인코딩된 PNG 바이트(오버레이 등)를 재렌더 없이 그대로 저장하고 image_url을 돌려준다.
+    save_scene(matplotlib 재렌더·제목·축)과 달리 원본 PNG를 보존한다 — 그리드 미리보기처럼
+    오버레이를 정확히 채팅에 보여줄 때 쓴다. '_' 접두라 list_results(개별 측정 목록)에는 안 잡힌다.
+    """
+    try:
+        day = datetime.now().strftime("%Y-%m-%d")
+        out_dir = RESULTS_ROOT / day
+        out_dir.mkdir(parents=True, exist_ok=True)
+        now = datetime.now()
+        stamp = now.strftime("%H%M%S_") + f"{now.microsecond // 1000:03d}"
+        safe = "".join(c for c in str(tag) if c.isalnum() or c in "-_") or "preview"
+        name = f"_{safe}_{stamp}.png"
+        (out_dir / name).write_bytes(png_bytes)
+        return {"ok": True, "image_url": _url(day, name)}
+    except Exception as e:
+        return {"ok": False, "error": f"Failed to save preview image: {e}"}
+
+
 def latest_scene(date: str | None = None) -> str | None:
     """해당 날짜(기본 오늘)의 가장 최근 scene npz 경로. 없으면 None."""
     day_dir = RESULTS_ROOT / _resolve_date(date)

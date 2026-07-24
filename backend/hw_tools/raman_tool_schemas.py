@@ -667,6 +667,70 @@ RAMAN_TOOLS = [
             },
         },
     },
+    # ── 그리드 매핑(미리보기 + 실행) ──────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "preview_grid_scan",
+            "description": (
+                "Preview a rows x cols grid mapping WITHOUT moving the stage or firing the laser. "
+                "Overlays the planned scan points as circles on the current camera view and returns that "
+                "image so you can visually verify the layout before committing. "
+                "ALWAYS call this first and inspect the returned image; only then call run_grid_scan with the "
+                "SAME parameters if it looks correct, or call preview_grid_scan again with adjusted values. "
+                "If center_x/center_y are omitted, the current stage position is used as the grid center. "
+                "Note the camera field of view is small (~0.43 x 0.30 mm), so with wide spacing some points may "
+                "fall outside the frame; they are still measured, and the response reports how many are in view."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rows": {"type": "integer", "description": "Number of grid rows (Y direction), >= 1"},
+                    "cols": {"type": "integer", "description": "Number of grid columns (X direction), >= 1"},
+                    "spacing_mm": {"type": "number", "description": "Distance between adjacent points (mm), > 0"},
+                    "center_x": {"type": "number", "description": "Grid center X (mm). Optional; defaults to current stage X"},
+                    "center_y": {"type": "number", "description": "Grid center Y (mm). Optional; defaults to current stage Y"},
+                },
+                "required": ["rows", "cols", "spacing_mm"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_grid_scan",
+            "description": (
+                "Execute a rows x cols grid mapping: for each point it moves the stage, optionally autofocuses, "
+                "acquires one spectrum, and auto-saves it (position-tagged). Returns a single compact summary "
+                "(counts, intensity min/max/mean, and per-point data when 32 points or fewer) instead of one tool "
+                "message per point - this is the token-efficient way to run a map. Preview with preview_grid_scan "
+                "first and visually confirm before calling this. The laser is fired at every point, so the "
+                "estimated cumulative dose is checked up front and the scan is refused if it exceeds the safety limit."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rows": {"type": "integer", "description": "Number of grid rows (Y direction), >= 1"},
+                    "cols": {"type": "integer", "description": "Number of grid columns (X direction), >= 1"},
+                    "spacing_mm": {"type": "number", "description": "Distance between adjacent points (mm), > 0"},
+                    "center_x": {"type": "number", "description": "Grid center X (mm). Optional; defaults to current stage X"},
+                    "center_y": {"type": "number", "description": "Grid center Y (mm). Optional; defaults to current stage Y"},
+                    "autofocus": {
+                        "type": "string",
+                        "enum": ["each", "center", "none"],
+                        "description": (
+                            "Autofocus strategy. 'each' = autofocus at every point (most accurate, slowest); "
+                            "'center' = autofocus once at the grid center then reuse that Z (fast, for flat samples); "
+                            "'none' = no autofocus, keep current Z. Default 'each'."
+                        ),
+                    },
+                    "exposure": {"type": "number", "description": "Exposure time per point (s). Default 0.2"},
+                    "power": {"type": "number", "description": "Laser power (%) per point. Default 40"},
+                },
+                "required": ["rows", "cols", "spacing_mm"],
+            },
+        },
+    },
     # ── 데이터 저장 / 로드 ────────────────────────────────────────────────────
     {
         "type": "function",
