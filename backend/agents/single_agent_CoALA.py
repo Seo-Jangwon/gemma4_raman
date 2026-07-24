@@ -159,7 +159,8 @@ def _recall_experiences(args: dict) -> dict:
         ranked = list(reversed(episodes))
     else:
         scored = [(e, _match_score(query, e,
-                                   ("sample", "sample_name", "visual_features",
+                                   ("goal", "tags", "sample_context", "execution_summary", "lesson", "system_metrics", 
+                                    "sample", "sample_name", "visual_features",
                                     "outcome", "lesson", "metrics")))
                   for e in episodes]
         ranked = [e for e, s in sorted(scored, key=lambda x: x[1], reverse=True) if s > 0]
@@ -191,20 +192,31 @@ def _record_experience(ctx: dict, args: dict) -> dict:
         "id": uuid.uuid4().hex[:12],
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
         "session_id": ctx.get("session_id", ""),
+        # ── 목표와 태그 ──────────────────────────────────────────────────────────
+        "goal": ctx.get("goal", ""), 
+        "tags": args.get("tags", []),
         # ── 시료 식별 ──────────────────────────────────────────────────────────
-        "sample": sample,                                          # 종류/재료 (필수)
-        "sample_name": str(args.get("sample_name", "")).strip(),   # 명시된 이름/라벨
-        "visual_features": str(args.get("visual_features", "")).strip(),  # 현미경 시각 특징
+        "sample_context": {
+            "sample": sample,
+            "sample_name": str(args.get("sample_name", "")).strip(),
+            "visual_features": str(args.get("visual_features", "")).strip(),
+        },
         # ── 측정 조건·결과 ────────────────────────────────────────────────────
-        "params": args.get("params", {}),
-        "outcome": str(args.get("outcome", "")).strip(),
-        "metrics": str(args.get("metrics", "")).strip(),
+        "execution_summary": {
+            "params_used": args.get("params", {}),
+            "trajectory": str(args.get("trajectory", "")).strip(),
+            "outcome": str(args.get("outcome", "")).strip(),
+            "is_success": args.get("is_success", False),
+        },
         "lesson": str(args.get("lesson", "")).strip(),
         # ── 시스템 자동 기록(절차 흔적) — LLM 입력 불필요 ─────────────────────
-        "tool_sequence": order,                        # 툴 호출 순서(전체)
-        "tool_counts": counts,                         # 툴별 호출 횟수
-        "n_measurements": counts.get("acquire_spectrum", 0),  # 측정(레이저 조사) 횟수
-        "dose_mj": round(float(ctx.get("dose", 0.0)), 3),     # 이번 턴 누적 조사량
+        "system_metrics": {
+            "metrics": str(args.get("metrics", "")).strip(),
+            "tool_sequence": order,
+            "tool_counts": counts,
+            "n_measurements": counts.get("acquire_spectrum", 0),
+            "dose_mj": round(float(ctx.get("dose", 0.0)), 3),
+        }
     }
     try:
         _append_json_list(_EPISODIC_PATH, entry)
@@ -213,8 +225,8 @@ def _record_experience(ctx: dict, args: dict) -> dict:
     ctx["learned"] = True
     return {"ok": True, "recorded": entry["id"], "sample": sample,
             "auto_captured": {"tool_calls": len(order),
-                              "n_measurements": entry["n_measurements"],
-                              "dose_mj": entry["dose_mj"]}}
+                              "n_measurements": entry["system_metrics"]["n_measurements"],
+                              "dose_mj": entry["system_metrics"]["dose_mj"]}}
 
 
 def _record_insight(ctx: dict, args: dict) -> dict:
@@ -382,12 +394,19 @@ _RECORD_EXP_TOOL_SCHEMA = {
                                                    "e.g. 'dark ~20um flake near center on a shiny substrate, some folds visible'."},
                 "params": {"type": "object",
                            "description": "Measurement parameters used. e.g. {'power':20,'exposure':2.0}."},
+                "trajectory": {"type": "string", "description": "1-2 sentence summary of why tools were called in this sequence and how issues were handled."},
                 "outcome": {"type": "string", "description": "Result summary. e.g. 'G/2D bands good'."},
+                "is_success": {"type": "boolean", "description": "True if the measurement goal was achieved, False otherwise."},
                 "metrics": {"type": "string", "description": "Quantitative metrics. e.g. 'SNR 8.3, no saturation'."},
                 "lesson": {"type": "string",
                            "description": "Lesson for next time. e.g. 'power above 30% risks saturation'."},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "3-5 key tags for searchability. e.g. ['fluorescence', 'graphene_saturation']"
+                }
             },
-            "required": ["sample"],
+            "required": ["sample", "trajectory", "is_success", "tags"],
         },
     },
 }
@@ -966,7 +985,7 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
         return
 
     ctx = {"dispatch": _get_dispatch(), "dose": 0.0, "session_id": session_id,
-           "tool_call_order": [], "learned": False}
+           "tool_call_order": [], "learned": False, "goal": user_message.strip()}
     wm = WorkingMemory(messages=list(history) + [HumanMessage(content=user_message)])
     wm.goal = user_message.strip()
 
