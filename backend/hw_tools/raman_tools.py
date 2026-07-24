@@ -75,13 +75,28 @@ def get_stage_speed() -> dict:
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
-def set_stage_speed(x_speed_mm_s: float, y_speed_mm_s: float, z_speed_mm_s: float = None) -> dict:
-    """스테이지 이동 속도를 설정한다. x_speed_mm_s, y_speed_mm_s, z_speed_mm_s는 각 축의 이동 속도."""
+def set_stage_speed(x_speed_mm_s: float = None, y_speed_mm_s: float = None, z_speed_mm_s: float = None) -> dict:
+    """스테이지 이동 속도를 설정한다. 전달되지 않은 축의 속도는 기존 값을 유지한다."""
     if _stage is None:
         return {"ok": False, "error": "Stage is not initialized."}
+        
     try:
-        _stage.set_velocity(x_speed_mm_s, y_speed_mm_s, z_speed_mm_s)
-        return {"ok": True, "x_speed_mm_s": x_speed_mm_s, "y_speed_mm_s": y_speed_mm_s, "z_speed_mm_s": z_speed_mm_s}
+        # 1. 현재 장비에 설정된 속도를 읽어옵니다.
+        current_vel = _stage.get_velocity()
+        
+        if not current_vel.get("ok"):
+            return {"ok": False, "error": current_vel.get("error", "Failed to read current velocity")}
+            
+        # 2. 값이 안 들어왔으면(None) 기존 속도를 그대로 사용합니다.
+        vx = x_speed_mm_s if x_speed_mm_s is not None else current_vel["x_speed_mm_s"]
+        vy = y_speed_mm_s if y_speed_mm_s is not None else current_vel["y_speed_mm_s"]
+        vz = z_speed_mm_s if z_speed_mm_s is not None else current_vel["z_speed_mm_s"]
+        
+        # 3. 조합된 속도로 컨트롤러에 명령을 내립니다. (va는 사용하지 않으므로 0.0)
+        _stage.set_velocity(vx, vy, vz, 0.0)
+        
+        return {"ok": True, "x_speed_mm_s": vx, "y_speed_mm_s": vy, "z_speed_mm_s": vz}
+        
     except Exception as e:
         return {"ok": False, "error": str(e)}
 

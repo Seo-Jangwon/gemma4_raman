@@ -515,18 +515,18 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_stage_speed",
-            "description": "Set the stage movement speed. X/Y max 5.0 mm/s, Z max 0.1 mm/s.",
+            "description": "Set the stage movement speed. X/Y max 5.0 mm/s, Z max 0.1 mm/s. If a specific axis speed is omitted, its current speed is maintained.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "x_speed_mm_s": {"type": "number", 
-                                     "description": "X-axis movement speed (mm/s, max 5.0)"},
+                                     "description": "X-axis movement speed (mm/s, max 5.0). Optional."},
                     "y_speed_mm_s": {"type": "number", 
-                                     "description": "Y-axis movement speed (mm/s, max 5.0)"},
+                                     "description": "Y-axis movement speed (mm/s, max 5.0). Optional."},
                     "z_speed_mm_s": {"type": "number", 
-                                     "description": "Z-axis movement speed (mm/s, max 0.1). Optional"},
+                                     "description": "Z-axis movement speed (mm/s, max 0.1). Optional."},
                 },
-                "required": ["x_speed_mm_s", "y_speed_mm_s"],
+                "required": [],
             },
         },
     },
