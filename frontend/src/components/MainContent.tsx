@@ -1,12 +1,33 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Menu } from 'lucide-react'
 import axios from 'axios'
-import SearchBar from './SearchBar'
+import ReactMarkdown from 'react-markdown'
+import SearchBar, { Attachment } from './SearchBar'
 import IconButton from './IconButton'
 import AFMDashboard from './afm/AFMDashboard'
 import CameraView from './raman/CameraView'
 import ParameterPanel, { SpectrumParams } from './raman/ParameterPanel'
 import type { PageId } from '../App'
+
+// 어시스턴트 답변의 마크다운(**굵게**, *기울임*, 목록, 제목, 코드 등)을 실제 서식으로 렌더링한다.
+// @tailwindcss/typography(prose) 플러그인이 없어 요소별 클래스를 직접 매핑한다.
+// node 는 DOM 요소로 흘리면 React 경고가 나므로 구조분해로 제거한다.
+const MD_COMPONENTS = {
+  p:          ({ node, ...p }: any) => <p className="mb-2 last:mb-0" {...p} />,
+  ul:         ({ node, ...p }: any) => <ul className="list-disc pl-5 mb-2 last:mb-0 space-y-0.5" {...p} />,
+  ol:         ({ node, ...p }: any) => <ol className="list-decimal pl-5 mb-2 last:mb-0 space-y-0.5" {...p} />,
+  li:         ({ node, ...p }: any) => <li className="leading-relaxed" {...p} />,
+  strong:     ({ node, ...p }: any) => <strong className="font-semibold" {...p} />,
+  em:         ({ node, ...p }: any) => <em className="italic" {...p} />,
+  h1:         ({ node, ...p }: any) => <h1 className="text-base font-bold mt-1 mb-1.5" {...p} />,
+  h2:         ({ node, ...p }: any) => <h2 className="text-sm font-bold mt-1 mb-1.5" {...p} />,
+  h3:         ({ node, ...p }: any) => <h3 className="text-sm font-semibold mt-1 mb-1" {...p} />,
+  a:          ({ node, ...p }: any) => <a className="text-raman-600 underline" target="_blank" rel="noreferrer" {...p} />,
+  code:       ({ node, ...p }: any) => <code className="px-1 py-0.5 rounded bg-black/5 font-mono text-[0.85em]" {...p} />,
+  pre:        ({ node, ...p }: any) => <pre className="p-2 rounded bg-black/5 font-mono text-xs overflow-x-auto mb-2" {...p} />,
+  blockquote: ({ node, ...p }: any) => <blockquote className="border-l-2 border-gray-300 pl-2 text-gray-600" {...p} />,
+  hr:         ({ node, ...p }: any) => <hr className="my-2 border-gray-200" {...p} />,
+}
 
 interface MainContentProps {
   onMenuClick: () => void
@@ -117,8 +138,20 @@ export default function MainContent({
   // 홈 채팅 입력은 이 핸들러로 간다. /api/experiment/stream 을 열고
   // 서버가 흘려보내는 SSE 이벤트(intent/clarification/node/done/error)를 파싱해
   // 진행상황을 실시간으로 채팅에 반영한다.
-  const handleChat = useCallback(async (command: string) => {
-    setMessages(prev => [...prev, { role: 'user', text: command }])
+  const handleChat = useCallback(async (command: string, attachments: Attachment[] = []) => {
+    // 첨부가 있으면 file_id 목록을 메시지 끝에 덧붙인다. 에이전트는 이 줄을 보고
+    // list_uploaded_files / inspect_file 로 넘어간다.
+    // 덧붙인 줄을 사용자 말풍선에도 그대로 보여준다 — 화면에 보이는 것과 모델에게
+    // 실제로 전달된 것이 어긋나면 나중에 로그를 볼 때 원인 추적이 불가능해진다.
+    const attachNote = attachments.length
+      ? '\n\n[Attached files]\n' +
+        attachments.map(a => `- ${a.filename} (file_id: ${a.fileId})`).join('\n')
+      : ''
+    const text = command || (attachments.length ? 'Analyze the attached file(s).' : '')
+    if (!text) return
+    const fullMessage = text + attachNote
+
+    setMessages(prev => [...prev, { role: 'user', text: fullMessage }])
     setChatLoading(true)
 
     const streamId = Date.now()          // 이번 스트림의 진행상황 메시지를 식별하는 키
@@ -195,7 +228,7 @@ export default function MainContent({
       const resp = await fetch('/api/experiment/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: command, session_id: sessionId }),
+        body: JSON.stringify({ message: fullMessage, session_id: sessionId }),
       })
       if (!resp.ok || !resp.body) throw new Error(`서버 응답 오류 (${resp.status})`)
 
@@ -333,7 +366,7 @@ export default function MainContent({
                     className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
-                      className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+                      className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
                         msg.role === 'user'
                           ? 'bg-raman-500 text-white rounded-br-sm'
                           : msg.isError
@@ -367,7 +400,9 @@ export default function MainContent({
                             </div>
                           </div>
                         )
-                        : msg.text}
+                        : msg.role === 'user'
+                        ? <span className="whitespace-pre-wrap">{msg.text}</span>
+                        : <ReactMarkdown components={MD_COMPONENTS}>{msg.text || ''}</ReactMarkdown>}
                     </div>
                   </div>
                 ))}

@@ -22,34 +22,6 @@ RAMAN_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "set_stage_speed",
-            "description": (
-                "Set the stage movement speed. "
-                "The x_speed_mm_s, y_speed_mm_s, z_speed_mm_s fields carry the speed of each axis."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "x_speed_mm_s": {
-                        "type": "number",
-                        "description": "X-axis movement speed (mm/s), max 5.0 mm/s",
-                    },
-                    "y_speed_mm_s": {
-                        "type": "number",
-                        "description": "Y-axis movement speed (mm/s), max 5.0 mm/s",
-                    },
-                    "z_speed_mm_s": {
-                        "type": "number",
-                        "description": "Z-axis movement speed (mm/s), max 0.1 mm/s",
-                    },
-                },
-                "required": ["x_speed_mm_s", "y_speed_mm_s"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "get_stage_position",
             "description": "Read the current stage X, Y, Z position (mm).",
             "parameters": {"type": "object", "properties": {}, "required": []},
@@ -547,9 +519,12 @@ RAMAN_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "x_speed_mm_s": {"type": "number", "description": "X-axis movement speed (mm/s, max 5.0)"},
-                    "y_speed_mm_s": {"type": "number", "description": "Y-axis movement speed (mm/s, max 5.0)"},
-                    "z_speed_mm_s": {"type": "number", "description": "Z-axis movement speed (mm/s, max 0.1). Optional"},
+                    "x_speed_mm_s": {"type": "number", 
+                                     "description": "X-axis movement speed (mm/s, max 5.0)"},
+                    "y_speed_mm_s": {"type": "number", 
+                                     "description": "Y-axis movement speed (mm/s, max 5.0)"},
+                    "z_speed_mm_s": {"type": "number", 
+                                     "description": "Z-axis movement speed (mm/s, max 0.1). Optional"},
                 },
                 "required": ["x_speed_mm_s", "y_speed_mm_s"],
             },
@@ -1008,12 +983,18 @@ RAMAN_TOOLS = [
         "function": {
             "name": "run_analysis",
             "description": (
-                "Run 'computation/visualization' Python code on saved measurement data in a safe sandbox. "
+                "Run 'computation/visualization' Python code on saved measurement data AND on files the user "
+                "attached to the chat, in a safe sandbox. "
                 "Use it to handle analyses not provided as tools (baseline correction, peak detection, per-coordinate peak maps/heatmaps, etc.) directly in code. "
                 "Already injected into the runtime: "
                 "spectra (list[dict] - each item has base, title, x, y, power, exposure, mode, "
                 "raman_shift (np.ndarray or None), intensity (np.ndarray)), "
                 "np (numpy), plt (matplotlib.pyplot). "
+                "If you pass file_ids, the attached files are parsed and injected as "
+                "files (list[dict] - each item has file_id, filename, sheet, columns (list[str]), n_rows, and "
+                "table (dict mapping column name -> np.ndarray for numeric columns, list[str] for text columns)). "
+                "Inspect a file's structure with inspect_file first, then use the column names you saw as keys of table. "
+                "spectra and files can be used together - e.g. overlay an attached reference spectrum on a measured one. "
                 "If you called capture_scene first, microscope_image (np.ndarray|None) and "
                 "image_extent ([xmin,xmax,ymin,ymax] stage mm|None) are also injected - "
                 "after ax.imshow(microscope_image, extent=image_extent), overlaying peaks at the measurement (x,y) "
@@ -1035,6 +1016,13 @@ RAMAN_TOOLS = [
                     "names": {
                         "type": "array", "items": {"type": "string"},
                         "description": "List of measurement bases to analyze (check with list_results). If omitted, the whole date.",
+                    },
+                    "file_ids": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": (
+                            "file_ids of attached files to load into the `files` variable "
+                            "(get them from list_uploaded_files). If omitted, no attached file is loaded."
+                        ),
                     },
                     "title": {"type": "string", "description": "Title to attach to the result figure."},
                 },

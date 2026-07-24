@@ -598,6 +598,50 @@ async def spectrum_acquire(body: AcquireSpectrumRequest, request: Request):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 첨부 데이터 파일 엔드포인트
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# 채팅창에 붙인 측정 데이터(csv/excel/txt)를 받는다. 아래 KB 업로드와 목적이 다르다:
+#   /api/kb/upload    문서(pdf/md/…)를 지식베이스에 색인 — '프로토콜을 가르친다'
+#   /api/files/upload 표 데이터를 에이전트가 분석 — '이 데이터를 봐 달라'
+# 에이전트는 이 HTTP API를 쓰지 않는다. list_uploaded_files / inspect_file 도구로
+# backend.upload_store를 직접 부른다(파일 위치 규칙은 upload_store 머리말 참고).
+
+@app.post("/api/files/upload")
+async def files_upload_endpoint(file: UploadFile = File(...)):
+    """데이터 파일을 data/uploads/<날짜>/에 저장하고 file_id를 돌려준다.
+
+    파싱은 여기서 하지 않는다 — 큰 파일이면 업로드 응답이 그만큼 늦어지고, 애초에
+    '어떻게 읽을지'는 에이전트가 inspect_file로 판단할 몫이다. 여기는 저장만 한다.
+    """
+    from backend.upload_store import ALLOWED_SUFFIXES, save_upload
+
+    name = Path(file.filename or "").name       # 경로 탈출 방지 — 파일명만 취한다
+    if not name:
+        raise HTTPException(status_code=400, detail="파일명이 없습니다")
+    if Path(name).suffix.lower() not in ALLOWED_SUFFIXES:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"지원하지 않는 형식입니다. 가능: {', '.join(sorted(ALLOWED_SUFFIXES))} "
+                    f"(논문·프로토콜 문서는 /api/kb/upload 로)"),
+        )
+    try:
+        data = await file.read()
+        return save_upload(name, data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"저장 실패: {e}")
+
+
+@app.get("/api/files")
+async def files_list_endpoint(date: Optional[str] = None):
+    """해당 날짜(기본 오늘)에 올라온 첨부 파일 목록 — 프론트 표시/디버깅용."""
+    from backend.upload_store import list_uploads
+    return {"ok": True, "files": list_uploads(date)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 지식베이스(KB) 엔드포인트
 # ══════════════════════════════════════════════════════════════════════════════
 #

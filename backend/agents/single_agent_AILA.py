@@ -70,6 +70,7 @@ from langchain_core.messages import (
 )
 
 from backend.agents.detail_log import new_turn
+from backend.agents.file_tools import FILE_DISPATCH, FILE_TOOLS
 from backend.agents.knowledge import search_kb
 from backend.hw_tools.raman_tool_schemas import RAMAN_TOOLS
 from backend.spectrum_store import spectrum_event
@@ -123,9 +124,11 @@ _KB_TOOL_SCHEMA = {
     },
 }
 
-# 모델에 바인딩되는 도구 전체. RAMAN_TOOLS(하드웨어 41종) + KB 검색 1종.
+# 모델에 바인딩되는 도구 전체. RAMAN_TOOLS(하드웨어) + 첨부파일 도구 + KB 검색 1종.
+# FILE_TOOLS는 CoALA와 '같은 리스트 객체'를 import한 것이라 두 에이전트의 파일 분석
+# 능력이 구조적으로 어긋날 수 없다(backend/agents/file_tools.py 머리말 참고).
 # server.py의 /api/agents/health가 len(ALL_TOOLS)를 읽는다.
-ALL_TOOLS = RAMAN_TOOLS + [_KB_TOOL_SCHEMA]
+ALL_TOOLS = RAMAN_TOOLS + FILE_TOOLS + [_KB_TOOL_SCHEMA]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -144,6 +147,26 @@ final judgment.
   actually checking with observation tools (get_stage_position, capture_camera_frame,
   analyze_microscope_image, get_ccd_info). Do not turn the laser on.
 - Raman measurement requests: plan and execute the measurement procedure below yourself.
+- Requests about a file the user attached: follow the attached-data-files section below. Do not turn
+  the laser on just because a file arrived.
+
+[Attached data files - csv / excel / txt]
+1. When the user attaches a data file or refers to one, call list_uploaded_files, then call
+   inspect_file on each relevant file. inspect_file returns only the structure - row/column counts,
+   column names, numeric-or-text per column, min/max/mean, and the first few rows.
+2. Decide yourself what the columns mean. Nothing has been interpreted for you: judge which numeric
+   column is a Raman shift axis in cm-1, which is intensity, which is a wavelength or a stage
+   coordinate, and which columns are not spectra at all but metadata (sample name, laser power,
+   exposure time, date, operator notes). Use the value ranges and column names as evidence, and say
+   what you concluded and why.
+3. Then call run_analysis with file_ids to compute on the full data - peak detection, baseline
+   correction, normalization, plotting, or comparison against spectra you measured. Inside the code
+   the file is available as files[i]["table"]["<column name>"].
+4. Report both kinds of content separately: the spectral information you extracted (peak positions
+   and assignments, SNR, etc.) and any other information the file carried (measurement conditions,
+   sample identity, anything that changes how the spectrum should be read).
+5. If the file turns out to hold no spectrum, say so plainly and report what it does hold instead -
+   do not force a spectral interpretation onto it.
 
 [Measurement procedure - proceed step by step, using your own judgment]
 1. If you do not know the sample type, substrate, or target location (coordinates or appearance),
@@ -277,6 +300,11 @@ def _call_tool(ctx: dict, name: str, args: dict) -> dict:
     #  "하드웨어가 연결되어 있지 않습니다"로 막혀버린다.)
     if name == "search_knowledge_base":
         return _search_knowledge_base(args)
+
+    # 첨부 파일 조회/분석도 같은 이유로 하드웨어 가드보다 먼저. run_analysis도 여기 포함되어
+    # 있어(file_tools.FILE_DISPATCH) 순수 계산인 분석이 장비 유무에 묶이지 않는다.
+    if name in FILE_DISPATCH:
+        return FILE_DISPATCH[name](args)
 
     dispatch = ctx["dispatch"]
     if dispatch is None:
@@ -495,6 +523,16 @@ def _describe_tool(name: str, args: dict, result: dict) -> str:
             return f"📚 KB lookup — no match for '{args.get('query', '')}'"
         titles = ", ".join(h.get("title", "?") for h in hits)
         return f"📚 KB lookup → {titles}"
+    if name == "list_uploaded_files":
+        files = result.get("files", [])
+        if not files:
+            return "📎 Attached files — none"
+        return f"📎 Attached files → {', '.join(f.get('filename', '?') for f in files)}"
+    if name == "inspect_file":
+        return (f"🔍 Inspected {result.get('filename', '?')} "
+                f"({result.get('n_rows', '?')} rows × {result.get('n_cols', '?')} cols)")
+    if name == "run_analysis":
+        return f"🧮 Analysis code executed ({result.get('image_count', 0)} figure(s))"
     return f"🔧 {name} called"
 
 

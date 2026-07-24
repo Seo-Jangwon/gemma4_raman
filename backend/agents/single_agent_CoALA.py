@@ -73,6 +73,7 @@ from langchain_core.messages import (
 )
 
 from backend.agents.detail_log import new_turn
+from backend.agents.file_tools import FILE_DISPATCH, FILE_RETRIEVAL, FILE_TOOLS
 from backend.agents.knowledge import search_kb
 from backend.hw_tools.raman_tool_schemas import RAMAN_TOOLS
 from backend.spectrum_store import spectrum_event
@@ -441,13 +442,20 @@ _INTERNAL_TOOLS = [
     _RECORD_EXP_TOOL_SCHEMA,
     _RECORD_INSIGHT_TOOL_SCHEMA,
 ]
-ALL_TOOLS = RAMAN_TOOLS + _INTERNAL_TOOLS
+# FILE_TOOLS는 AILA와 '같은 리스트 객체'를 import한 것이라 두 에이전트의 파일 분석
+# 능력이 구조적으로 어긋날 수 없다(backend/agents/file_tools.py 머리말 참고).
+ALL_TOOLS = RAMAN_TOOLS + FILE_TOOLS + _INTERNAL_TOOLS
 
 # 어느 도구가 어느 CoALA 액션 범주인지 — 실행 디스패치와 planning/execution 분리에 쓴다.
 #   retrieval  : planning 도구. 사이클을 닫지 않고 working memory에 정보를 쌓는다.
 #   learning   : execution(commit) 액션. grounding과 함께 propose→evaluate→select 대상.
 #   그 외(하드웨어): grounding = execution(commit) 액션.
-_INTERNAL_RETRIEVAL = {"search_knowledge_base", "recall_experiences", "recall_insights"}
+#   첨부 파일 조회(list_uploaded_files/inspect_file)도 부수효과 없는 정보 수집이라
+#   retrieval에 합친다. 안 그러면 파일을 한 번 들여다볼 때마다 의사결정 사이클이 하나씩
+#   닫혀, 구조만 확인하다 사이클 예산을 태운다. 반면 run_analysis는 결과물(그림)을
+#   만드는 실행 액션이므로 FILE_RETRIEVAL에 없고 commit으로 남는다.
+_INTERNAL_RETRIEVAL = {"search_knowledge_base", "recall_experiences",
+                       "recall_insights"} | FILE_RETRIEVAL
 _INTERNAL_LEARNING = {"record_experience", "record_insight"}
 
 
@@ -470,7 +478,8 @@ memory, and you act according to the decision cycle below (planning -> execution
 [Decision cycle - distinguish planning from execution]
 Your actions are of two kinds, and their nature is completely different.
 
-  · Planning actions (information gathering): search_knowledge_base, recall_experiences, recall_insights.
+  · Planning actions (information gathering): search_knowledge_base, recall_experiences, recall_insights,
+    list_uploaded_files, inspect_file.
     - These do not turn on the laser; they 'gather evidence'. Call them several times in a row as needed
       to fill working memory sufficiently. They make nothing irreversible, so use them freely, but do not
       repeat the same lookup.
@@ -487,6 +496,26 @@ Your actions are of two kinds, and their nature is completely different.
     action. The laser should only be fired after enough evidence is gathered.
 
   · finish: if there are no more tools to call, write the final report in English without tools and this turn ends.
+
+[Attached data files - csv / excel / txt]
+1. When the user attaches a data file or refers to one, gather evidence with the planning actions
+   list_uploaded_files and then inspect_file on each relevant file. inspect_file returns only the
+   structure - row/column counts, column names, numeric-or-text per column, min/max/mean, first rows.
+2. Decide yourself what the columns mean. Nothing has been interpreted for you: judge which numeric
+   column is a Raman shift axis in cm-1, which is intensity, which is a wavelength or a stage
+   coordinate, and which columns are not spectra at all but metadata (sample name, laser power,
+   exposure time, date, operator notes). Use the value ranges and column names as evidence, and say
+   what you concluded and why.
+3. Then run_analysis with file_ids (an execution action - one per cycle) to compute on the full data:
+   peak detection, baseline correction, normalization, plotting, or comparison against spectra you
+   measured. Inside the code the file is available as files[i]["table"]["<column name>"].
+4. Report both kinds of content separately: the spectral information you extracted (peak positions and
+   assignments, SNR, etc.) and any other information the file carried (measurement conditions, sample
+   identity, anything that changes how the spectrum should be read).
+5. If the file turns out to hold no spectrum, say so plainly and report what it does hold instead - do
+   not force a spectral interpretation onto it.
+6. A file arriving is not by itself a reason to turn on the laser. Analyze the file first; measure only
+   if the user asked for a measurement.
 
 [Measurement procedure - proceed on your own through the cycles]
 1. If you do not know the sample/substrate/target location, ask the user first before turning on the laser.
@@ -619,6 +648,12 @@ def _call_tool(ctx: dict, name: str, args: dict) -> dict:
         return _record_experience(ctx, args)
     if name == "record_insight":
         return _record_insight(ctx, args)
+
+    # 첨부 파일 조회/분석도 하드웨어를 만지지 않으므로 dispatch 가드보다 먼저 처리한다.
+    # run_analysis도 여기 포함되어(file_tools.FILE_DISPATCH) 순수 계산인 분석이
+    # 장비 연결 여부에 묶이지 않는다.
+    if name in FILE_DISPATCH:
+        return FILE_DISPATCH[name](args)
 
     # ── external grounding actions ────────────────────────────────────────────
     dispatch = ctx["dispatch"]
@@ -1134,6 +1169,16 @@ def _describe_tool(name: str, args: dict, result: dict, action: str) -> str:
         return f"💾 Experience recorded (episodic) → {result.get('sample', '')}"
     if name == "record_insight":
         return f"💡 Insight recorded (semantic) → {result.get('topic', '')}"
+    if name == "list_uploaded_files":
+        files = result.get("files", [])
+        if not files:
+            return "📎 Attached files — none"
+        return f"📎 Attached files → {', '.join(f.get('filename', '?') for f in files)}"
+    if name == "inspect_file":
+        return (f"🔍 Inspected {result.get('filename', '?')} "
+                f"({result.get('n_rows', '?')} rows × {result.get('n_cols', '?')} cols)")
+    if name == "run_analysis":
+        return f"🧮 Analysis code executed ({result.get('image_count', 0)} figure(s))"
     return f"🔧 {name} called"
 
 

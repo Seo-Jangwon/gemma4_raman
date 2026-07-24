@@ -15,8 +15,15 @@
     spectra : list[dict]  — 저장된 측정들. 각 dict:
         base, title, x, y, power, exposure, mode,
         raman_shift(np.ndarray|None), intensity(np.ndarray)
+    files   : list[dict]  — 사용자가 채팅에 첨부한 파일(file_ids 로 지정된 것만). 각 dict:
+        file_id, filename, sheet, columns(list[str]), n_rows,
+        table(dict: 컬럼명 → 숫자면 np.ndarray, 문자면 list[str])
     np      : numpy
     plt     : matplotlib.pyplot   (그림을 만들면 자동 저장됨)
+
+  ※ 첨부 파일도 microscope_image 와 똑같은 원칙으로 들어온다 — 파일을 '읽는' 것은
+    신뢰된 부모(upload_store)이고, 생성된 코드는 이미 파싱된 변수만 만진다.
+    위 import 화이트리스트/BANNED 목록 때문에 생성 코드가 스스로 파일을 열 방법은 없다.
 
   최악의 오작동도 "그림/계산이 틀림"에 그치고 하드웨어에는 닿지 않는다.
 """
@@ -139,9 +146,28 @@ def _main(payload_path: str) -> None:
                 ext = z["extent"]
                 image_extent = [float(v) for v in ext] if ext.size == 4 else None
 
+        # 첨부 파일(있으면) 주입 — 숫자 컬럼만 np 배열로 승격하고 문자 컬럼은 리스트 그대로.
+        # 어느 컬럼이 무슨 의미인지는 여기서 판단하지 않는다(그건 에이전트 몫).
+        files = []
+        for up in payload.get("uploads") or []:
+            table = {}
+            for cname, vals in (up.get("numeric") or {}).items():
+                table[cname] = np.asarray(
+                    [np.nan if v is None else v for v in vals], dtype=float)
+            for cname, vals in (up.get("text") or {}).items():
+                table[cname] = list(vals)
+            files.append({
+                "file_id": up.get("file_id"),
+                "filename": up.get("filename"),
+                "sheet": up.get("sheet"),
+                "columns": up.get("columns") or [],
+                "n_rows": up.get("n_rows", 0),
+                "table": table,
+            })
+
         ns = {
             "__builtins__": _safe_builtins(),
-            "np": np, "plt": plt, "spectra": spectra,
+            "np": np, "plt": plt, "spectra": spectra, "files": files,
             "microscope_image": microscope_image, "image_extent": image_extent,
         }
         with contextlib.redirect_stdout(buf):
@@ -174,8 +200,13 @@ def _main(payload_path: str) -> None:
 
 # ── 부모(서버) 쪽 오케스트레이터 ───────────────────────────────────────────────
 def run_analysis(code: str, date: str | None = None, names: list[str] | None = None,
-                 title: str | None = None, timeout_sec: int = 60) -> dict:
-    """저장된 측정 데이터를 대상으로 분석/시각화 코드를 안전 실행한다.
+                 title: str | None = None, timeout_sec: int = 60,
+                 file_ids: list[str] | None = None) -> dict:
+    """저장된 측정 데이터(+첨부 파일)를 대상으로 분석/시각화 코드를 안전 실행한다.
+
+    file_ids 를 주면 그 업로드 파일들이 파싱되어 샌드박스의 `files` 변수로 들어간다.
+    측정 데이터(spectra)와 첨부 파일(files)은 동시에 쓸 수 있다 — 예를 들어 사용자가
+    올린 참조 스펙트럼과 방금 측정한 스펙트럼을 한 그림에 겹쳐 그리는 식.
 
     Returns
     -------
@@ -185,6 +216,7 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
     import subprocess
     import tempfile
     from backend.spectrum_store import list_results, latest_scene
+    from backend.upload_store import load_upload
 
     items = list_results(date)
     if names:
@@ -204,6 +236,17 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
             "intensity": list(intensity),
         })
 
+    # 첨부 파일을 '여기서(신뢰된 부모)' 읽어 둔다 — 샌드박스 코드는 파일을 열 수 없으므로
+    # 이 단계에서 파싱된 값만이 생성 코드가 볼 수 있는 전부다.
+    uploads = []
+    for fid in (file_ids or []):
+        try:
+            uploads.append(load_upload(str(fid)))
+        except Exception as e:
+            return {"ok": False,
+                    "error": f"Could not load the attached file '{fid}': {type(e).__name__}: {e}",
+                    "hint": "Check the exact file_id with list_uploaded_files."}
+
     # 실행 전에 문법·정책을 부모에서도 1차 검사(빠른 실패, 명확한 에러)
     try:
         validate_code(code)
@@ -211,7 +254,8 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
         return {"ok": False, "error": f"Code policy violation: {e}",
                 "hint": "Analysis only with numpy/scipy/matplotlib. No hardware/file/network access."}
 
-    payload = {"code": code, "spectra": spectra, "scene_path": latest_scene(date)}
+    payload = {"code": code, "spectra": spectra, "scene_path": latest_scene(date),
+               "uploads": uploads}
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
                                      encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False)
