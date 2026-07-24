@@ -2,6 +2,9 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { Menu } from 'lucide-react'
 import axios from 'axios'
 import ReactMarkdown from 'react-markdown'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import SearchBar, { Attachment } from './SearchBar'
 import IconButton from './IconButton'
 import AFMDashboard from './afm/AFMDashboard'
@@ -27,6 +30,19 @@ const MD_COMPONENTS = {
   pre:        ({ node, ...p }: any) => <pre className="p-2 rounded bg-black/5 font-mono text-xs overflow-x-auto mb-2" {...p} />,
   blockquote: ({ node, ...p }: any) => <blockquote className="border-l-2 border-gray-300 pl-2 text-gray-600" {...p} />,
   hr:         ({ node, ...p }: any) => <hr className="my-2 border-gray-200" {...p} />,
+}
+
+// 수식 렌더링 플러그인. remark-math 로 $…$ / $$…$$ 를 수식 노드로 파싱하고
+// rehype-katex 로 KaTeX 렌더링한다(스타일은 위의 katex.min.css).
+const MD_REMARK_PLUGINS = [remarkMath]
+const MD_REHYPE_PLUGINS = [rehypeKatex]
+
+// LaTeX 구분자 정규화 — remark-math 는 $…$ / $$…$$ 만 인식하므로, 모델이 흔히 쓰는
+// \[ … \] → $$ … $$, \( … \) → $ … $ 로 바꿔 수식이 깨지지 않게 한다.
+function normalizeMath(src: string): string {
+  return src
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_m, e) => `$$${e}$$`)
+    .replace(/\\\(([\s\S]+?)\\\)/g, (_m, e) => `$${e}$`)
 }
 
 interface MainContentProps {
@@ -402,7 +418,11 @@ export default function MainContent({
                         )
                         : msg.role === 'user'
                         ? <span className="whitespace-pre-wrap">{msg.text}</span>
-                        : <ReactMarkdown components={MD_COMPONENTS}>{msg.text || ''}</ReactMarkdown>}
+                        : <ReactMarkdown
+                            remarkPlugins={MD_REMARK_PLUGINS}
+                            rehypePlugins={MD_REHYPE_PLUGINS}
+                            components={MD_COMPONENTS}
+                          >{normalizeMath(msg.text || '')}</ReactMarkdown>}
                     </div>
                   </div>
                 ))}

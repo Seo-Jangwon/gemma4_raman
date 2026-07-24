@@ -1715,9 +1715,8 @@ def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
                 n_in_view += 1
             # 화면 밖 점도 cv2.circle이 자동 클립하므로 그냥 그린다(가장자리 힌트).
             cv2.circle(frame_bgr, (ipx, ipy), _GRID_SPOT_RADIUS_PX, (0, 255, 0), 2)      # green: 스캔 점
-        # 화면 중심(현재 조사점) — 프론트 빨간 링과 같은 위치·색으로.
-        cv2.circle(frame_bgr, (CAMERA_WIDTH // 2, CAMERA_HEIGHT // 2),
-                   _GRID_SPOT_RADIUS_PX, (0, 0, 255), 2)                                 # red: 현재 조사점
+        # (요청) 미리보기에는 스캔 예정점(초록 원)만 표시한다. 화면 중심의 '현재 조사점'
+        # 빨간 링은 스캔 계획과 무관해 혼동을 줄 수 있어 그리지 않는다.
 
         ret, buf = cv2.imencode('.png', frame_bgr)
         if not ret:
@@ -1733,8 +1732,8 @@ def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
         question = (
             f"Grid scan PREVIEW (not executed yet): {rows}x{cols} = {rows*cols} points, "
             f"{spacing_mm} mm spacing, centered at stage (X={cx:.4f}, Y={cy:.4f}) mm. "
-            f"Cyan circles mark points to be scanned; the red circle is the current laser spot at the "
-            f"view center. Grid span {span_x:.3f}x{span_y:.3f} mm vs camera view ~{fov_x:.3f}x{fov_y:.3f} mm; "
+            f"Green circles mark the points to be scanned. "
+            f"Grid span {span_x:.3f}x{span_y:.3f} mm vs camera view ~{fov_x:.3f}x{fov_y:.3f} mm; "
             f"{n_in_view}/{rows*cols} points fall within the current view (the rest are outside the frame "
             f"but will still be measured). If this layout looks right, call run_grid_scan with the SAME "
             f"parameters. If not, call preview_grid_scan again with adjusted rows/cols/spacing_mm/center."
