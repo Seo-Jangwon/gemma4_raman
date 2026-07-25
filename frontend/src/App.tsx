@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import Sidebar from './components/Sidebar'
 import MainContent from './components/MainContent'
 import Banner from './components/Banner'
 import SystemInitModal from './components/SystemInitModal'
 import CCDStatusBar from './components/CCDStatusBar'
+import { useChats } from './chatStore'
 
 export type PageId =
   | 'home'
@@ -24,6 +25,13 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [bannerVisible, setBannerVisible] = useState(true)
   const [activePage, setActivePage] = useState<PageId>('home')
+
+  // 채팅 기록 상태(localStorage 영속) — 사이드바 목록/새채팅과 MainContent 활성 대화의 단일 출처.
+  const { chats, activeId, activeChat, newChat, selectChat, deleteChat, updateActive } = useChats()
+
+  // 새 채팅/기록 선택 시 홈(채팅) 화면으로 전환한다.
+  const handleNewChat = useCallback(() => { newChat(); setActivePage('home') }, [newChat])
+  const handleSelectChat = useCallback((id: string) => { selectChat(id); setActivePage('home') }, [selectChat])
 
   // Keep sidebar visible but make it more subtle for AFM pages
   const isAFMPage = activePage.startsWith('afm')
@@ -53,6 +61,11 @@ function App() {
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
           onPageSelect={(id) => setActivePage(id)}
+          chats={chats}
+          activeChatId={activeId}
+          onNewChat={handleNewChat}
+          onSelectChat={handleSelectChat}
+          onDeleteChat={deleteChat}
         />
 
         {/* Main content area */}
@@ -60,11 +73,16 @@ function App() {
           id="main-content"
           className="flex-1 flex flex-col overflow-hidden"
         >
+          {/* key={activeId}: 대화를 바꾸면 MainContent가 새로 마운트되어 그 대화의
+              메시지/세션으로 초기화된다(로드 로직 없이 깔끔히 전환). */}
           <MainContent
+            key={activeId}
             onMenuClick={() => setSidebarOpen(!sidebarOpen)}
             sidebarOpen={shouldShowSidebar}
             activePage={activePage}
             onPageSelect={setActivePage}
+            initialChat={activeChat}
+            onPersist={updateActive}
           />
         </main>
 

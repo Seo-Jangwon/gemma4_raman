@@ -1,24 +1,28 @@
-import {
-  Sparkles,
-  Clock,
-  Settings,
-  X,
-  Camera,
-  Focus,
-  Sparkles as SparklesIcon,
-  Terminal,
-  AlertCircle,
-} from 'lucide-react'
+import { Clock, Settings, X, Plus, MessageSquare, Trash2, Sparkles } from 'lucide-react'
 import type { PageId } from '../App'
+import type { Chat } from '../chatStore'
 import logoImage from '../logo/logo.png'
 
 interface SidebarProps {
   isOpen: boolean
   onClose: () => void
   onPageSelect: (id: PageId) => void
+  chats: Chat[]
+  activeChatId: string
+  onNewChat: () => void
+  onSelectChat: (id: string) => void
+  onDeleteChat: (id: string) => void
 }
 
-export default function Sidebar({ isOpen, onClose, onPageSelect }: SidebarProps) {
+export default function Sidebar({
+  isOpen,
+  onClose,
+  chats,
+  activeChatId,
+  onNewChat,
+  onSelectChat,
+  onDeleteChat,
+}: SidebarProps) {
   return (
     <>
       {/* Mobile overlay */}
@@ -44,9 +48,9 @@ export default function Sidebar({ isOpen, onClose, onPageSelect }: SidebarProps)
         {/* Header */}
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img 
-              src={logoImage} 
-              alt="Raman-GPT Logo" 
+            <img
+              src={logoImage}
+              alt="Raman-GPT Logo"
               className="w-6 h-6 object-contain"
             />
             <h1 className="text-xl font-semibold text-gray-900">Raman-GPT</h1>
@@ -60,81 +64,69 @@ export default function Sidebar({ isOpen, onClose, onPageSelect }: SidebarProps)
           </button>
         </div>
 
-        {/* AFM Agent section - Moved to top */}
+        {/* Raman Agent section — 새 채팅 시작 */}
         <div className="p-3 border-b border-gray-200">
-          <h2 className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            AFM Agent
-          </h2>
-          <nav className="space-y-1" aria-label="AFM Agent">
+          <div className="flex items-center justify-between px-4 py-2">
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              Raman Agent
+            </h2>
             <button
-              className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-afm-primary-500 hover:bg-afm-primary-50 rounded-lg focus:ring-2 focus:ring-afm-primary-500 font-medium"
-              onClick={() => {
-                onPageSelect('afm')
-                onClose()
-              }}
+              onClick={() => { onNewChat(); onClose() }}
+              className="p-1 text-raman-500 hover:bg-raman-50 rounded focus:ring-2 focus:ring-raman-500"
+              aria-label="New chat"
+              title="새 채팅"
             >
-              <Sparkles className="w-4 h-4 text-afm-primary-500" />
-              <span>AFM Dashboard</span>
+              <Plus className="w-4 h-4" />
             </button>
-          </nav>
+          </div>
+          <button
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-raman-500 hover:bg-raman-50 rounded-lg focus:ring-2 focus:ring-raman-500 font-medium"
+            onClick={() => { onNewChat(); onClose() }}
+          >
+            <Sparkles className="w-4 h-4 text-raman-500" />
+            <span>새 채팅</span>
+          </button>
         </div>
 
-        {/* Agents section */}
+        {/* Chat history section (was Agents) */}
         <div className="flex-1 overflow-y-auto p-3">
           <h2 className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            Agents
+            채팅 기록
           </h2>
-          <nav className="space-y-1" aria-label="Agents">
-            <button
-              className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-200 rounded-lg focus:ring-2 focus:ring-raman-500"
-              onClick={() => {
-                onPageSelect('afm-image-raman')
-                onClose()
-              }}
-            >
-              <Camera className="w-4 h-4 text-raman-500" />
-              Image-to-Raman
-            </button>
-            <button
-              className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-200 rounded-lg focus:ring-2 focus:ring-raman-500"
-              onClick={() => {
-                onPageSelect('afm-autofocus')
-                onClose()
-              }}
-            >
-              <Focus className="w-4 h-4 text-sers-500" />
-              Auto-Focus
-            </button>
-            <button
-              className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-200 rounded-lg focus:ring-2 focus:ring-raman-500"
-              onClick={() => {
-                onPageSelect('afm-optimization')
-                onClose()
-              }}
-            >
-              <SparklesIcon className="w-4 h-4 text-raman-500" />
-              RAG Optimization
-            </button>
-            <button
-              className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-200 rounded-lg focus:ring-2 focus:ring-raman-500"
-              onClick={() => {
-                onPageSelect('afm-hardware')
-                onClose()
-              }}
-            >
-              <Terminal className="w-4 h-4 text-gray-700" />
-              Hardware Control
-            </button>
-            <button
-              className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-200 rounded-lg focus:ring-2 focus:ring-raman-500"
-              onClick={() => {
-                onPageSelect('afm-troubleshooting')
-                onClose()
-              }}
-            >
-              <AlertCircle className="w-4 h-4 text-red-500" />
-              Troubleshooting
-            </button>
+          <nav className="space-y-1" aria-label="채팅 기록">
+            {chats.length === 0 && (
+              <p className="px-4 py-2 text-xs text-gray-400">아직 대화가 없습니다.</p>
+            )}
+            {chats.map(chat => {
+              const active = chat.id === activeChatId
+              return (
+                <div
+                  key={chat.id}
+                  className={`group flex items-center gap-2 pr-1 rounded-lg ${
+                    active ? 'bg-raman-50' : 'hover:bg-gray-200'
+                  }`}
+                >
+                  <button
+                    className={`flex-1 min-w-0 flex items-center gap-3 px-4 py-2.5 text-left text-sm focus:ring-2 focus:ring-raman-500 rounded-lg ${
+                      active ? 'text-raman-600 font-medium' : 'text-gray-800'
+                    }`}
+                    onClick={() => { onSelectChat(chat.id); onClose() }}
+                    title={chat.title}
+                  >
+                    <MessageSquare className="w-4 h-4 flex-shrink-0 text-gray-400" />
+                    <span className="truncate">{chat.title || '새 대화'}</span>
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onDeleteChat(chat.id) }}
+                    className="p-1.5 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 focus:opacity-100 rounded"
+                    aria-label="대화 삭제"
+                    title="대화 삭제"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )
+            })}
           </nav>
         </div>
 
@@ -147,7 +139,7 @@ export default function Sidebar({ isOpen, onClose, onPageSelect }: SidebarProps)
             <Clock className="w-5 h-5" />
             Activity
           </button>
-          
+
           <button
             className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-gray-700 hover:bg-gray-200 rounded-lg focus:ring-2 focus:ring-raman-500"
             aria-label="Open settings"
@@ -160,4 +152,3 @@ export default function Sidebar({ isOpen, onClose, onPageSelect }: SidebarProps)
     </>
   )
 }
-

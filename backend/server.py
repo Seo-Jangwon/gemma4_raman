@@ -524,6 +524,7 @@ async def hardware_state(request: Request):
             "ro_mode":       getattr(ccd, "ro_mode",        "fvb"),
             "preamp_gain_i": getattr(ccd, "preamp_gain_i",  0),
             "preamp_gains":  getattr(ccd, "preamp_gains",   []),
+            "shutter":       getattr(ccd, "shutter_mode",   "auto"),
             "temperature":   None,
         }
         try:

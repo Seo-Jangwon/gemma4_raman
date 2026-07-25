@@ -11,6 +11,7 @@ import AFMDashboard from './afm/AFMDashboard'
 import CameraView from './raman/CameraView'
 import ParameterPanel, { SpectrumParams } from './raman/ParameterPanel'
 import type { PageId } from '../App'
+import type { Chat, ChatMessage } from '../chatStore'
 
 // 어시스턴트 답변의 마크다운(**굵게**, *기울임*, 목록, 제목, 코드 등)을 실제 서식으로 렌더링한다.
 // @tailwindcss/typography(prose) 플러그인이 없어 요소별 클래스를 직접 매핑한다.
@@ -50,21 +51,11 @@ interface MainContentProps {
   sidebarOpen: boolean
   activePage: PageId
   onPageSelect: (id: PageId) => void
-}
-
-interface ChatMessage {
-  role: 'user' | 'assistant'
-  text: string
-  isError?: boolean
-  // 스트리밍 실험용 확장 필드
-  id?: number                  // 진행상황 메시지를 이벤트마다 갱신하기 위한 안정 키
-  kind?: 'progress' | 'clarification' | 'report' | 'spectrum'
-  steps?: string[]             // kind==='progress' 일 때 노드별 진행 로그 누적
-  // kind==='spectrum' — 측정 결과 스펙트럼 이미지(합본 포함) + 다운로드 링크
-  imageUrl?: string
-  csvUrl?: string
-  jsonUrl?: string
-  zipUrl?: string
+  // 채팅 기록 연동 — App(useChats)이 활성 대화를 넘겨주고, 변경분을 다시 올려 영속화한다.
+  // App에서 key={activeId}로 렌더하므로 대화 전환 시 이 컴포넌트가 새로 마운트되어
+  // 아래 초기값이 그 대화의 메시지/세션으로 다시 잡힌다.
+  initialChat?: Chat
+  onPersist?: (messages: ChatMessage[], sessionId: string) => void
 }
 
 const DEFAULT_PARAMS: SpectrumParams = {
@@ -86,54 +77,98 @@ const DEFAULT_PARAMS: SpectrumParams = {
   stageSpeedY: 5.0,
 }
 
+// Andor 내부 ro_mode 문자열(예: 'FULL_VERTICAL_BINNING')을 프론트 readMode 값으로.
+// 알 수 없는 값이면 undefined를 반환해 라이브 동기화가 select를 깨진 값으로 만들지 않게 한다.
+function mapReadMode(v: unknown): SpectrumParams['readMode'] | undefined {
+  const m: Record<string, SpectrumParams['readMode']> = {
+    full_vertical_binning: 'fvb', fvb: 'fvb',
+    single_track: 'single_track',
+    img: 'image', image: 'image',
+  }
+  return m[String(v).toLowerCase()]
+}
+
+// 하드웨어 상태 라이브 폴링 주기(ms)와, 사용자가 값을 바꾼 뒤 폴링이 그 값을 다시
+// 덮어쓰지 않도록 두는 유예시간(ms). 대부분의 파라미터는 Acquire 시점에 적용되므로,
+// 편집 직후 잠깐은 라이브 동기화를 멈춰 사용자가 스테이징한 값을 지켜준다.
+const HW_POLL_MS = 1500
+const PARAM_EDIT_GRACE_MS = 6000
+
 export default function MainContent({
   onMenuClick,
   sidebarOpen,
   activePage,
+  initialChat,
+  onPersist,
 }: MainContentProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  // 활성 대화의 메시지/세션으로 초기화한다. App이 key={activeId}로 렌더하므로
+  // 대화를 바꾸면 새 마운트에서 이 초기값이 그 대화 기준으로 다시 잡힌다.
+  const [messages, setMessages] = useState<ChatMessage[]>(() => initialChat?.messages ?? [])
   const [chatLoading, setChatLoading] = useState(false)
   // clarification(되묻기) 대화를 이어가기 위한 세션 id.
   // 빈 문자열이면 새 실험, 값이 있으면 진행 중인 되묻기의 답변을 같은 세션에 이어붙인다.
-  const [sessionId, setSessionId] = useState('')
+  const [sessionId, setSessionId] = useState(() => initialChat?.sessionId ?? '')
   const [params, setParams] = useState<SpectrumParams>(DEFAULT_PARAMS)
   const [stagePos, setStagePos] = useState<{ x: number; y: number; z: number } | null>(null)
   const [availableGains, setAvailableGains] = useState<number[]>([])
   const [isAcquiring, setIsAcquiring] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  // 라이브 폴링이 사용자의 편집을 덮어쓰지 않게 하는 가드.
+  //  · paramEditingRef  : 파라미터 패널의 어떤 입력에든 포커스가 있는 동안 true
+  //  · lastParamEditRef : 마지막 로컬 편집 시각(ms). 이후 PARAM_EDIT_GRACE_MS 동안 동기화 보류
+  const paramEditingRef = useRef(false)
+  const lastParamEditRef = useRef(0)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, chatLoading])
 
+  // 대화 변경을 채팅 기록에 영속화한다. 스트리밍 중 메시지가 초당 여러 번 바뀌므로
+  // 800ms 디바운스로 묶어 localStorage 쓰기 폭주를 막는다(응답이 끝나면 안정되어 저장됨).
+  useEffect(() => {
+    if (!onPersist) return
+    const t = window.setTimeout(() => onPersist(messages, sessionId), 800)
+    return () => window.clearTimeout(t)
+  }, [messages, sessionId, onPersist])
+
   const syncHardwareState = useCallback(async () => {
     try {
       const { data } = await axios.get('/api/hardware/state')
 
+      // 편집 폼(params)을 라이브 값으로 덮어써도 되는지 — 포커스 중이거나 방금 편집했으면 보류.
+      // 스테이지 좌표(표시 전용)와 프리앰프 게인 목록은 편집 대상이 아니라 항상 갱신한다.
+      const holdParams =
+        paramEditingRef.current || Date.now() - lastParamEditRef.current < PARAM_EDIT_GRACE_MS
+
       if (data.ccd) {
         const c = data.ccd
-        setParams(prev => ({
-          ...prev,
-          ...(c.exposure_time != null && { exposureTime: c.exposure_time }),
-          ...(c.acq_mode      != null && { acqMode: c.acq_mode }),
-          ...(c.num_acc       != null && { numAccumulations: c.num_acc }),
-          ...(c.num_kin       != null && { kineticCount: c.num_kin }),
-          ...(c.ro_mode       != null && { readMode: c.ro_mode }),
-          ...(c.preamp_gain_i != null && { preampGainIndex: c.preamp_gain_i }),
-        }))
         if (Array.isArray(c.preamp_gains) && c.preamp_gains.length > 0) {
           setAvailableGains(c.preamp_gains)
         }
+        if (!holdParams) {
+          const rm = c.ro_mode != null ? mapReadMode(c.ro_mode) : undefined
+          setParams(prev => ({
+            ...prev,
+            ...(c.exposure_time != null && { exposureTime: c.exposure_time }),
+            ...(c.acq_mode      != null && { acqMode: c.acq_mode }),
+            ...(c.num_acc       != null && { numAccumulations: c.num_acc }),
+            ...(c.num_kin       != null && { kineticCount: c.num_kin }),
+            ...(rm              != null && { readMode: rm }),
+            ...(c.preamp_gain_i != null && { preampGainIndex: c.preamp_gain_i }),
+            ...(c.shutter       != null && { shutter: c.shutter }),
+            ...(c.temperature   != null && { targetTemp: c.temperature }),
+          }))
+        }
       }
 
-      if (data.laser?.power_pct != null) {
+      if (!holdParams && data.laser?.power_pct != null) {
         setParams(prev => ({ ...prev, laserPower: data.laser.power_pct }))
       }
 
       if (data.stage) {
         const s = data.stage
         if (s.x != null) setStagePos({ x: s.x, y: s.y, z: s.z })
-        if (s.velocity) {
+        if (!holdParams && s.velocity) {
           setParams(prev => ({
             ...prev,
             stageSpeedX: s.velocity.x,
@@ -146,8 +181,12 @@ export default function MainContent({
     }
   }, [])
 
+  // 마운트 시 1회 + 주기 폴링으로 카메라 아래 설정값을 라이브로 반영한다
+  // (에이전트가 툴로 CCD/스테이지/레이저 설정을 바꾸면 패널이 곧 따라간다).
   useEffect(() => {
     syncHardwareState()
+    const id = window.setInterval(syncHardwareState, HW_POLL_MS)
+    return () => window.clearInterval(id)
   }, [syncHardwareState])
 
   // ── 멀티에이전트 실험 파이프라인 (SSE 스트리밍 + clarification) ──
@@ -283,6 +322,8 @@ export default function MainContent({
   }, [sessionId, syncHardwareState])
 
   const handleParamChange = useCallback((update: Partial<SpectrumParams>) => {
+    // 사용자가 방금 값을 바꿨다 — 잠시 라이브 폴링이 이 값을 되돌리지 않게 유예 타이머를 찍는다.
+    lastParamEditRef.current = Date.now()
     setParams(prev => {
       const next = { ...prev, ...update }
       if (update.stageSpeedX != null || update.stageSpeedY != null) {
@@ -451,8 +492,14 @@ export default function MainContent({
                 <CameraView stagePos={stagePos} onMoved={syncHardwareState} />
               </div>
 
-              {/* 하단: 파라미터 패널 */}
-              <div className="flex-shrink-0 overflow-y-auto p-2 border-t border-gray-200" style={{ maxHeight: '45%' }}>
+              {/* 하단: 파라미터 패널 — 입력에 포커스가 있는 동안은 라이브 폴링이 값을
+                  덮어쓰지 않도록 편집 플래그를 세운다(캡처 단계로 자식 입력까지 포착). */}
+              <div
+                className="flex-shrink-0 overflow-y-auto p-2 border-t border-gray-200"
+                style={{ maxHeight: '45%' }}
+                onFocusCapture={() => { paramEditingRef.current = true }}
+                onBlurCapture={() => { paramEditingRef.current = false }}
+              >
                 <ParameterPanel
                   params={params}
                   onParamChange={handleParamChange}

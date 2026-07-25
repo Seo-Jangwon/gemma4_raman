@@ -117,6 +117,9 @@ class AndorCCD(object):
         self.buffer = np.zeros((1, self.Nx), dtype=np.int32)
         self.ro_mode = 'FULL_VERTICAL_BINNING'
         self.ro_fvb_hbin = 1
+        # 현재 셔터 모드 캐시('auto'|'open'|'close'). Andor SDK는 SetShutter만 있고
+        # 읽기(GetShutter)가 없어, ro_mode처럼 set 시점에 캐시해야 상태 조회가 가능하다.
+        self.shutter_mode = 'auto'
         self.ad_chan = 0
         self.output_amp = DEFAULT_OUTPUT_AMP
         self.cooler_on = False
@@ -815,6 +818,7 @@ class AndorCCD(object):
         """셔터 자동 모드 (취득 시 자동 개폐)."""
         with self.lock:
             _check(self.sdk.SetShutter(0, int(consts.Shutter_Mode.FULLY_AUTO), 0, 0), "SetShutter")
+        self.shutter_mode = 'auto'
 
     def set_shutter_open(self, open=True):
         """셔터 강제 열기(True) / 닫기(False)."""
@@ -822,6 +826,7 @@ class AndorCCD(object):
             with self.lock:
                 _check(self.sdk.SetShutter(0, int(consts.Shutter_Mode.PERMANENTLY_OPEN), 0, 0),
                        "SetShutter")
+            self.shutter_mode = 'open'
         else:
             self.set_shutter_close()
 
@@ -830,6 +835,7 @@ class AndorCCD(object):
         with self.lock:
             _check(self.sdk.SetShutter(0, int(consts.Shutter_Mode.PERMANENTLY_CLOSED), 0, 0),
                    "SetShutter")
+        self.shutter_mode = 'close'
 
     def set_cosmic_ray_filter(self, enabled: bool = True):
         """우주선(Cosmic Ray) 필터 모드 설정. accumulate 모드에서만 유효."""

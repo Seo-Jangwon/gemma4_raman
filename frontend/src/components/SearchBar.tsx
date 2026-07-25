@@ -178,9 +178,12 @@ export default function SearchBar({ onSubmit, isLoading = false }: SearchBarProp
             onChange={(e) => setValue(e.target.value)}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            placeholder="Ask Raman-GPT anything... (e.g., 'Map this 10×10 μm region with 0.5 μm steps')"
+            placeholder="Ask Raman-GPT anything..."
             className="flex-1 resize-none outline-none text-gray-900 placeholder-gray-500 min-h-[24px] max-h-[200px]"
             rows={1}
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
@@ -223,29 +226,6 @@ export default function SearchBar({ onSubmit, isLoading = false }: SearchBarProp
           </div>
         </div>
       </div>
-
-      {focused && !value && pending.length === 0 && (
-        <div className="mt-2 p-4 bg-white border border-gray-200 rounded-xl shadow-lg">
-          <p className="text-xs text-gray-500 mb-2">Try asking:</p>
-          <div className="space-y-1">
-            {[
-              'Analyze this microscopy image and select SERS hotspots',
-              'Optimize laser power for cell imaging',
-              'Troubleshoot weak signal issue',
-              'Auto-focus and acquire spectrum at this point',
-            ].map((suggestion, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => setValue(suggestion)}
-                className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg"
-              >
-                {suggestion}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
     </form>
   )
 }
