@@ -675,9 +675,17 @@ RAMAN_TOOLS = [
             "description": (
                 "Preview a rows x cols grid mapping WITHOUT moving the stage or firing the laser. "
                 "Overlays the planned scan points as circles on the current camera view and returns that "
-                "image so you can visually verify the layout before committing. "
-                "ALWAYS call this first and inspect the returned image; only then call run_grid_scan with the "
-                "SAME parameters if it looks correct, or call preview_grid_scan again with adjusted values. "
+                "image so the layout can be visually verified before committing. "
+                "ORIENTATION (do not confuse the two): rows = number of points stacked VERTICALLY = grid "
+                "HEIGHT (stage Y axis); cols = number of points side-by-side HORIZONTALLY = grid WIDTH "
+                "(stage X axis). So rows=3, cols=2 is a TALL grid (3 high x 2 wide) and rows=2, cols=3 is a "
+                "WIDE grid (2 high x 3 wide) - these are DIFFERENT layouts, never swap them. When the user "
+                "asks for a grid like 'A x B', decide deliberately which number is the horizontal count "
+                "(width -> cols) and which is the vertical count (height -> rows), then use this preview "
+                "image to confirm the drawn orientation matches what they asked. "
+                "MANDATORY HUMAN APPROVAL: always preview FIRST, then STOP - show this preview image to the "
+                "user, end your turn, and WAIT. Do NOT call run_grid_scan in the same turn as this preview; "
+                "only call it in a later turn after the user has explicitly approved this exact layout. "
                 "If center_x/center_y are omitted, the current stage position is used as the grid center. "
                 "Note the camera field of view is small (~0.43 x 0.30 mm), so with wide spacing some points may "
                 "fall outside the frame; they are still measured, and the response reports how many are in view."
@@ -685,8 +693,8 @@ RAMAN_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "rows": {"type": "integer", "description": "Number of grid rows (Y direction), >= 1"},
-                    "cols": {"type": "integer", "description": "Number of grid columns (X direction), >= 1"},
+                    "rows": {"type": "integer", "description": "Number of grid points stacked VERTICALLY = grid HEIGHT (stage Y axis), integer >= 1. e.g. rows=3 -> 3 points tall."},
+                    "cols": {"type": "integer", "description": "Number of grid points side-by-side HORIZONTALLY = grid WIDTH (stage X axis), integer >= 1. e.g. cols=2 -> 2 points wide."},
                     "spacing_mm": {"type": "number", "description": "Distance between adjacent points (mm), > 0"},
                     "center_x": {"type": "number", "description": "Grid center X (mm). Optional; defaults to current stage X"},
                     "center_y": {"type": "number", "description": "Grid center Y (mm). Optional; defaults to current stage Y"},
@@ -703,15 +711,22 @@ RAMAN_TOOLS = [
                 "Execute a rows x cols grid mapping: for each point it moves the stage, optionally autofocuses, "
                 "acquires one spectrum, and auto-saves it (position-tagged). Returns a single compact summary "
                 "(counts, intensity min/max/mean, and per-point data when 32 points or fewer) instead of one tool "
-                "message per point - this is the token-efficient way to run a map. Preview with preview_grid_scan "
-                "first and visually confirm before calling this. The laser is fired at every point, so the "
+                "message per point - this is the token-efficient way to run a map. "
+                "ORIENTATION: rows = vertical count (height, stage Y), cols = horizontal count (width, stage X); "
+                "rows=3,cols=2 is a tall 3x2 grid, rows=2,cols=3 is a wide 2x3 grid - do not swap them. Use the "
+                "SAME rows/cols/spacing_mm/center that the user approved in the preview. "
+                "REQUIRES PRIOR HUMAN APPROVAL: do NOT call this in the same turn as preview_grid_scan. Call it "
+                "ONLY after (1) you showed the user a preview_grid_scan image, (2) you ended that turn, and "
+                "(3) the user EXPLICITLY approved that exact layout in a later message. If the user has not "
+                "explicitly approved the previewed grid, do not call this - preview first and wait. "
+                "The laser is fired at every point, so the "
                 "estimated cumulative dose is checked up front and the scan is refused if it exceeds the safety limit."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "rows": {"type": "integer", "description": "Number of grid rows (Y direction), >= 1"},
-                    "cols": {"type": "integer", "description": "Number of grid columns (X direction), >= 1"},
+                    "rows": {"type": "integer", "description": "Number of grid points stacked VERTICALLY = grid HEIGHT (stage Y axis), integer >= 1. e.g. rows=3 -> 3 points tall. Must match the approved preview."},
+                    "cols": {"type": "integer", "description": "Number of grid points side-by-side HORIZONTALLY = grid WIDTH (stage X axis), integer >= 1. e.g. cols=2 -> 2 points wide. Must match the approved preview."},
                     "spacing_mm": {"type": "number", "description": "Distance between adjacent points (mm), > 0"},
                     "center_x": {"type": "number", "description": "Grid center X (mm). Optional; defaults to current stage X"},
                     "center_y": {"type": "number", "description": "Grid center Y (mm). Optional; defaults to current stage Y"},

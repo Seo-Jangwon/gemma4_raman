@@ -1221,6 +1221,17 @@ def _describe_tool(name: str, args: dict, result: dict, action: str) -> str:
     return f"🔧 {name} called"
 
 
+def _grid_gate_begin_turn(interactive: bool) -> None:
+    """raman_tools의 그리드 사람-승인 게이트에 턴 시작을 알린다(대화=강제 ON, 벤치마크=OFF).
+    하드웨어 모듈 import가 실패하는 개발 PC에서는 조용히 무시한다 — 그 경우 grid scan 자체가
+    'Hardware not connected'로 막히므로 게이트는 무의미하다. (AILA와 동일한 훅.)"""
+    try:
+        from backend.hw_tools.raman_tools import grid_gate_begin_turn
+        grid_gate_begin_turn(interactive=interactive)
+    except Exception:
+        pass
+
+
 def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]:
     """CoALA 에이전트를 이벤트 제너레이터로 실행한다 (프론트엔드 SSE용).
 
@@ -1244,6 +1255,9 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
         llm_tools = _get_llm_tools()
         llm_plain = _get_llm_plain()
         history = _SESSIONS.get(sid, [])
+        # 새 사용자 턴 시작 — 직전 턴의 그리드 미리보기가 있으면 이제 사람이 승인할 수
+        # 있는 턴이므로 게이트를 armed로 올린다(대화 경로라 게이트 ON).
+        _grid_gate_begin_turn(interactive=True)
 
         final_text = None
         final_ctx = None
@@ -1298,6 +1312,9 @@ def run_experiment(user_message: str, session_id: str = "") -> dict:
     # 분리한다(안 그러면 모든 벤치마크 질의가 'nosession' 한 파일에 뭉친다).
     sid = session_id or str(uuid.uuid4())
     turn = new_turn("CoALA", sid, user_message)
+    # 벤치마크는 사람이 없는 자율 평가 — 그리드 승인 게이트를 끈다(안 끄면 모든 격자
+    # 스캔이 승인 없이 거부된다).
+    _grid_gate_begin_turn(interactive=False)
     llm_tools = _get_llm_tools()
     llm_plain = _get_llm_plain()
     final_text = ""

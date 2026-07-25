@@ -315,7 +315,7 @@ def main():
 
     ap = argparse.ArgumentParser(description="라만 벤치마크 입력 신호 생성기")
     ap.add_argument("--date", default=None, help="대상 날짜 YYYY-MM-DD (기본: 오늘)")
-    ap.add_argument("--seed", type=int, default=20260724, help="난수 시드(재현용)")
+    ap.add_argument("--seed", type=int, default=20260725, help="난수 시드(재현용)")
     ap.add_argument("--clean", action="store_true",
                     help="이 스크립트가 만드는 파일명들을 먼저 지우고 다시 생성")
     args = ap.parse_args()

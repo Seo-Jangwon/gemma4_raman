@@ -1630,6 +1630,100 @@ _MM_PER_PX_X = _UM_PER_PX_X * CALIB_FACTOR_X / 1000.0
 _MM_PER_PX_Y = _UM_PER_PX_Y * CALIB_FACTOR_Y / 1000.0
 
 
+# ── 그리드 스캔 사람-승인 게이트 (human-in-the-loop 하드 인터록) ──────────────────
+# [왜 코드 게이트인가] 스키마/시스템 프롬프트로 "미리보기 후 멈추고 승인받아라"라고
+# 지시해도 보장이 안 된다: ReAct(AILA)는 한 응답의 tool_call을 전부 실행하고, CoALA도
+# preview와 run이 서로 다른 사이클이면 같은 턴 안에서 연속 실행될 수 있다. 레이저는
+# 비가역이라, "실행 자체를 거부"하는 물리적 인터록이 프롬프트와 별개로 필요하다.
+#
+# [상태기계] state ∈ {"none","pending","armed"} + 승인된 격자 형상(geom).
+#   preview_grid_scan 성공         → geom 저장, state="pending" (사람이 아직 못 봄)
+#   grid_gate_begin_turn(대화)      → "pending"이면 "armed"(이번 턴 사람이 승인 가능),
+#                                     "armed"인데 안 쓰였으면 만료 → "none"(재미리보기 필요)
+#   run_grid_scan (enforce 시)      → "armed" + geom 일치일 때만 통과, 발사 직전 소비 → "none"
+# 즉 미리보기와 실행 사이에 '사람 턴 경계'가 반드시 하나 끼도록 강제한다. 승인 창은 딱
+# 한 턴(one-shot)이라, 취소하거나 무관한 요청을 한 뒤 stale 승인으로 실행되는 일이 없다.
+#
+# 단일 장비·단일 사용자 로컬 도구라 모듈 전역 dict로 충분하다(= 장비 전역 인터록).
+# 벤치마크(run_experiment)는 사람이 없는 자율 평가이므로 grid_gate_begin_turn(interactive=
+# False)로 게이트를 끈다(안 그러면 모든 벤치마크 격자 스캔이 승인 없이 거부된다).
+_grid_gate = {"geom": None, "state": "none", "enforce": False}
+
+
+def _grid_gate_geom(rows, cols, spacing_mm, center_x, center_y) -> dict:
+    """게이트 비교용 격자 형상 정규화 — 미리보기와 실행이 '같은 격자'인지 판정하는 기준.
+    형상(rows/cols/spacing/center)만 본다. power/exposure/autofocus는 dose 회로차단기가
+    따로 막으므로 승인 대상이 아니다(사람이 눈으로 승인한 것은 '어디에 몇 점을'이다).
+    center는 모델이 넘긴 원값(None 포함)으로 비교한다 — 실측 위치로 해석하면 미리보기와
+    실행 사이 스테이지 이동으로 값이 달라져 오탐이 난다."""
+    return {
+        "rows": int(rows), "cols": int(cols),
+        "spacing_mm": round(float(spacing_mm), 4),
+        "center_x": None if center_x is None else round(float(center_x), 4),
+        "center_y": None if center_y is None else round(float(center_y), 4),
+    }
+
+
+def grid_gate_begin_turn(interactive: bool = True) -> None:
+    """에이전트가 새 사용자 턴을 시작할 때 호출하는 훅(AILA/CoALA 공용).
+
+    interactive=True (SSE 대화): 사람 승인 게이트 ON. 직전 턴에 만든 미리보기가 있으면
+      '이제 사람이 보고 승인할 턴'이라는 뜻으로 pending→armed. 이미 armed였는데 실행에
+      쓰이지 않았으면 승인 창이 만료된 것이라 none으로 되돌린다(재미리보기 강제).
+    interactive=False (벤치마크 자율 실행): 게이트 OFF + 상태 초기화 — 사람이 없으므로
+      미리보기 없이도 run_grid_scan을 허용한다."""
+    _grid_gate["enforce"] = bool(interactive)
+    if not interactive:
+        _grid_gate["geom"] = None
+        _grid_gate["state"] = "none"
+        return
+    if _grid_gate["state"] == "pending":
+        _grid_gate["state"] = "armed"
+    elif _grid_gate["state"] == "armed":
+        # 지난 턴에 승인 가능(armed)했으나 실행하지 않았다 → 승인 창 만료.
+        _grid_gate["state"] = "none"
+        _grid_gate["geom"] = None
+
+
+def _grid_gate_on_preview(geom: dict) -> None:
+    """preview_grid_scan 성공 시 호출 — 승인 대기(pending) 상태로 만든다."""
+    _grid_gate["geom"] = geom
+    _grid_gate["state"] = "pending"
+
+
+def _grid_gate_check(geom: dict):
+    """run_grid_scan 진입 시 승인 여부 검사(부작용 없음). 통과면 None, 거부면 에러 dict를
+    반환한다 — 에이전트는 이 관측을 읽고 '미리보기→턴 종료→대기'로 돌아가게 된다.
+    실제 소비(승인 1회 사용)는 발사 직전 _grid_gate_consume()에서 한다 — 사전검증
+    (범위/None) 실패로 승인이 헛되이 소모되지 않도록 검사와 소비를 분리한다."""
+    if not _grid_gate["enforce"]:
+        return None
+    state = _grid_gate["state"]
+    if state == "none" or _grid_gate["geom"] is None:
+        return {"ok": False, "error": (
+            "Human approval required: no approved grid preview is on record. Call preview_grid_scan "
+            "first, show the user the preview, end your turn, and run only after the user approves.")}
+    if state == "pending":
+        return {"ok": False, "error": (
+            "Human approval required: the grid preview has NOT been approved yet. Do not run in the "
+            "same turn as the preview - end your turn now, let the user see the preview, and call "
+            "run_grid_scan only after the user explicitly approves it in a new message.")}
+    if geom != _grid_gate["geom"]:
+        return {"ok": False, "error": (
+            f"Approval mismatch: the user approved grid {_grid_gate['geom']} but this run requests "
+            f"{geom}. Preview the exact grid again and get the user's approval before running.")}
+    return None
+
+
+def _grid_gate_consume() -> None:
+    """승인을 1회 소비한다 — 발사 직전(모든 사전검증 통과 후) 호출. 게이트가 꺼져 있으면
+    (벤치마크) 아무 것도 하지 않는다."""
+    if not _grid_gate["enforce"]:
+        return
+    _grid_gate["geom"] = None
+    _grid_gate["state"] = "none"
+
+
 def _grid_stage_coords(center_x: float, center_y: float,
                        rows: int, cols: int, spacing_mm: float) -> list:
     """(center_x,center_y) 중심 대칭 rows×cols 격자의 스테이지 좌표를 행 우선(raster)으로.
@@ -1730,13 +1824,18 @@ def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
         fov_x, fov_y = CAMERA_WIDTH * _MM_PER_PX_X, CAMERA_HEIGHT * _MM_PER_PX_Y
         span_x, span_y = (cols - 1) * spacing_mm, (rows - 1) * spacing_mm
         question = (
-            f"Grid scan PREVIEW (not executed yet): {rows}x{cols} = {rows*cols} points, "
-            f"{spacing_mm} mm spacing, centered at stage (X={cx:.4f}, Y={cy:.4f}) mm. "
+            f"Grid scan PREVIEW (not executed yet): {rows} rows x {cols} cols = {rows*cols} points "
+            f"-> a {cols}-wide x {rows}-tall grid, {spacing_mm} mm spacing, "
+            f"centered at stage (X={cx:.4f}, Y={cy:.4f}) mm. "
             f"Green circles mark the points to be scanned. "
             f"Grid span {span_x:.3f}x{span_y:.3f} mm vs camera view ~{fov_x:.3f}x{fov_y:.3f} mm; "
             f"{n_in_view}/{rows*cols} points fall within the current view (the rest are outside the frame "
-            f"but will still be measured). If this layout looks right, call run_grid_scan with the SAME "
-            f"parameters. If not, call preview_grid_scan again with adjusted rows/cols/spacing_mm/center."
+            f"but will still be measured). "
+            f"STOP HERE - do NOT run the scan yet. Show this preview to the user, confirm the "
+            f"{cols}-wide x {rows}-tall orientation is what they asked for, then END YOUR TURN and WAIT "
+            f"for their explicit approval. Only in a LATER turn, after the user approves, call run_grid_scan "
+            f"with these SAME parameters. If the layout is wrong, call preview_grid_scan again with adjusted "
+            f"rows/cols/spacing_mm/center."
         )
         out = {
             "ok": True,
@@ -1750,6 +1849,9 @@ def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
         if saved_img.get("ok"):
             out["saved"] = {"title": f"Grid preview {rows}x{cols} @ {spacing_mm}mm",
                             "image_url": saved_img["image_url"]}
+        # 사람-승인 게이트: 이 미리보기를 '승인 대기(pending)'로 등록한다. 이후 사용자
+        # 턴 경계에서 armed로 올라가야 run_grid_scan이 통과한다(같은 턴 즉시 실행 차단).
+        _grid_gate_on_preview(_grid_gate_geom(rows, cols, spacing_mm, center_x, center_y))
         return out
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -1772,6 +1874,11 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
         return err
     if autofocus not in ("each", "center", "none"):
         return {"ok": False, "error": "autofocus must be one of: each, center, none."}
+    # 사람-승인 게이트(하드 인터록) — 하드웨어를 만지기 전에 먼저 막는다. 승인된 미리보기
+    # 없이 레이저 격자 스캔을 실행하지 않는다. 실제 소비는 발사 직전(_grid_gate_consume).
+    gate_err = _grid_gate_check(_grid_gate_geom(rows, cols, spacing_mm, center_x, center_y))
+    if gate_err:
+        return gate_err
     if _stage is None:
         return {"ok": False, "error": "Stage is not initialized."}
     if _ccd is None:
@@ -1814,6 +1921,10 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
             af = run_autofocus()
             if not af.get("ok"):
                 return {"ok": False, "error": f"Autofocus at grid center failed: {af.get('error')}"}
+
+        # 모든 사전검증(범위/None/오토포커스) 통과 — 이제 레이저를 쏜다. 승인을 여기서
+        # 소비한다(1회용). 이 지점 이후 재실행하려면 다시 미리보기·승인이 필요하다.
+        _grid_gate_consume()
 
         results = []
         n_ok = 0
