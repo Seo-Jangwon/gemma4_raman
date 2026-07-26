@@ -510,50 +510,64 @@ async def stage_move_pixel(body: MovePixelRequest, request: Request):
 
 @app.get("/api/hardware/state")
 async def hardware_state(request: Request):
-    """현재 하드웨어 파라미터 조회 — 프론트엔드 파라미터 패널 동기화용."""
-    hw   = _state(request).hw
-    out  = {"ccd": None, "laser": None, "stage": None}
+    """현재 하드웨어 파라미터 조회 — 프론트엔드 파라미터 패널 동기화용.
 
-    if hw.ccd is not None:
-        ccd = hw.ccd
-        ccd_info: dict = {
-            "exposure_time": getattr(ccd, "exposure_time", None),
-            "acq_mode":      getattr(ccd, "aq_mode",       "single"),
-            "num_acc":       getattr(ccd, "num_acc",        1),
-            "num_kin":       getattr(ccd, "num_kin",        1),
-            "ro_mode":       getattr(ccd, "ro_mode",        "fvb"),
-            "preamp_gain_i": getattr(ccd, "preamp_gain_i",  0),
-            "preamp_gains":  getattr(ccd, "preamp_gains",   []),
-            "shutter":       getattr(ccd, "shutter_mode",   "auto"),
-            "temperature":   None,
-        }
-        try:
-            ccd_info["temperature"] = int(ccd.get_temperature())
-        except Exception:
-            pass
-        out["ccd"] = ccd_info
+    [왜 executor로 오프로드하는가]
+    아래 stage.get_position/get_velocity, ccd.get_temperature 는 직렬 통신·SDK 호출로
+    수십~수백 ms 블로킹된다. async 핸들러에서 직접 부르면 그동안 이벤트 루프가 멈춰,
+    같은 루프에서 도는 카메라 MJPEG 스트림(/api/camera/stream)이 끊긴다. 프론트가 이
+    엔드포인트를 주기적으로 폴링하므로, 하드웨어 읽기를 스레드풀로 내려 루프를 막지 않는다.
+    (getattr 캐시 읽기는 값싸지만 한 번에 같이 내려 코드를 단순하게 둔다.)
+    """
+    state = _state(request)
+    hw = state.hw
 
-    if hw.laser is not None:
-        out["laser"] = {
-            "power_pct": getattr(hw.laser, "power_pct", None),
-            "is_on":     getattr(hw.laser, "is_on",     None),
-        }
+    def _read() -> dict:
+        out: dict = {"ccd": None, "laser": None, "stage": None}
 
-    if hw.stage is not None:
-        try:
-            pos = hw.stage.get_position()
-            out["stage"] = {"x": float(pos[0]), "y": float(pos[1]), "z": float(pos[2])}
-        except Exception:
-            out["stage"] = {}
-        try:
-            vel = hw.stage.get_velocity()
-            if out["stage"] is None:
+        if hw.ccd is not None:
+            ccd = hw.ccd
+            ccd_info: dict = {
+                "exposure_time": getattr(ccd, "exposure_time", None),
+                "acq_mode":      getattr(ccd, "aq_mode",       "single"),
+                "num_acc":       getattr(ccd, "num_acc",        1),
+                "num_kin":       getattr(ccd, "num_kin",        1),
+                "ro_mode":       getattr(ccd, "ro_mode",        "fvb"),
+                "preamp_gain_i": getattr(ccd, "preamp_gain_i",  0),
+                "preamp_gains":  getattr(ccd, "preamp_gains",   []),
+                "shutter":       getattr(ccd, "shutter_mode",   "auto"),
+                "temperature":   None,
+            }
+            try:
+                ccd_info["temperature"] = int(ccd.get_temperature())
+            except Exception:
+                pass
+            out["ccd"] = ccd_info
+
+        if hw.laser is not None:
+            out["laser"] = {
+                "power_pct": getattr(hw.laser, "power_pct", None),
+                "is_on":     getattr(hw.laser, "is_on",     None),
+            }
+
+        if hw.stage is not None:
+            try:
+                pos = hw.stage.get_position()
+                out["stage"] = {"x": float(pos[0]), "y": float(pos[1]), "z": float(pos[2])}
+            except Exception:
                 out["stage"] = {}
-            out["stage"]["velocity"] = {"x": float(vel[0]), "y": float(vel[1]), "z": float(vel[2])}
-        except Exception:
-            pass
+            try:
+                vel = hw.stage.get_velocity()
+                if out["stage"] is None:
+                    out["stage"] = {}
+                out["stage"]["velocity"] = {"x": float(vel[0]), "y": float(vel[1]), "z": float(vel[2])}
+            except Exception:
+                pass
 
-    return out
+        return out
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(state.executor, _read)
 
 
 @app.post("/api/stage/speed")

@@ -74,7 +74,7 @@ export default function Sidebar({
               onClick={() => { onNewChat(); onClose() }}
               className="p-1 text-raman-500 hover:bg-raman-50 rounded focus:ring-2 focus:ring-raman-500"
               aria-label="New chat"
-              title="새 채팅"
+              title="New chat"
             >
               <Plus className="w-4 h-4" />
             </button>
@@ -114,7 +114,7 @@ export default function Sidebar({
                     title={chat.title}
                   >
                     <MessageSquare className="w-4 h-4 flex-shrink-0 text-gray-400" />
-                    <span className="truncate">{chat.title || '새 대화'}</span>
+                    <span className="truncate">{chat.title || 'New conversation'}</span>
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); onDeleteChat(chat.id) }}
