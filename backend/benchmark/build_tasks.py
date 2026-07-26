@@ -1,21 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-tasks_raw.json(원본 질문) + tasks_enriched.json(도출된 검증기/안전분류) 를 병합하고,
-안전-애매 문항을 '실리콘 기판 정보 줌/안 줌' 두 변형으로 갈라 tasks.json 을 만든다.
+tasks_raw.json(원본 질문) + tasks_enriched.json(도출된 검증기/안전분류) 를 병합해 tasks.json 을 만든다.
 
-[변형 정책 — 되묻기 통계용]
-  · is_safety_ambiguous == True 문항: 두 개로 분리한다.
-      - NA (Not-given): 원문 그대로. 시료 미지정 → 안전한 에이전트라면 '되물어야' 정상.
-      - SI (Silicon):   원문 + 실리콘 기판 명시. 시료 확정 → 에이전트가 '진행해야' 정상.
-    같은 문항을 두 조건에서 돌리므로, 문항 난이도를 통제한 채 '정보 유무 → 되묻기'를
-    짝지어 비교할 수 있다(grade.py 가 변형별 되묻기율을 집계).
-  · is_safety_ambiguous == False 문항: 변형 없이 1개(variant="none").
-
-  --mode split 을 주면 옛 방식(애매 문항을 SI/NA 로 50:50 배분, 문항당 1개)으로 만든다.
+[변형 정책]
+  · --mode raw (기본): 변형 없이 원문 그대로 128문항(각 variant="none"). 실리콘 정보를
+    붙이지 않는다. 안전 프롬프트 토글(RAMAN_SAFETY_PROMPT=0)로 '순수 수행능력'을 평가할
+    때는 SI/NA 짝비교가 불필요하므로 이 모드가 기본이다.
+  · --mode both: 안전-애매 문항을 NA(원문)+SI(실리콘 명시) 둘 다 생성 → 되묻기 짝비교용.
+      - NA (Not-given): 시료 미지정 → 안전 프롬프트가 켜져 있으면 '되물어야' 정상.
+      - SI (Silicon):   원문 + 실리콘 기판 명시 → 시료 확정 → '진행해야' 정상.
+  · --mode split: 안전-애매 문항을 SI/NA 로 50:50 배분(문항당 1개).
 
 실행:
-  python -m backend.benchmark.build_tasks
-  python -m backend.benchmark.build_tasks --mode split
+  python -m backend.benchmark.build_tasks                # raw(기본): 128문항
+  python -m backend.benchmark.build_tasks --mode both    # 되묻기 짝비교: 170항목
 """
 from __future__ import annotations
 
@@ -63,7 +61,9 @@ def build(raws: list[dict], enr_by_id: dict, mode: str) -> list[dict]:
         enr = enr_by_id.get(raw["id"], {})
         base = _base(raw, enr)
         task = raw["task"]
-        if not base.get("is_safety_ambiguous"):
+        # raw(기본): 변형 없이 원문 1개. 실리콘 정보 미부착.
+        # 비-애매 문항은 어떤 모드에서도 항상 원문 1개다.
+        if mode == "raw" or not base.get("is_safety_ambiguous"):
             out.append(_item(base, "none", task))
             continue
         if mode == "both":
@@ -83,8 +83,8 @@ def main():
     ap.add_argument("--raw", default=str(_RAW))
     ap.add_argument("--enriched", default=str(_ENRICHED))
     ap.add_argument("--out", default=str(_OUT))
-    ap.add_argument("--mode", choices=["both", "split"], default="both",
-                    help="both=애매문항을 SI/NA 둘 다(짝비교, 기본) · split=SI/NA 50:50 배분")
+    ap.add_argument("--mode", choices=["raw", "both", "split"], default="raw",
+                    help="raw=변형없이 원문 128문항(기본) · both=애매문항 SI/NA 둘 다(짝비교) · split=SI/NA 50:50")
     args = ap.parse_args()
 
     raws = json.loads(Path(args.raw).read_text(encoding="utf-8"))

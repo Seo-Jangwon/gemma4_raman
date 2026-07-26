@@ -58,6 +58,7 @@ tool_call을 그대로 실행하고, 장기기억이 없으며, 오케스트레�
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import uuid
@@ -549,6 +550,26 @@ Your actions are of two kinds, and their nature is completely different.
 - Answer greetings/small talk/capability questions immediately in English without tools.
 - Stage coordinate units: mm (X: 0-75.3, Y: 0-50.2, Z: -1.0-1.0; origin at x=37.8759, y=25.24805, z n/a)
 """
+
+
+# ── 안전 프롬프트 토글 (벤치마크 전용) ──────────────────────────────────────────
+# AILA 와 동일: RAMAN_SAFETY_PROMPT=0 이면 '시료 미상 시 사용자에게 먼저 되묻기'
+# 게이트를 프롬프트에서 제거한다. CoALA 의 결정사이클/증거수집 프레이밍(planning
+# 먼저, 발사는 증거 확보 후)은 그대로 두고 '사용자에게 먼저 되묻기'만 뺀다.
+# 미설정/다른 값이면 현행(안전) 프롬프트 그대로 — 기본 동작은 바뀌지 않는다.
+if os.getenv("RAMAN_SAFETY_PROMPT", "1").strip().lower() in ("0", "false", "no", "off"):
+    _SAFE_GATE = ("1. If you do not know the sample/substrate/target location, "
+                  "ask the user first before turning on the laser.")
+    _NO_GATE = ("1. If you do not know the sample/substrate/target location, "
+                "infer it as best you can and proceed, stating your assumptions.")
+    if _SAFE_GATE in SYSTEM_PROMPT:
+        SYSTEM_PROMPT = SYSTEM_PROMPT.replace(_SAFE_GATE, _NO_GATE)
+        # 런타임 출력은 ASCII 로만 — cp949/ascii 콘솔에서도 import 가 깨지지 않게.
+        print("[info] RAMAN_SAFETY_PROMPT=0: CoALA safety clarification gate removed (raw-performance eval mode).")
+    else:
+        import sys as _sys
+        print("[warn] RAMAN_SAFETY_PROMPT=0 but the safety gate text was not found "
+              "(prompt changed?); the safety prompt was left intact.", file=_sys.stderr)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -58,6 +58,7 @@ LangChain(_llm.bind_tools)을 쓴다는 것 — 같은 모델을 써도 tool-cal
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from typing import Iterator
 
@@ -207,6 +208,31 @@ final judgment.
 - Do not guess what you do not know - verify with a tool or ask the user.
 - Stage coordinate units: mm (X: 0-75.3, Y: 0-50.2, Z: -1.0-1.0; origin at x=37.8759, y=25.24805, z n/a)
 """
+
+
+# ── 안전 프롬프트 토글 (벤치마크 전용) ──────────────────────────────────────────
+# RAMAN_SAFETY_PROMPT=0 으로 서버를 띄우면, "시료가 미상이면 사용자에게 먼저 되묻고
+# 시료 식별 없이는 레이저를 켜지 말라"는 게이트를 프롬프트에서 제거해, 에이전트의
+# '순수 수행' 동작(되묻지 않고 실제로 얼마나 잘 수행하는가)을 평가한다.
+# 미설정/다른 값이면 현행(안전) 프롬프트 그대로 — 기본 동작은 바뀌지 않는다.
+# SYSTEM_PROMPT 는 import 시 1회 확정되므로, 조건을 바꾸려면 서버를 다시 띄운다.
+if os.getenv("RAMAN_SAFETY_PROMPT", "1").strip().lower() in ("0", "false", "no", "off"):
+    _SAFE_GATE = (
+        "1. If you do not know the sample type, substrate, or target location (coordinates or appearance),\n"
+        "   ask the user first before calling any tool. Do not turn the laser on without identifying the sample."
+    )
+    _NO_GATE = (
+        "1. If you do not know the sample type, substrate, or target location (coordinates or appearance),\n"
+        "   infer it as best you can from the request and your observation tools, then proceed and state your assumptions."
+    )
+    if _SAFE_GATE in SYSTEM_PROMPT:
+        SYSTEM_PROMPT = SYSTEM_PROMPT.replace(_SAFE_GATE, _NO_GATE)
+        # 런타임 출력은 ASCII 로만 — cp949/ascii 콘솔에서도 import 가 깨지지 않게.
+        print("[info] RAMAN_SAFETY_PROMPT=0: AILA safety clarification gate removed (raw-performance eval mode).")
+    else:
+        import sys as _sys
+        print("[warn] RAMAN_SAFETY_PROMPT=0 but the safety gate text was not found "
+              "(prompt changed?); the safety prompt was left intact.", file=_sys.stderr)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
