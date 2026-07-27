@@ -36,6 +36,8 @@ def _dispatch(v: dict, tool_trace, pre_state, post_state) -> VerifyResult:
             return _tool_result_ok(v, tool_trace)
         if vtype == "tool_args":
             return _tool_args(v, tool_trace)
+        if vtype == "tool_arg_any":
+            return _tool_arg_any(v, tool_trace)
         if vtype == "tool_sequence":
             return _tool_sequence(v, tool_trace)
         if vtype == "tool_call_count":
@@ -74,6 +76,30 @@ def _dispatch(v: dict, tool_trace, pre_state, post_state) -> VerifyResult:
 
 def _calls_of(tool_trace: list[dict], tool_name: str) -> list[dict]:
     return [t for t in tool_trace if t["tool"] == tool_name]
+
+
+# ── 열거형 문자열 정규화 ──────────────────────────────────────────
+# 같은 뜻인데 표기만 다른 값(예: 툴 스키마 enum 'fvb'  ↔  하드웨어 ro_mode
+# 'FULL_VERTICAL_BINNING')을 채점에서 동일하게 취급한다. 표기차이로 정답이
+# 오답 처리되던 문제를 막는다. 대소문자/공백/언더스코어/하이픈은 무시.
+_ENUM_ALIASES = {
+    # CCD 읽기 모드: set_ccd_read_mode enum  ↔  andor 인터페이스 ro_mode
+    "fvb": "fvb",
+    "full_vertical_binning": "fvb",
+    "single_track": "single_track",
+    "multi_track": "multi_track",
+    "random_track": "random_track",
+    "image": "image",
+    "img": "image",
+}
+
+
+def _norm_enum(s) -> str:
+    """열거형/모드 문자열을 표기차이에 무관하게 비교하기 위한 정규 토큰으로."""
+    t = str(s).strip().lower().replace("-", "_").replace(" ", "_")
+    while "__" in t:
+        t = t.replace("__", "_")
+    return _ENUM_ALIASES.get(t, t)
 
 
 # ── verifier 구현 ─────────────────────────────────────────────────
@@ -121,7 +147,8 @@ def _tool_args(v: dict, tool_trace: list[dict]) -> VerifyResult:
         if actual is None:
             continue
         if tolerance is None:
-            if str(actual).lower() == str(expected).lower():
+            # 문자열/열거형 인자: 표기차이(대소문자·공백·별칭)를 무시하고 비교.
+            if _norm_enum(actual) == _norm_enum(expected):
                 return VerifyResult(passed=True, verifier_type="tool_args",
                                     detail=f"{v['tool']}.{field}={actual} (expected={expected})")
         else:
@@ -132,6 +159,42 @@ def _tool_args(v: dict, tool_trace: list[dict]) -> VerifyResult:
     last_val = calls[-1]["args"].get(field, "N/A")
     return VerifyResult(passed=False, verifier_type="tool_args",
                         detail=f"{v['tool']}.{field} 불일치: actual={last_val}, expected={expected}")
+
+
+def _tool_arg_any(v: dict, tool_trace: list[dict]) -> VerifyResult:
+    """여러 후보 (tool, field) 중 어느 하나라도 기대값과 일치하면 통과.
+
+    같은 파라미터를 여러 경로로 줄 수 있을 때 공정하게 채점한다.
+    예: 레이저 파워는 set_laser_power(percent=) 또는 acquire_spectrum(power=)
+        어느 쪽으로 줘도 정답. acquire_spectrum 이 내부에서 파워설정+발사를
+        수행하므로 사전 set_laser_power 호출을 강제하지 않는다.
+
+    v = {type:"tool_arg_any", expected, tolerance?,
+         candidates:[{tool, field}, ...]}
+    """
+    expected = v["expected"]
+    tolerance = v.get("tolerance")
+    seen = []
+    for cand in v.get("candidates", []):
+        for call in _calls_of(tool_trace, cand["tool"]):
+            actual = call["args"].get(cand["field"])
+            if actual is None:
+                continue
+            seen.append(f"{cand['tool']}.{cand['field']}={actual}")
+            if tolerance is None:
+                if _norm_enum(actual) == _norm_enum(expected):
+                    return VerifyResult(passed=True, verifier_type="tool_arg_any",
+                                        detail=f"{cand['tool']}.{cand['field']}={actual} (expected={expected})")
+            else:
+                try:
+                    if abs(float(actual) - float(expected)) <= float(tolerance):
+                        return VerifyResult(passed=True, verifier_type="tool_arg_any",
+                                            detail=f"{cand['tool']}.{cand['field']}={actual} (expected={expected}±{tolerance})")
+                except (TypeError, ValueError):
+                    pass
+    cand_str = " | ".join(f"{c['tool']}.{c['field']}" for c in v.get("candidates", []))
+    return VerifyResult(passed=False, verifier_type="tool_arg_any",
+                        detail=f"어느 후보도 expected={expected} 불일치 ({cand_str}). 관측={seen or '없음'}")
 
 
 def _tool_sequence(v: dict, tool_trace: list[dict]) -> VerifyResult:
@@ -273,10 +336,11 @@ def _ccd_read_mode(v: dict, post_state: dict) -> VerifyResult:
         return VerifyResult(passed=False, verifier_type="ccd_read_mode",
                             detail="post_state에 CCD 정보 없음")
     actual = ccd.get("ro_mode", "")
-    expected = v["expected"].lower()
-    if actual.lower() == expected:
+    expected = v["expected"]
+    # 표기차이(fvb == FULL_VERTICAL_BINNING 등)는 정규화 후 비교.
+    if _norm_enum(actual) == _norm_enum(expected):
         return VerifyResult(passed=True, verifier_type="ccd_read_mode",
-                            detail=f"CCD 읽기 모드: {actual}")
+                            detail=f"CCD 읽기 모드 일치: actual={actual} ≡ expected={expected}")
     return VerifyResult(passed=False, verifier_type="ccd_read_mode",
                         detail=f"CCD 읽기 모드 불일치: actual={actual}, expected={expected}")
 

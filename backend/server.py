@@ -557,10 +557,17 @@ async def hardware_state(request: Request):
             except Exception:
                 out["stage"] = {}
             try:
+                # get_velocity() 는 dict 반환 {"ok",x_speed_mm_s,y_speed_mm_s,z_speed_mm_s,...}.
+                # (이전 버그: vel[0] 로 dict 를 정수 인덱싱 → 항상 예외 → velocity 미기록)
                 vel = hw.stage.get_velocity()
                 if out["stage"] is None:
                     out["stage"] = {}
-                out["stage"]["velocity"] = {"x": float(vel[0]), "y": float(vel[1]), "z": float(vel[2])}
+                if isinstance(vel, dict) and vel.get("ok"):
+                    out["stage"]["velocity"] = {
+                        "x": float(vel["x_speed_mm_s"]),
+                        "y": float(vel["y_speed_mm_s"]),
+                        "z": float(vel["z_speed_mm_s"]),
+                    }
             except Exception:
                 pass
 

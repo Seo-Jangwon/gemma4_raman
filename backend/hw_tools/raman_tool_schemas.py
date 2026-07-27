@@ -81,6 +81,14 @@ RAMAN_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_laser_status",
+            "description": "Query the current laser state: whether it is firing (is_on) and the last set power (power_percent, %).",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "acquire_spectrum",
             "description": (
                 "Acquire a Raman spectrum at the current position. "
@@ -525,6 +533,29 @@ RAMAN_TOOLS = [
                                      "description": "Y-axis movement speed (mm/s, max 5.0). Optional."},
                     "z_speed_mm_s": {"type": "number", 
                                      "description": "Z-axis movement speed (mm/s, max 0.1). Optional."},
+                },
+                "required": [],
+            },
+        },
+    },
+    # ── 하드웨어 연결 관리 ────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "reconnect_hardware",
+            "description": (
+                "Disconnect and re-initialize a hardware component when it is unresponsive or stuck. "
+                "component: 'stage' | 'ccd' | 'camera' | 'laser' | 'all'. "
+                "WARNING: reconnecting the 'ccd' re-runs cooling and can block for minutes until -40 C stabilizes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "component": {
+                        "type": "string",
+                        "enum": ["stage", "ccd", "camera", "laser", "all"],
+                        "description": "Which component to reconnect. Default 'all'.",
+                    }
                 },
                 "required": [],
             },

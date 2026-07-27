@@ -93,6 +93,8 @@ class LaserController:
         self.baud = baud
         self.ser = None
         self._power_set = False
+        self.is_on = False       # SSPW(레이저 발사) 상태 추적 — 하드웨어 상태 조회/채점용
+        self.power_pct = None    # 마지막으로 설정한 파워(%) 추적
         self._connect()
         time.sleep(0.5)
         # self._full_initialization()
@@ -575,10 +577,12 @@ class LaserController:
             print("🔦 가이드빔 ON (축04 이동 없음)")
         print("⚡ 레이저 ON (SSPW 1)")
         self._send_command("00", "SSPW", "1", timeout=3.0)
+        self.is_on = True
 
     def laser_off(self):
         print("🛑 레이저 정지 (OFF)")
         self._send_command("00", "SSPW", "0", timeout=3.0)
+        self.is_on = False
         self._power_set = False
         self.set_guide_beam()
 
@@ -641,6 +645,7 @@ class LaserController:
         success = self._execute_command("02", "SMMA", target_pos, timeout=15.0)
         if success:
             self._power_set = True
+            self.power_pct = clamped
             time.sleep(0.1)  # 모터 안정화
             print(f"   -> 파워 설정 완료! (≈{clamped}% 투과)")
         else:
@@ -675,6 +680,7 @@ class LaserController:
             # 1. 레이저 OFF
             print("   [1/2] 레이저 OFF")
             self._send_command("00", "SSPW", "0", timeout=5.0, retries=1)
+            self.is_on = False
             time.sleep(0.1)
 
             # # 2. 가이드빔 대기 상태 (축04 → -0612828, 축02 → -0602895)

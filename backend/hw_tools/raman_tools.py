@@ -62,6 +62,70 @@ def init_hardware(stage=None, laser=None, ccd=None, camera=None):
     print(f"[DEBUG] raman_tools.init_hardware() 호출됨: stage={_stage}, laser={_laser}, ccd={_ccd}, camera={_camera}")
 
 
+def _teardown_component(mgr, comp: str) -> None:
+    """재접속 전 해당 컴포넌트를 안전하게 해제(예외는 무시)."""
+    try:
+        if comp == "stage" and mgr.stage is not None:
+            try: mgr.stage.disconnect()
+            except Exception: pass
+            try: mgr.stage.free_session()
+            except Exception: pass
+            mgr.stage = None
+        elif comp == "camera" and mgr.camera is not None:
+            try: mgr.camera.stop_stream()
+            except Exception: pass
+            try: mgr.camera.close()
+            except Exception: pass
+            mgr.camera = None
+        elif comp == "ccd" and mgr.ccd is not None:
+            try: mgr.ccd.close()
+            except Exception: pass
+            mgr.ccd = None
+        elif comp == "laser" and mgr.laser is not None:
+            try: mgr.laser.laser_off()
+            except Exception: pass
+            try:
+                if mgr.laser.ser and mgr.laser.ser.is_open:
+                    mgr.laser.ser.close()
+            except Exception: pass
+            mgr.laser = None
+    except Exception:
+        pass
+
+
+def reconnect_hardware(component: str = "all") -> dict:
+    """카메라/스테이지/CCD/레이저 연결을 끊었다가 재초기화한다.
+
+    component: 'stage' | 'ccd' | 'camera' | 'laser' | 'all' (기본 all).
+    주의: CCD 재초기화는 -40C 냉각 안정화까지 수 분간 블로킹될 수 있다.
+    재초기화 후 raman_tools 전역 핸들을 새 객체로 다시 주입한다.
+    """
+    try:
+        from backend.hardware_manager import get_manager
+    except Exception as e:
+        return {"ok": False, "error": f"HardwareManager import failed: {e}"}
+
+    comp = str(component or "all").strip().lower()
+    valid = {"stage", "ccd", "camera", "laser", "all"}
+    if comp not in valid:
+        return {"ok": False, "error": f"component must be one of {sorted(valid)}"}
+
+    mgr = get_manager()
+    targets = ["stage", "ccd", "camera", "laser"] if comp == "all" else [comp]
+    done, errors = [], {}
+    for t in targets:
+        try:
+            _teardown_component(mgr, t)
+            getattr(mgr, f"_init_{t}")()
+            done.append(t)
+        except Exception as e:
+            errors[t] = str(e)
+
+    # 재초기화된 객체를 raman_tools 전역에 재주입
+    init_hardware(stage=mgr.stage, laser=mgr.laser, ccd=mgr.ccd, camera=mgr.camera)
+    return {"ok": (len(errors) == 0), "reconnected": done, "errors": (errors or None)}
+
+
 # ──────────────────────────────────────────
 # 스테이지
 # ──────────────────────────────────────────
@@ -71,8 +135,14 @@ def get_stage_speed() -> dict:
     if _stage is None:
         return {"ok": False, "error": "Stage is not initialized."}
     try:
-        speeds = _stage.get_velocity()
-        return {"ok": True, "x_speed_mm_s": speeds[0], "y_speed_mm_s": speeds[1], "z_speed_mm_s": speeds[2]}
+        # get_velocity() 는 dict 반환. (이전 버그: speeds[0] 로 dict 를 정수 인덱싱 → 항상 에러)
+        vel = _stage.get_velocity()
+        if not (isinstance(vel, dict) and vel.get("ok")):
+            return {"ok": False, "error": vel.get("error", "Failed to read velocity") if isinstance(vel, dict) else "Unexpected velocity type"}
+        return {"ok": True,
+                "x_speed_mm_s": vel["x_speed_mm_s"],
+                "y_speed_mm_s": vel["y_speed_mm_s"],
+                "z_speed_mm_s": vel["z_speed_mm_s"]}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -192,6 +262,20 @@ def set_laser_power(percent: float) -> dict:
         _laser.set_power(percent)
         time.sleep(0.15)  # ND 필터 광학 settling (모터 정지 후 잔류 진동)
         return {"ok": True, "power_percent": percent}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def get_laser_status() -> dict:
+    """현재 레이저 상태 조회: 발사(on/off) 여부와 마지막으로 설정한 파워(%)."""
+    if _laser is None:
+        return {"ok": False, "error": "Laser is not initialized."}
+    try:
+        return {
+            "ok": True,
+            "is_on": bool(getattr(_laser, "is_on", False)),
+            "power_percent": getattr(_laser, "power_pct", None),
+        }
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -1985,10 +2069,13 @@ TOOL_DISPATCH = {
     "move_stage_relative":      lambda a: move_stage_relative(**a),
     "get_stage_speed":          lambda a: get_stage_speed(),
     "set_stage_speed":          lambda a: set_stage_speed(**a),
+    # ── 하드웨어 연결 관리 ────────────────────────────────────────────────────
+    "reconnect_hardware":       lambda a: reconnect_hardware(**a),
     # ── 레이저 ──────────────────────────────────────────────────────────────
     "laser_on":                 lambda a: laser_on(),
     "laser_off":                lambda a: laser_off(),
     "set_laser_power":          lambda a: set_laser_power(**a),
+    "get_laser_status":         lambda a: get_laser_status(),
     "set_guide_beam_mode":      lambda a: set_guide_beam_mode(),
     # ── 스펙트럼 수집 ────────────────────────────────────────────────────────
     "acquire_spectrum":         lambda a: _cache_and_return(acquire_spectrum(**a)),

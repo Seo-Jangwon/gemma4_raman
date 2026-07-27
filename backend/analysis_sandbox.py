@@ -41,7 +41,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 # ── 정책 ──────────────────────────────────────────────────────────────────────
 _ALLOWED_IMPORT_ROOTS = {
-    "numpy", "scipy", "math", "statistics", "matplotlib",
+    "numpy", "scipy", "math", "statistics", "matplotlib", "pandas",
     "json", "itertools", "functools", "collections", "cmath", "random",
 }
 _BANNED_NAMES = {

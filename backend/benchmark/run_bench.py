@@ -16,8 +16,11 @@
         python -m backend.server
      그리고 프론트나 API로 각 장비 connect 를 완료해 둔다(레이저 측정 문항이 있으므로
      실제 레이저가 발사됨 — dose 회로차단기가 폭주만 막는다).
-  2) 입력 태스크 준비: python -m backend.benchmark.xlsx_to_tasks  → tasks_raw.json
-     그리고 build_tasks.py 로 tasks.json(실리콘 변형 포함) 생성.
+  2) 입력 태스크 준비:
+        python -m backend.benchmark.make_task_spectra   # 문항ID별 스펙트럼 생성 + tasks_raw 프롬프트에 파일명 주입
+        python -m backend.benchmark.build_tasks          # tasks_raw.json + tasks_enriched.json -> tasks.json
+     주의: 정답 원본은 tasks_raw.json / tasks_enriched.json 다(직접 편집). xlsx 재추출
+     스크립트(xlsx_to_tasks)는 raw 편집을 덮어써 위험하므로 제거했다.
   3) 러너 실행:
         python -m backend.benchmark.run_bench                 # 전체
         python -m backend.benchmark.run_bench --agents AILA   # 한 에이전트만
