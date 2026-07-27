@@ -292,15 +292,24 @@ def _get_dispatch():
 # 도구 호출
 # ══════════════════════════════════════════════════════════════════════════════
 
+# 길이 필터를 면제하는 키.
+# files(list_uploaded_files)를 버리면 모델은 count만 받고 file_id를 얻을 길이 없어
+# "ok인데 목록이 없다"며 같은 도구를 수십 번 재호출한다(실측: 업로드 62개일 때 25회).
+# 항목당 4필드짜리 짧은 dict라 통째로 실어도 토큰 부담은 작다 —
+# 이 필터가 원래 막으려던 건 수천 점짜리 숫자 배열이다.
+_SLIM_KEEP_KEYS = {"files"}
+
+
 def _slim(result):
     """대용량 배열(스펙트럼 원본 등)은 컨텍스트에 그대로 싣지 않는다 —
     토큰 낭비 + 모델 혼란 방지(구 hw_manager의 동일 정책 계승).
 
-    길이 32 초과 리스트를 통째로 버린다. KB 검색 결과는 최대 3개짜리 리스트라
-    이 필터에 걸리지 않는다.
+    길이 32 초과 리스트를 통째로 버린다(_SLIM_KEEP_KEYS 제외). KB 검색 결과는
+    최대 3개짜리 리스트라 이 필터에 걸리지 않는다.
     """
     if isinstance(result, dict):
-        return {k: v for k, v in result.items() if not (isinstance(v, list) and len(v) > 32)}
+        return {k: v for k, v in result.items()
+                if k in _SLIM_KEEP_KEYS or not (isinstance(v, list) and len(v) > 32)}
     return result
 
 

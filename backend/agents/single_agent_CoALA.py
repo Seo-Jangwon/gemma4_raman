@@ -636,11 +636,18 @@ def _get_dispatch():
 _INJECTED_IMAGE = "_injected_image"     # 이미지 주입용 HumanMessage 표시
 
 
+# 길이 필터를 면제하는 키 — AILA의 _SLIM_KEEP_KEYS와 동일해야 비교가 공정하다.
+# files(list_uploaded_files)를 버리면 모델은 count만 받고 file_id를 얻을 길이 없어
+# 같은 도구를 수십 번 재호출한다. 항목당 4필드짜리 짧은 dict라 부담은 작다.
+_SLIM_KEEP_KEYS = {"files"}
+
+
 def _slim(result):
     """대용량 배열(스펙트럼 원본 등)은 컨텍스트에 싣지 않는다 — 토큰 낭비/혼란 방지.
-    길이 32 초과 리스트를 버린다. 기억 조회 결과는 짧아 걸리지 않는다."""
+    길이 32 초과 리스트를 버린다(_SLIM_KEEP_KEYS 제외). 기억 조회 결과는 짧아 걸리지 않는다."""
     if isinstance(result, dict):
-        return {k: v for k, v in result.items() if not (isinstance(v, list) and len(v) > 32)}
+        return {k: v for k, v in result.items()
+                if k in _SLIM_KEEP_KEYS or not (isinstance(v, list) and len(v) > 32)}
     return result
 
 

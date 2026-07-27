@@ -112,6 +112,16 @@ def _main(payload_path: str) -> None:
 
     from backend.spectrum_store import RESULTS_ROOT, URL_PREFIX
 
+    # 자식의 stdout/stderr 는 Windows 에서 cp949 다. 여기에 cp949 로 표현 못 하는 문자가
+    # 하나라도 섞이면 write 자체가 UnicodeEncodeError 로 죽고, 부모는 진짜 원인 대신
+    # "결과 없이 종료"만 보게 된다(생성 코드의 에러 메시지가 통째로 사라진다).
+    # 인코딩 불가 문자는 이스케이프로 흘려보내고 프로세스는 절대 죽지 않게 한다.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(errors="backslashreplace")
+        except Exception:
+            pass
+
     payload = json.loads(Path(payload_path).read_text(encoding="utf-8"))
     code = payload["code"]
 
@@ -171,7 +181,9 @@ def _main(payload_path: str) -> None:
             "microscope_image": microscope_image, "image_extent": image_extent,
         }
         with contextlib.redirect_stdout(buf):
-            exec(compile(code, "<analysis>", "exec"), ns)  # noqa: S102 — 샌드박스됨
+            # 이 줄의 주석은 ASCII 로만 쓴다 — traceback 에 소스 줄이 그대로 실려
+            # 모델에게 전달되므로, 비ASCII가 있으면 에러 메시지가 이스케이프로 더럽혀진다.
+            exec(compile(code, "<analysis>", "exec"), ns)  # noqa: S102 (sandboxed)
 
         # 생성된 모든 그림을 data/results 에 저장
         day = datetime.now().strftime("%Y-%m-%d")
@@ -195,7 +207,11 @@ def _main(payload_path: str) -> None:
             "error": f"{type(e).__name__}: {e}",
             "trace": traceback.format_exc()[-1200:],
         }
-    sys.stdout.write("\n__ANALYSIS_RESULT__" + json.dumps(result, ensure_ascii=False))
+    # ensure_ascii 는 기본값(True) 그대로 둔다 — 비ASCII를 \uXXXX 로 이스케이프해
+    # 순수 ASCII 로만 내보낸다. 부모의 json.loads 가 원래 문자로 복원하므로 무손실이고,
+    # cp949 파이프를 타도 절대 깨지지 않는다. 여기서 ensure_ascii=False 를 쓰면
+    # traceback 에 섞여 들어온 한글 주석 한 줄이 프로세스를 죽인다.
+    sys.stdout.write("\n__ANALYSIS_RESULT__" + json.dumps(result))
 
 
 # ── 부모(서버) 쪽 오케스트레이터 ───────────────────────────────────────────────
@@ -264,7 +280,10 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "backend.analysis_sandbox", payload_path],
-            capture_output=True, text=True, timeout=timeout_sec,
+            # errors="replace": 자식 stderr 에 로케일로 못 읽는 바이트가 섞여도 부모의
+            # 읽기 스레드가 UnicodeDecodeError 로 죽지 않게 한다
+            # (encoding 은 자식과 같은 로케일 기본값을 그대로 쓴다).
+            capture_output=True, text=True, errors="replace", timeout=timeout_sec,
             cwd=str(_PROJECT_ROOT),
         )
     except subprocess.TimeoutExpired:
