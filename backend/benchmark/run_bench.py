@@ -20,12 +20,22 @@
      [평가 모드 환경변수 — 반드시 '서버를 띄울 때' 준다]
      이 러너는 HTTP 클라이언트라 이미 떠 있는 서버의 에이전트 설정을 바꿀 수 없다.
      아래는 서버 프로세스의 환경변수로만 적용된다.
-        RAMAN_SAFETY_PROMPT=0    '시료 미상 시 되묻기' 게이트 제거(순수 수행능력 평가)
-        RAMAN_EPISODIC_MEMORY=0  CoALA episodic memory(recall/record_experience) 제거
-                                 — 켜두면 experiences.json 이 문항을 넘어 축적돼 뒷 문항이
-                                   앞 문항 경험을 회수한다(문항 간 조건 오염 + 컨텍스트 압박).
-                                   semantic(KB/insights)은 유지되므로 episodic 만의 ablation.
-     예: RAMAN_SAFETY_PROMPT=0 RAMAN_EPISODIC_MEMORY=0 python -m backend.server
+        RAMAN_SAFETY_PROMPT=0     '시료 미상 시 되묻기' 게이트 제거(순수 수행능력 평가)
+        RAMAN_MEMORY_SCOPE=session CoALA 장기기억(episodic+semantic)을 세션별로 격리
+                                  — 벤치는 문항마다 새 session_id 를 주므로, 문항이 넘어갈
+                                    때마다 메모리가 빈 상태에서 시작한다. 켜지 않으면 1번
+                                    문항은 경험 0건, 200번 문항은 199개 문항의 경험으로
+                                    푸는 셈이라 문항 순서가 결과를 바꾼다(재현 불가).
+                                    도구/프롬프트는 그대로라 CoALA 아키텍처는 온전하고,
+                                    각 문항이 무엇을 기록했는지는
+                                    backend/agents/coala_memory/sessions/<sid>/ 에 남아
+                                    채점 근거로 쓸 수 있다.
+        RAMAN_EPISODIC_MEMORY=0   (선택) episodic 액션 자체를 액션 공간에서 제거하는
+                                  ablation. 위 MEMORY_SCOPE 로 오염이 잡히므로 평소엔
+                                  불필요하고, 'episodic 유무' 비교를 따로 뽑을 때만 쓴다.
+
+     권장(벤치 기본):
+        $env:RAMAN_SAFETY_PROMPT="0"; $env:RAMAN_MEMORY_SCOPE="session"; python -m backend.server
      서버 기동 로그의 [info] 줄로 실제 적용 여부를 확인하고 벤치를 시작할 것.
   2) 입력 태스크 준비:
         python -m backend.benchmark.make_task_spectra   # 문항ID별 스펙트럼 생성 + tasks_raw 프롬프트에 파일명 주입

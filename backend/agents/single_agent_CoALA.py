@@ -20,6 +20,9 @@ tool_call을 그대로 실행하고, 장기기억이 없으며, 오케스트레�
   · Episodic memory : 읽기 recall_experiences, 쓰기 record_experience → experiences.json.
                       (RAMAN_EPISODIC_MEMORY=0 이면 이 두 액션과 관련 프롬프트를 제거한
                        ablation 으로 뜬다 — 벤치마크의 문항 간 오염/컨텍스트 압박 회피용.)
+  · 메모리 스코프    : RAMAN_MEMORY_SCOPE=session 이면 episodic/semantic 저장소가
+                      coala_memory/sessions/<session_id>/ 로 갈라져, 세션이 바뀔 때마다
+                      빈 상태에서 시작한다(벤치 문항 간 이월 차단). 기본은 global.
   · Procedural memory: 이 파일의 코드 + TOOL_DISPATCH + LLM 가중치(설계자가 초기화).
   · Action space    : external=grounding(하드웨어), internal=retrieval/reasoning/learning.
   · Decision cycle  : planning(propose·evaluate·select) → execution → observe (논문 §4.6).
@@ -115,8 +118,61 @@ _MAX_DOSE_MJ_PER_TURN = 1000.0
 # 단일 사용자 로컬 도구라 파일 락 없이 read-modify-write append로 충분하다.
 
 _MEMORY_DIR = Path(__file__).resolve().parent / "coala_memory"
-_EPISODIC_PATH = _MEMORY_DIR / "experiences.json"   # 실험 경험(에피소드)
-_SEMANTIC_PATH = _MEMORY_DIR / "insights.json"      # 경험에서 증류한 일반 지식
+_EPISODIC_NAME = "experiences.json"   # 실험 경험(에피소드)
+_SEMANTIC_NAME = "insights.json"      # 경험에서 증류한 일반 지식
+
+
+# ── 메모리 스코프 토글 (벤치마크 전용) ────────────────────────────────────────
+# RAMAN_MEMORY_SCOPE=session 으로 서버를 띄우면 장기기억 저장소가 '세션마다 따로'
+# 열린다 — coala_memory/sessions/<session_id>/ 아래로. 새 session_id 로 들어오면
+# 그 순간 저장소가 비어 있으므로, 사실상 세션이 넘어갈 때마다 초기화된 것과 같다.
+#
+# [왜 필요한가]
+# 벤치는 문항마다 새 session_id 를 줘서 공정성을 맞추는데(run_bench.py 머리말),
+# 장기기억은 세션을 넘어 축적되므로 그 가정을 우회한다. 1번 문항은 경험 0건으로,
+# 200번 문항은 199개 문항이 남긴 경험으로 푸는 셈이라 CoALA 의 조건이 문항 순서에
+# 따라 계속 변한다 — 재현도 해석도 안 되는 교란이다.
+#
+# [왜 '삭제'가 아니라 '세션별 디렉터리'인가]
+# ① 지우는 시점을 누가 언제 부르느냐(러너? 서버?)에 따른 경쟁이 없다. 새 sid 로
+#    들어오면 자동으로 빈 저장소다.
+# ② 각 문항에서 에이전트가 '무엇을 기록했는지'가 디스크에 남아 채점 근거가 된다.
+#    지워버리면 그 증거까지 사라진다.
+# ③ 도구도 프롬프트도 그대로라 CoALA 아키텍처가 온전하다. 모델이 recall 에 쓰는
+#    사이클·토큰 비용도 정직하게 측정된다(메모리를 꺼버리면 이 비용이 사라진다).
+#
+# 미설정이면 'global' — 현행대로 coala_memory/ 하나에 계속 축적된다(실사용 기본값).
+_MEMORY_SCOPE = os.getenv("RAMAN_MEMORY_SCOPE", "global").strip().lower()
+_SESSION_SCOPED_MEMORY = _MEMORY_SCOPE == "session"
+if _SESSION_SCOPED_MEMORY:
+    # 런타임 출력은 ASCII 로만 — cp949/ascii 콘솔에서도 import 가 깨지지 않게.
+    print("[info] RAMAN_MEMORY_SCOPE=session: CoALA long-term memory is per-session "
+          "(episodic+semantic start empty for every new session_id).")
+elif _MEMORY_SCOPE != "global":
+    import sys as _sys
+    print(f"[warn] RAMAN_MEMORY_SCOPE='{_MEMORY_SCOPE}' is not recognized "
+          "(use 'global' or 'session'); falling back to 'global'.", file=_sys.stderr)
+
+
+def _sanitize_sid(sid: str) -> str:
+    """세션 id 를 디렉터리명으로 — detail_log._sanitize 와 같은 규칙이라
+    DetailLog 파일명과 메모리 폴더명이 같은 sid 로 맞춰진다(추적이 쉬워진다)."""
+    return re.sub(r"[^0-9A-Za-z_-]", "-", str(sid))[:64] or "nosession"
+
+
+def _memory_dir(ctx: dict) -> Path:
+    """이 컨텍스트가 쓸 장기기억 디렉터리. session 스코프면 세션별 하위 폴더."""
+    if not _SESSION_SCOPED_MEMORY:
+        return _MEMORY_DIR
+    return _MEMORY_DIR / "sessions" / _sanitize_sid(ctx.get("session_id", ""))
+
+
+def _episodic_path(ctx: dict) -> Path:
+    return _memory_dir(ctx) / _EPISODIC_NAME
+
+
+def _semantic_path(ctx: dict) -> Path:
+    return _memory_dir(ctx) / _SEMANTIC_NAME
 
 
 def _load_json_list(path: Path) -> list[dict]:
@@ -131,52 +187,179 @@ def _load_json_list(path: Path) -> list[dict]:
 
 def _append_json_list(path: Path, item: dict) -> None:
     """저장소 파일에 항목 하나를 append한다(디렉터리 없으면 생성)."""
-    _MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     items = _load_json_list(path)
     items.append(item)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(items, f, ensure_ascii=False, indent=2)
 
 
-def _match_score(query: str, entry: dict, fields: tuple[str, ...]) -> int:
-    """질의 토큰이 항목의 지정 필드들에 몇 개나 부분매칭되는지 — 조회 랭킹용.
+def _match_score(query: str, hay: str) -> int:
+    """질의 토큰 중 몇 개가 건초더미 텍스트에 부분매칭되는지 — 조회 랭킹용.
 
     임베딩 검색을 쓰지 않는 이유: episodic 저장소는 JSON 선택이므로 의존성 없는
     키워드 매칭으로 충분하고, 개발 PC에서도 임베딩 서버 없이 검사할 수 있다.
+
+    주의: 이 점수의 상한은 '질의 토큰 수'다. "graphene" 한 단어로 조회하면 관련
+    에피소드가 전부 1점으로 동점이 된다 — 그래서 점수만으로 순위를 매기면 안 되고
+    _recall_experiences 가 조건일치/성공/최신을 뒤이은 정렬 키로 쓴다.
     """
-    hay = " ".join(str(entry.get(fld, "")) for fld in fields).lower()
+    hay = hay.lower()
     toks = [t for t in re.split(r"\s+", query.lower().strip()) if t]
     return sum(1 for t in toks if t in hay)
 
 
-def _recall_experiences(args: dict) -> dict:
+def _flat_haystack(entry: dict, fields: tuple[str, ...]) -> str:
+    """평평한 구조(insights 등)의 지정 필드를 이어붙인다."""
+    return " ".join(str(entry.get(f, "")) for f in fields)
+
+
+def _episode_haystack(e: dict) -> str:
+    """에피소드의 '잎 텍스트'만 이어붙인다 — 검색 대상 문자열.
+
+    [왜 dict 를 통째로 str() 하면 안 되는가]
+    sample_context/execution_summary/system_metrics 를 통째로 문자열화하면 값뿐
+    아니라 '키 이름'까지 건초더미에 들어간다. 그러면 예컨대 질의에 'power' 가 있을 때
+    params_used 의 키 'power' 가 모든 에피소드에 매칭돼, 시료와 무관한 토큰이 전원의
+    점수를 똑같이 올리고 순위 차이를 뭉갠다. 그래서 실제 잎 값만 골라 쓴다.
+    """
+    sc = e.get("sample_context") or {}
+    ex = e.get("execution_summary") or {}
+    return " ".join([
+        str(e.get("goal", "")),
+        " ".join(str(t) for t in (e.get("tags") or [])),
+        str(sc.get("sample", "")), str(sc.get("sample_name", "")),
+        str(sc.get("substrate", "")), str(sc.get("visual_features", "")),
+        str(ex.get("outcome", "")), str(e.get("lesson", "")),
+    ])
+
+
+# 회수 payload 예산 — 저장은 full, 회수는 이 상한 안에서 projection 한다.
+_RECALL_TEXT_CAP = 200      # 자유텍스트 필드 1개의 최대 문자수
+_RECALL_MAX_TOP_K = 5       # 모델이 큰 값을 넣어도 여기서 자른다
+
+
+def _cut(v, cap: int = _RECALL_TEXT_CAP) -> str:
+    """자유텍스트를 상한까지 자른다(넘치면 말줄임)."""
+    s = str(v or "").strip()
+    return (s[:cap] + "…") if len(s) > cap else s
+
+
+def _substrate_relation(now: str, past: str) -> str:
+    """현재 기판과 과거 기판의 관계 — 'match' | 'mismatch' | 'unknown'.
+
+    파장·대물렌즈가 고정인 이 장비에서 '과거 파라미터가 지금 통하는가'를 가르는
+    조건은 사실상 기판 하나다(Si 는 520cm-1 배경, 유리는 형광, 금속은 SERS 증강으로
+    안전 파워 자체가 달라진다). 한쪽이 부분 문자열이면 같은 기판으로 본다
+    ('Si' vs 'Si wafer'). 과도한 정규화는 오히려 거짓 일치를 만들어 하지 않는다.
+    """
+    n, p = str(now or "").strip().lower(), str(past or "").strip().lower()
+    if not n or not p:
+        return "unknown"
+    if n == p or n in p or p in n:
+        return "match"
+    return "mismatch"
+
+
+def _project_episode(e: dict, relation: str = "unknown") -> dict:
+    """에피소드를 '모델에게 돌려줄 형태'로 축약한다 — 저장 원본은 건드리지 않는다.
+
+    [무엇을 빼고 무엇을 남기는가]
+    빼는 것: tool_sequence(사이클 수에 비례해 최대 150개까지 길어지는 원시 목록 —
+             토큰 폭발의 주범이고, 내용은 trajectory 가 요약한다), tool_counts,
+             id/session_id(모델 판단에 기여 없음. 원본은 디스크에 그대로 있다), tags
+             (검색 핸들이라 매칭에는 쓰되 읽을 값어치는 낮다).
+    남기는 것: goal(무엇을 하려 했는가 — trajectory 는 '왜 이 순서로 했는가'라서
+              목표를 담는다는 보장이 없다. 같은 시료·기판이라도 목적이 다르면 맞는
+              파라미터가 다르므로 기판과 같은 급의 전이 조건이다),
+              substrate(조건 판정), n_measurements/dose_mj(1번에 성공인지 12번 만에
+              성공인지 — is_success 만으로는 구분되지 않는 신뢰도 신호).
+    """
+    sc = e.get("sample_context") or {}
+    ex = e.get("execution_summary") or {}
+    sm = e.get("system_metrics") or {}
+    is_success = bool(ex.get("is_success", False))
+    item = {
+        "ts": (e.get("ts") or "")[:10],                  # 날짜만
+        "goal": _cut(e.get("goal")),
+        "sample": sc.get("sample", ""),
+        "sample_name": sc.get("sample_name", ""),
+        "substrate": sc.get("substrate", ""),
+        "visual_features": _cut(sc.get("visual_features")),
+        "params_used": ex.get("params_used") or {},
+        "is_success": is_success,
+        "n_measurements": sm.get("n_measurements", 0),
+        "dose_mj": sm.get("dose_mj", 0),
+        "outcome": _cut(ex.get("outcome")),
+        "trajectory": _cut(ex.get("trajectory")),
+        "metrics": _cut(sm.get("metrics")),
+        "lesson": _cut(e.get("lesson")),
+    }
+
+    # ── 조건/품질 라벨 — '거르지 말고 표시한다' ────────────────────────────────
+    # 기판이 다르다고 결과에서 빼버리면 모델은 "관련 경험 없음"으로 읽고 아무 근거
+    # 없이 진행한다. 경고와 함께 보여주는 편이 낫다. 실패 경험도 같은 이유로 남기되,
+    # '따라할 파라미터'가 아니라 '피할 사례'임을 명시한다.
+    if relation == "mismatch":
+        item["condition_warning"] = (
+            f"DIFFERENT substrate (past: {item['substrate'] or 'unknown'}) - the parameters and "
+            "lesson below may NOT transfer to the current substrate.")
+    elif relation == "unknown":
+        item["condition_note"] = (
+            "Substrate not confirmed on one side - the parameters below are only valid for the "
+            "substrate they were measured on.")
+    if not is_success:
+        item["advisory"] = "FAILED run - treat as a case to AVOID, not as parameters to copy."
+    return item
+
+
+def _recall_experiences(ctx: dict, args: dict) -> dict:
     """recall_experiences 도구 구현 — episodic memory 읽기.
 
     과거 실험 경험 중 질의(시편/키워드)와 관련된 것을 top_k개 반환한다.
     비어 있으면 에러가 아니라 정상적인 "아직 축적된 경험 없음"으로 답한다 —
     그래야 모델이 재시도 루프에 빠지지 않고 스스로 판단하고 나중에 기록한다.
+    (session 스코프에서는 매 세션 비어 있는 것이 정상이다.)
+
+    [랭킹이 키워드 점수만으로는 안 되는 이유]
+    _match_score 의 상한은 질의 토큰 수라 "graphene" 한 단어면 관련 에피소드가 전부
+    동점이다. 파이썬 sorted 는 안정 정렬이라 동점이면 입력 순서(=오래된 것 먼저)가
+    유지되고, 실패한 실험도 성공한 실험과 같은 순위를 받는다. 그 상태에서
+    시스템 프롬프트는 "파라미터를 추측하지 말고 이 증거에서 정하라"고 지시하므로,
+    시료를 태웠던 실험의 파워가 '따라야 할 근거'로 제시될 수 있다. 그래서 정렬 키를
+    (키워드 점수 → 기판일치 → 성공 → 최신) 4단으로 둔다.
     """
     query = str(args.get("query", "")).strip()
-    top_k = int(args.get("top_k", 3) or 3)
-    episodes = _load_json_list(_EPISODIC_PATH)
+    top_k = max(1, min(int(args.get("top_k", 3) or 3), _RECALL_MAX_TOP_K))
+    now_substrate = str(args.get("substrate", "")).strip()
+    episodes = _load_json_list(_episodic_path(ctx))
     if not episodes:
         return {"ok": True, "results": [],
                 "note": "No past experiments accumulated yet. After finishing this measurement, "
                         "leave one with record_experience and it will be retrievable in future experiments."}
+
+    _rel = lambda e: _substrate_relation(
+        now_substrate, ((e.get("sample_context") or {}).get("substrate", "")))
+    _rel_rank = {"match": 1, "unknown": 0, "mismatch": -1}
+
     if not query:
         # 질의가 없으면 최근 경험을 반환한다(그래도 유용한 컨텍스트).
-        ranked = list(reversed(episodes))
+        picked = list(reversed(episodes))[:top_k]
     else:
-        scored = [(e, _match_score(query, e,
-                                   ("goal", "tags", "sample_context", "execution_summary", "lesson", "system_metrics", 
-                                    "sample", "sample_name", "visual_features",
-                                    "outcome", "lesson", "metrics")))
-                  for e in episodes]
-        ranked = [e for e, s in sorted(scored, key=lambda x: x[1], reverse=True) if s > 0]
-        if not ranked:
+        scored = []
+        for idx, e in enumerate(episodes):          # idx 가 곧 시간순 (append 저장)
+            s = _match_score(query, _episode_haystack(e))
+            if s <= 0:
+                continue
+            ok = 1 if (e.get("execution_summary") or {}).get("is_success") else 0
+            scored.append((s, _rel_rank[_rel(e)], ok, idx, e))
+        if not scored:
             return {"ok": True, "results": [],
                     "note": f"No past experience related to '{query}'. Decide on your own."}
-    return {"ok": True, "results": ranked[:top_k]}
+        # 점수 → 기판일치 → 성공 → 최신 순으로 내림차순.
+        picked = [t[-1] for t in sorted(scored, key=lambda x: x[:4], reverse=True)][:top_k]
+
+    return {"ok": True, "results": [_project_episode(e, _rel(e)) for e in picked]}
 
 
 def _record_experience(ctx: dict, args: dict) -> dict:
@@ -208,6 +391,9 @@ def _record_experience(ctx: dict, args: dict) -> dict:
         "sample_context": {
             "sample": sample,
             "sample_name": str(args.get("sample_name", "")).strip(),
+            # 파장·대물렌즈가 고정인 이 장비에서 '과거 조건이 지금 통하는가'를 가르는
+            # 사실상 유일한 변수. 회수 시 현재 기판과 대조해 일치/불일치를 라벨링한다.
+            "substrate": str(args.get("substrate", "")).strip(),
             "visual_features": str(args.get("visual_features", "")).strip(),
         },
         # ── 측정 조건·결과 ────────────────────────────────────────────────────
@@ -228,7 +414,7 @@ def _record_experience(ctx: dict, args: dict) -> dict:
         }
     }
     try:
-        _append_json_list(_EPISODIC_PATH, entry)
+        _append_json_list(_episodic_path(ctx), entry)
     except OSError as e:
         return {"ok": False, "error": f"Failed to save experience: {e}"}
     ctx["learned"] = True
@@ -255,7 +441,7 @@ def _record_insight(ctx: dict, args: dict) -> dict:
         "insight": insight,
     }
     try:
-        _append_json_list(_SEMANTIC_PATH, entry)
+        _append_json_list(_semantic_path(ctx), entry)
     except OSError as e:
         return {"ok": False, "error": f"Failed to save insight: {e}"}
     ctx["learned"] = True
@@ -263,7 +449,7 @@ def _record_insight(ctx: dict, args: dict) -> dict:
     return {"ok": True, "recorded": entry["id"], "topic": topic}
 
 
-def _recall_insights(args: dict) -> dict:
+def _recall_insights(ctx: dict, args: dict) -> dict:
     """recall_insights 도구 구현 — semantic memory(자기 생성분) 읽기.
 
     [이 도구가 추가된 이유 — write-only 갭 보완]
@@ -273,8 +459,8 @@ def _recall_insights(args: dict) -> dict:
     스스로 남긴 insights.json을 조회한다.
     """
     query = str(args.get("query", "")).strip()
-    top_k = int(args.get("top_k", 3) or 3)
-    insights = _load_json_list(_SEMANTIC_PATH)
+    top_k = max(1, min(int(args.get("top_k", 3) or 3), _RECALL_MAX_TOP_K))
+    insights = _load_json_list(_semantic_path(ctx))
     if not insights:
         return {"ok": True, "results": [],
                 "note": "No generalized knowledge (insights) accumulated yet. Leave one with "
@@ -282,8 +468,11 @@ def _recall_insights(args: dict) -> dict:
     if not query:
         ranked = list(reversed(insights))
     else:
-        scored = [(e, _match_score(query, e, ("topic", "insight"))) for e in insights]
-        ranked = [e for e, s in sorted(scored, key=lambda x: x[1], reverse=True) if s > 0]
+        # insights 는 (topic, insight) 두 필드뿐인 평평한 구조라 잎 텍스트 문제가 없다.
+        # 다만 동점 시 최신이 먼저 오도록 인덱스를 역순 키로 함께 쓴다.
+        scored = [(_match_score(query, _flat_haystack(e, ("topic", "insight"))), idx, e)
+                  for idx, e in enumerate(insights)]
+        ranked = [e for s, _, e in sorted(scored, key=lambda x: x[:2], reverse=True) if s > 0]
         if not ranked:
             return {"ok": True, "results": [],
                     "note": f"No generalized knowledge related to '{query}'. Decide on your own."}
@@ -341,14 +530,23 @@ _RECALL_TOOL_SCHEMA = {
             "[episodic memory read - planning] Query experiences from past similar experiments (parameters "
             "used, results, lessons). Calling it before planning a new measurement lets you reuse past "
             "know-how. It does not turn on the laser, so it is harmless, and this call does not end the cycle. "
-            "If there is no experience yet, an empty result is returned (normal)."
+            "If there is no experience yet, an empty result is returned (normal). "
+            "Results may carry a condition_warning (measured on a DIFFERENT substrate - parameters may not "
+            "transfer), a condition_note (substrate unconfirmed), or an advisory (FAILED run - a case to "
+            "avoid, not to copy). Read those labels before reusing any parameter."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {"type": "string",
                           "description": "Sample/situation keyword. e.g. 'graphene saturation', 'exosome SNR'."},
-                "top_k": {"type": "integer", "description": "Number of experiences to fetch (default 3)."},
+                "substrate": {"type": "string",
+                              "description": "Substrate of the CURRENT sample, if you know it "
+                                             "(e.g. 'Si', 'glass', 'Au'). Given this, past experiments on the "
+                                             "same substrate rank higher and ones on a different substrate are "
+                                             "flagged. Omit if unknown - nothing is filtered out either way."},
+                "top_k": {"type": "integer",
+                          "description": f"Number of experiences to fetch (default 3, max {_RECALL_MAX_TOP_K})."},
             },
             "required": ["query"],
         },
@@ -398,6 +596,12 @@ _RECORD_EXP_TOOL_SCHEMA = {
                 "sample_name": {"type": "string",
                                 "description": "Explicit sample name/label if the user gave one. "
                                                "e.g. 'Sample A', 'empty silicon wafer'. Leave empty if none was stated."},
+                "substrate": {"type": "string",
+                              "description": "Substrate the sample sits on, if known. e.g. 'Si', 'SiO2/Si', "
+                                             "'glass', 'quartz', 'Au'. This decides whether these parameters "
+                                             "transfer to a future experiment (Si adds a 520 cm-1 background, "
+                                             "glass adds fluorescence, metals can enhance via SERS so the safe "
+                                             "power is lower). Leave empty if you could not determine it."},
                 "visual_features": {"type": "string",
                                     "description": "Visual appearance from the microscope image. "
                                                    "e.g. 'dark ~20um flake near center on a shiny substrate, some folds visible'."},
@@ -753,9 +957,9 @@ def _call_tool(ctx: dict, name: str, args: dict) -> dict:
     if name == "search_knowledge_base":
         return _search_knowledge_base(args)
     if name == "recall_experiences":
-        return _recall_experiences(args)
+        return _recall_experiences(ctx, args)
     if name == "recall_insights":
-        return _recall_insights(args)
+        return _recall_insights(ctx, args)
     if name == "record_experience":
         return _record_experience(ctx, args)
     if name == "record_insight":
@@ -859,10 +1063,32 @@ def _update_working_memory(wm: WorkingMemory, name: str, args: dict,
     if action == "retrieval":
         hits = result.get("results", [])
         if hits:
+            # 세 retrieval 도구가 형태가 다른 항목을 돌려주므로 폴백 체인으로 뽑는다.
+            #   search_knowledge_base → {"title", "recommended_params", ...}   (평평)
+            #   recall_insights       → {"topic", "insight"}                   (평평)
+            #   recall_experiences    → {"sample", "params_used", ...}         (_project_episode)
+            # 예전에는 최상위에서 sample/params 를 찾았는데 에피소드는 이들이 중첩돼
+            # 있어 항상 "?" 로 찍혔다. render() 가 매 planning 프롬프트 맨 위에 싣는
+            # 요약이 에피소드에 대해 공란이 되어, 모델이 raw JSON 덤프에만 의존했다.
             for h in hits[:3]:
-                title = h.get("title") or h.get("sample") or h.get("topic") or "?"
-                rp = h.get("recommended_params") or h.get("params")
-                extra = f" recommended {rp}" if rp else ""
+                title = (h.get("title")            # KB
+                         or h.get("sample")        # 에피소드(projection 후 최상위)
+                         or h.get("topic")         # insights
+                         or "?")
+                if h.get("substrate"):
+                    title += f" on {h['substrate']}"
+                rp = h.get("recommended_params") or h.get("params_used") or h.get("params")
+                extra = f" params {rp}" if rp else ""
+                # 성공/실패와 조건 불일치는 요약 단계에서부터 눈에 띄어야 한다 —
+                # 그래야 모델이 raw 덤프를 안 읽어도 '따라할 것/피할 것'을 구분한다.
+                # 마커는 ASCII 로 — 이 문자열은 프롬프트 본문에 들어가고 콘솔에도
+                # 찍힐 수 있다(cp949 콘솔에서 비ASCII 는 인코딩 에러를 낸다).
+                if h.get("is_success") is True:
+                    extra += " [OK]"
+                elif h.get("is_success") is False:
+                    extra += " [FAILED-avoid]"
+                if h.get("condition_warning"):
+                    extra += " [different-substrate]"
                 wm.retrieved.append(f"[{name}] {title}{extra}")
         else:
             note = result.get("note", "no match")
