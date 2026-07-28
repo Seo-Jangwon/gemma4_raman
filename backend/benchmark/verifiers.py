@@ -32,6 +32,8 @@ def _dispatch(v: dict, tool_trace, pre_state, post_state) -> VerifyResult:
     try:
         if vtype == "tool_called":
             return _tool_called(v, tool_trace)
+        if vtype == "tool_called_any":
+            return _tool_called_any(v, tool_trace)
         if vtype == "tool_result_ok":
             return _tool_result_ok(v, tool_trace)
         if vtype == "tool_args":
@@ -117,6 +119,22 @@ def _tool_called(v: dict, tool_trace: list[dict]) -> VerifyResult:
         verifier_type="tool_called",
         detail=f"모든 필수 tool 호출됨: {v['tools']}",
     )
+
+
+def _tool_called_any(v: dict, tool_trace: list[dict]) -> VerifyResult:
+    """허용된 tool 중 하나라도 호출되면 통과.
+
+    같은 목표를 여러 툴 경로로 달성할 수 있을 때 공정하게 채점한다.
+    예: 3x3 그리드 측정은 run_grid_scan 한 번 또는 move_stage+acquire_spectrum
+        수동 루프 둘 다 정답이므로 tool_called_any=[run_grid_scan, acquire_spectrum].
+    """
+    tools = v["tools"]
+    hit = [t for t in tools if _calls_of(tool_trace, t)]
+    if hit:
+        return VerifyResult(passed=True, verifier_type="tool_called_any",
+                            detail=f"허용 tool 중 호출됨: {hit}")
+    return VerifyResult(passed=False, verifier_type="tool_called_any",
+                        detail=f"허용 tool 중 아무것도 호출되지 않음: {tools}")
 
 
 def _tool_result_ok(v: dict, tool_trace: list[dict]) -> VerifyResult:

@@ -16,6 +16,17 @@
         python -m backend.server
      그리고 프론트나 API로 각 장비 connect 를 완료해 둔다(레이저 측정 문항이 있으므로
      실제 레이저가 발사됨 — dose 회로차단기가 폭주만 막는다).
+
+     [평가 모드 환경변수 — 반드시 '서버를 띄울 때' 준다]
+     이 러너는 HTTP 클라이언트라 이미 떠 있는 서버의 에이전트 설정을 바꿀 수 없다.
+     아래는 서버 프로세스의 환경변수로만 적용된다.
+        RAMAN_SAFETY_PROMPT=0    '시료 미상 시 되묻기' 게이트 제거(순수 수행능력 평가)
+        RAMAN_EPISODIC_MEMORY=0  CoALA episodic memory(recall/record_experience) 제거
+                                 — 켜두면 experiences.json 이 문항을 넘어 축적돼 뒷 문항이
+                                   앞 문항 경험을 회수한다(문항 간 조건 오염 + 컨텍스트 압박).
+                                   semantic(KB/insights)은 유지되므로 episodic 만의 ablation.
+     예: RAMAN_SAFETY_PROMPT=0 RAMAN_EPISODIC_MEMORY=0 python -m backend.server
+     서버 기동 로그의 [info] 줄로 실제 적용 여부를 확인하고 벤치를 시작할 것.
   2) 입력 태스크 준비:
         python -m backend.benchmark.make_task_spectra   # 문항ID별 스펙트럼 생성 + tasks_raw 프롬프트에 파일명 주입
         python -m backend.benchmark.build_tasks          # tasks_raw.json + tasks_enriched.json -> tasks.json

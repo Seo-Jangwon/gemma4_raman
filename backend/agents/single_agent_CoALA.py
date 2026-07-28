@@ -18,6 +18,8 @@ tool_call을 그대로 실행하고, 장기기억이 없으며, 오케스트레�
                       (goal / retrieved / observations / messages).
   · Semantic memory : 읽기 search_kb(knowledge.py), 쓰기 record_insight → insights.json.
   · Episodic memory : 읽기 recall_experiences, 쓰기 record_experience → experiences.json.
+                      (RAMAN_EPISODIC_MEMORY=0 이면 이 두 액션과 관련 프롬프트를 제거한
+                       ablation 으로 뜬다 — 벤치마크의 문항 간 오염/컨텍스트 압박 회피용.)
   · Procedural memory: 이 파일의 코드 + TOOL_DISPATCH + LLM 가중치(설계자가 초기화).
   · Action space    : external=grounding(하드웨어), internal=retrieval/reasoning/learning.
   · Decision cycle  : planning(propose·evaluate·select) → execution → observe (논문 §4.6).
@@ -439,7 +441,28 @@ _RECORD_INSIGHT_TOOL_SCHEMA = {
     },
 }
 
-# 모델에 바인딩되는 도구 전체. RAMAN_TOOLS(하드웨어 41종) + internal 액션 5종.
+# ── 에피소딕 메모리 토글 (벤치마크 전용) ──────────────────────────────────────
+# RAMAN_EPISODIC_MEMORY=0 으로 서버를 띄우면 episodic memory(recall_experiences /
+# record_experience)를 액션 공간에서 빼고, 프롬프트의 episodic 지시문도 지운다.
+# semantic(search_knowledge_base / recall_insights / record_insight)은 그대로 두므로
+# "CoALA에서 episodic만 없앤" ablation 이 된다.
+#
+# [왜 러너가 아니라 서버 환경변수인가]
+# run_bench.py 는 공개 HTTP API만 쓰는 클라이언트라 이미 떠 있는 서버 프로세스의
+# 액션 공간에 개입할 수 없다. RAMAN_SAFETY_PROMPT 와 같은 이유·같은 방식이다.
+#
+# [왜 벤치에서 끄고 싶어지는가]
+# ① experiences.json 엔트리가 통째로 회수돼 프롬프트에 실린다(특히 tool_sequence 는
+#    사이클 수에 비례해 길어진다) → num_ctx 예산 압박.
+# ② 벤치는 문항마다 새 session_id 로 공정성을 맞추는데, episodic 은 세션을 넘어
+#    축적되므로 뒷 문항이 앞 문항 경험을 회수한다 → 문항 간 조건 오염.
+# 미설정이면 현행(켜짐) 그대로 — 기본 동작은 바뀌지 않는다.
+_EPISODIC_ENABLED = os.getenv("RAMAN_EPISODIC_MEMORY", "1").strip().lower() \
+    not in ("0", "false", "no", "off")
+_EPISODIC_TOOL_NAMES = {"recall_experiences", "record_experience"}
+
+# 모델에 바인딩되는 도구 전체. RAMAN_TOOLS(하드웨어 41종) + internal 액션 5종
+# (RAMAN_EPISODIC_MEMORY=0 이면 internal 3종).
 # server.py의 /api/agents/health가 len(ALL_TOOLS)를 읽는다.
 _INTERNAL_TOOLS = [
     _KB_TOOL_SCHEMA,
@@ -448,6 +471,9 @@ _INTERNAL_TOOLS = [
     _RECORD_EXP_TOOL_SCHEMA,
     _RECORD_INSIGHT_TOOL_SCHEMA,
 ]
+if not _EPISODIC_ENABLED:
+    _INTERNAL_TOOLS = [t for t in _INTERNAL_TOOLS
+                       if t["function"]["name"] not in _EPISODIC_TOOL_NAMES]
 # FILE_TOOLS는 AILA와 '같은 리스트 객체'를 import한 것이라 두 에이전트의 파일 분석
 # 능력이 구조적으로 어긋날 수 없다(backend/agents/file_tools.py 머리말 참고).
 ALL_TOOLS = RAMAN_TOOLS + FILE_TOOLS + _INTERNAL_TOOLS
@@ -572,6 +598,51 @@ if os.getenv("RAMAN_SAFETY_PROMPT", "1").strip().lower() in ("0", "false", "no",
               "(prompt changed?); the safety prompt was left intact.", file=_sys.stderr)
 
 
+# ── 에피소딕 메모리 프롬프트 정리 (_EPISODIC_ENABLED=False 일 때) ──────────────
+# 도구를 바인딩에서 빼는 것만으론 부족하다. 프롬프트가 계속 recall_experiences/
+# record_experience 를 지시하면 모델이 없는 도구를 호출하려 들어 사이클만 태운다.
+# 그래서 지시문 자체를 지우되, semantic 경로(KB/insights)는 문장에 그대로 남긴다.
+if not _EPISODIC_ENABLED:
+    _EPISODIC_PROMPT_EDITS = [
+        # [Memory structure] — episodic 줄 자체를 삭제
+        ("- Episodic memory: read past experiments with recall_experiences and write with "
+         "record_experience (know-how).\n",
+         ""),
+        # planning 액션 열거에서 제외
+        ("  · Planning actions (information gathering): search_knowledge_base, recall_experiences, "
+         "recall_insights,\n    list_uploaded_files, inspect_file.",
+         "  · Planning actions (information gathering): search_knowledge_base, recall_insights,\n"
+         "    list_uploaded_files, inspect_file."),
+        # execution(commit) 액션 열거에서 제외
+        ("recording tools (record_experience, record_insight).",
+         "recording tools (record_insight)."),
+        # 측정 절차 2 — 과거 경험 조회 지시 제거
+        ("2. Once you know the sample, first query past know-how with recall_experiences, accumulated "
+         "rules with\n   recall_insights, and protocols with search_knowledge_base to fill working "
+         "memory (planning actions).",
+         "2. Once you know the sample, first query accumulated rules with recall_insights and protocols "
+         "with\n   search_knowledge_base to fill working memory (planning actions)."),
+        # 측정 절차 6 — 경험 기록 지시를 insight 기록만 남기도록
+        ("6. When the measurement is done, before writing the report, record this experience with "
+         "record_experience\n   (and, if possible, generalized knowledge with record_insight) into "
+         "long-term memory - this is how know-how\n   accumulates for the next experiment.",
+         "6. When the measurement is done, before writing the report, record generalized knowledge with\n"
+         "   record_insight into long-term memory - this is how know-how accumulates for the next "
+         "experiment."),
+    ]
+    _missed = [old for old, _ in _EPISODIC_PROMPT_EDITS if old not in SYSTEM_PROMPT]
+    for _old, _new in _EPISODIC_PROMPT_EDITS:
+        SYSTEM_PROMPT = SYSTEM_PROMPT.replace(_old, _new)
+    # 런타임 출력은 ASCII 로만 — cp949/ascii 콘솔에서도 import 가 깨지지 않게.
+    print(f"[info] RAMAN_EPISODIC_MEMORY=0: CoALA episodic memory disabled "
+          f"({len(_INTERNAL_TOOLS)} internal tools, semantic memory intact).")
+    if _missed:
+        import sys as _sys
+        print(f"[warn] RAMAN_EPISODIC_MEMORY=0 but {len(_missed)} prompt passage(s) were not found "
+              "(prompt changed?); the tools are unbound but the prompt may still mention them.",
+              file=_sys.stderr)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # LLM 로딩 — AILA와 동일하게 ChatOllama만 사용 (다른 LLM 금지)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -672,6 +743,13 @@ def _call_tool(ctx: dict, name: str, args: dict) -> dict:
     유일한 비-LLM 판단은 조사량 회로차단기뿐(AILA와 동일)."""
 
     # ── internal actions (하드웨어 dispatch와 무관하게 항상 처리) ──────────────
+    # episodic 이 꺼져 있으면 스키마를 바인딩하지 않지만, 모델이 이름을 환각해
+    # 호출할 수는 있다. 저장소에 실제로 닿기 전에 여기서 막는다(이중 방어).
+    if not _EPISODIC_ENABLED and name in _EPISODIC_TOOL_NAMES:
+        return {"ok": False,
+                "error": f"{name} is not available in this configuration. "
+                         "Proceed without episodic memory."}
+
     if name == "search_knowledge_base":
         return _search_knowledge_base(args)
     if name == "recall_experiences":
