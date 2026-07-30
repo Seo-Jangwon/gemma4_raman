@@ -101,15 +101,42 @@ _INSPECT_FILE_SCHEMA = {
     },
 }
 
+_LIST_SESSION_ARTIFACTS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "list_session_artifacts",
+        "description": (
+            "List the files YOU have produced in this session (processed spectra you saved with "
+            "save_result or save_spectrum, and figures from run_analysis), in the order you saved them. "
+            "Each entry has a data/-relative `path` you can read back with load_spectrum('<path>'). "
+            "Use it when a task builds on something you saved earlier in this conversation, when you "
+            "need to confirm a save actually happened, or when you must report where your output went. "
+            "It touches no hardware and has no side effects."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "description": ("Filter by kind: 'spectra' for saved spectra, 'figure' for plots. "
+                                    "Omit to list everything."),
+                    "enum": ["spectra", "figure", "measurement"],
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
 # 두 에이전트가 ALL_TOOLS 에 그대로 이어 붙이는 리스트.
 # run_analysis 는 여기 없다 — 스키마는 이미 RAMAN_TOOLS 에 있고 실행만 가로채기 때문.
-FILE_TOOLS = [_LIST_FILES_SCHEMA, _INSPECT_FILE_SCHEMA]
+FILE_TOOLS = [_LIST_FILES_SCHEMA, _INSPECT_FILE_SCHEMA, _LIST_SESSION_ARTIFACTS_SCHEMA]
 
 # CoALA 전용: 부수효과 없는 '정보 수집'이라 planning(retrieval) 액션으로 분류돼야 한다.
 # 이 집합에 없으면 사이클을 닫는 실행(commit) 액션이 되어, 파일 한 번 들여다볼 때마다
 # 의사결정 사이클을 하나씩 소모한다. run_analysis 는 결과물(그림)을 만드는
 # 실행 액션이므로 여기 넣지 않는다.
-FILE_RETRIEVAL = {"list_uploaded_files", "inspect_file"}
+FILE_RETRIEVAL = {"list_uploaded_files", "inspect_file", "list_session_artifacts"}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -183,9 +210,29 @@ def _t_run_analysis(args: dict) -> dict:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
+def _t_list_session_artifacts(args: dict) -> dict:
+    """이 세션에서 에이전트가 만든 산출물 목록(run_store.manifest 조회)."""
+    from backend.agents import run_store
+
+    kind = (args.get("kind") or "").strip() or None
+    cur = run_store.current()
+    try:
+        arts = run_store.list_artifacts(kind)
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    if not arts:
+        # 빈 목록은 에러가 아니다 — '아직 아무것도 저장하지 않았다'는 정상 상태.
+        return {"ok": True, "session": cur["label"], "artifacts": [],
+                "note": ("You have not saved anything in this session yet. "
+                         "Save computed spectra with save_result inside run_analysis.")}
+    return {"ok": True, "session": cur["label"], "session_dir": cur["rel_dir"],
+            "count": len(arts), "artifacts": arts}
+
+
 # 이름 → 실행 함수. 각 에이전트의 _call_tool 이 하드웨어 가드보다 '먼저' 이 dict 를 본다.
 FILE_DISPATCH = {
-    "list_uploaded_files": _t_list_uploaded_files,
-    "inspect_file":        _t_inspect_file,
-    "run_analysis":        _t_run_analysis,
+    "list_uploaded_files":     _t_list_uploaded_files,
+    "inspect_file":            _t_inspect_file,
+    "run_analysis":            _t_run_analysis,
+    "list_session_artifacts":  _t_list_session_artifacts,
 }

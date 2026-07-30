@@ -542,10 +542,33 @@ RAMAN_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_hardware_status",
+            "description": (
+                "Report which hardware components (stage, laser, ccd, camera) are currently connected, "
+                "and for the connected ones whether they actually respond. Read `summary` first. "
+                "Call this FIRST whenever a hardware tool fails, before trying to fix anything - it tells "
+                "you whether one device is down or several, which decides what is even worth attempting. "
+                "It touches nothing and fires no laser, so it is always safe to call."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "reconnect_hardware",
             "description": (
-                "Disconnect and re-initialize a hardware component when it is unresponsive or stuck. "
+                "Release and re-initialize a hardware component that is unresponsive or stuck. "
                 "component: 'stage' | 'ccd' | 'camera' | 'laser' | 'all'. "
+                "Call get_hardware_status first to see what is actually down. "
+                "Read the returned `errors` text carefully - it distinguishes two very different cases. "
+                "(a) 'resource is still held by this process': a process-level lock that NO tool can clear. "
+                "Calling this tool again will not help; the server must be restarted by a human. Do not retry - "
+                "carry on without that component and say so in your final answer. "
+                "(b) 're-initialization failed' after a successful release: a device-side problem (power, cable, "
+                "driver, or another program holding the device). Retrying once is reasonable; beyond that, proceed "
+                "without the component and state the limitation. "
+                "Never call this repeatedly in a loop - it cannot fix either case by repetition. "
                 "WARNING: reconnecting the 'ccd' re-runs cooling and can block for minutes until -40 C stabilizes."
             ),
             "parameters": {
@@ -783,9 +806,12 @@ RAMAN_TOOLS = [
         "function": {
             "name": "save_spectrum",
             "description": (
-                "Save a spectrum intensity array to a CSV file. "
-                "If raman_shift is also passed, calibration information is included. "
-                "The file is saved to the <project root>/data/ directory."
+                "Save a spectrum intensity array you already hold to a CSV file, into this session's "
+                "own folder. If raman_shift is also passed, calibration information is included. "
+                "Returns `path`, a data/-relative path you can read back later with load_spectrum. "
+                "Prefer save_result inside run_analysis when the array was COMPUTED there - passing a "
+                "long array through this tool's arguments wastes the context window and loses precision. "
+                "Use this tool for arrays you already have in hand (e.g. straight from acquire_spectrum)."
             ),
             "parameters": {
                 "type": "object",
@@ -797,7 +823,11 @@ RAMAN_TOOLS = [
                     },
                     "filename": {
                         "type": "string",
-                        "description": "File name to save (the .csv extension is optional). e.g. 'polystyrene_01'",
+                        "description": (
+                            "Short descriptive label for this result, NOT a path - e.g. 'polystyrene_01' or "
+                            "'despiked'. The session folder and an ordering number are added automatically, "
+                            "so do not put directories or the task id in it."
+                        ),
                     },
                     "raman_shift": {
                         "type": "array",
@@ -996,8 +1026,10 @@ RAMAN_TOOLS = [
             "name": "list_results",
             "description": (
                 "Query the list of measurement results auto-saved by acquire_spectrum. "
-                "Returns each item's base (file identifier), title, timestamp, and meta (coordinates, etc.). "
-                "Get the base to pass to combine_spectra / aggregate_spectra_csv / bundle_results here."
+                "Returns each item's base (file identifier), session, title, timestamp, and meta (coordinates, etc.). "
+                "Get the base to pass to combine_spectra / aggregate_spectra_csv / bundle_results here. "
+                "By default this lists only the measurements from YOUR current session - your own work, "
+                "not other sessions'. Files live in data/results/<date>/<your session>/."
             ),
             "parameters": {
                 "type": "object",
@@ -1005,6 +1037,15 @@ RAMAN_TOOLS = [
                     "date": {
                         "type": "string",
                         "description": "Date to query 'YYYY-MM-DD'. If omitted, today.",
+                    },
+                    "scope": {
+                        "type": "string", "enum": ["session", "all"],
+                        "description": (
+                            "Which measurements to consider. 'session' (default) = only the ones "
+                            "measured in THIS session, which is almost always what you want. "
+                            "'all' = every session saved that day; use it only when the request is "
+                            "explicitly about combining work from earlier, separate sessions."
+                        ),
                     },
                 },
                 "required": [],
@@ -1029,6 +1070,15 @@ RAMAN_TOOLS = [
                         "description": "List of measurement bases to combine (check with list_results). If omitted, the whole date.",
                     },
                     "max_cols": {"type": "integer", "description": "Number of grid columns. Default 4.", "minimum": 1},
+                    "scope": {
+                        "type": "string", "enum": ["session", "all"],
+                        "description": (
+                            "Which measurements to consider. 'session' (default) = only the ones "
+                            "measured in THIS session, which is almost always what you want. "
+                            "'all' = every session saved that day; use it only when the request is "
+                            "explicitly about combining work from earlier, separate sessions."
+                        ),
+                    },
                 },
                 "required": [],
             },
@@ -1048,7 +1098,16 @@ RAMAN_TOOLS = [
                     "date": {"type": "string", "description": "Target date 'YYYY-MM-DD'. If omitted, today."},
                     "names": {
                         "type": "array", "items": {"type": "string"},
-                        "description": "List of measurement bases to organize. If omitted, the whole date.",
+                        "description": "List of measurement bases to organize. If omitted, all of yours from that date.",
+                    },
+                    "scope": {
+                        "type": "string", "enum": ["session", "all"],
+                        "description": (
+                            "Which measurements to consider. 'session' (default) = only the ones "
+                            "measured in THIS session, which is almost always what you want. "
+                            "'all' = every session saved that day; use it only when the request is "
+                            "explicitly about combining work from earlier, separate sessions."
+                        ),
                     },
                 },
                 "required": [],
@@ -1109,8 +1168,20 @@ RAMAN_TOOLS = [
                 "image_extent ([xmin,xmax,ymin,ymax] stage mm|None) are also injected - "
                 "after ax.imshow(microscope_image, extent=image_extent), overlaying peaks at the measurement (x,y) "
                 "makes a peak map on top of the microscope image. "
-                "A figure created with plt is auto-saved and shown in the chat. Numeric results are observed if you print() them. "
-                "Constraints (safety): no hardware (laser/stage/CCD) control, no file/network access, "
+                "A figure created with plt is auto-saved and shown in the chat. "
+                "Small numeric results are observed if you print() them. "
+                "To SAVE a computed spectrum, call the injected hook "
+                "save_result(filename, intensity, raman_shift=None, wavelength_nm=None, metadata=None) "
+                "inside your code - it writes data/<filename>.csv at full precision and returns the path, "
+                "which also comes back in the tool result as saved_files. "
+                "This is the correct way to persist a processed spectrum (baseline-corrected, "
+                "spike-removed, normalized, smoothed): do it in the same run_analysis call that computes it. "
+                "Do NOT print an array and then pass it to save_spectrum - printing thousands of numbers "
+                "overflows the context window and loses precision; use save_result and print only a short "
+                "summary (how many points, how many spikes removed, where the peaks are). "
+                "stdout is truncated past 4000 characters. "
+                "Constraints (safety): no hardware (laser/stage/CCD) control, no network access, "
+                "no file access other than save_result and plt figures, "
                 "imports limited to computation libraries such as numpy/scipy/matplotlib/math. "
                 "A 'measurement' like a 3x3 scan is done first with move_stage + acquire_spectrum, not this tool, "
                 "and the saved result is analyzed/visualized here. On failure, read error/trace, fix the code, and call again."
@@ -1120,7 +1191,13 @@ RAMAN_TOOLS = [
                 "properties": {
                     "code": {
                         "type": "string",
-                        "description": "Python analysis code to run. Use spectra, np, plt directly. e.g. compute each spectrum's peak intensity and draw a peak map as an (x,y) scatter.",
+                        "description": (
+                            "Python analysis code to run. Use spectra, np, plt directly. "
+                            "e.g. compute each spectrum's peak intensity and draw a peak map as an (x,y) scatter. "
+                            "If the task asks you to save a computed spectrum, call "
+                            "save_result('name', corrected_intensity, raman_shift=x) at the end of this code "
+                            "rather than printing the array."
+                        ),
                     },
                     "date": {"type": "string", "description": "Measurement date to analyze 'YYYY-MM-DD'. If omitted, today."},
                     "names": {
@@ -1154,7 +1231,15 @@ RAMAN_TOOLS = [
                     "date": {"type": "string", "description": "Target date 'YYYY-MM-DD'. If omitted, today."},
                     "names": {
                         "type": "array", "items": {"type": "string"},
-                        "description": "List of measurement bases to bundle. If omitted, the whole date.",
+                        "description": "List of measurement bases to bundle. If omitted, all of yours from that date.",
+                    },
+                    "scope": {
+                        "type": "string", "enum": ["session", "all"],
+                        "description": (
+                            "Which measurements to bundle. 'session' (default) = only the ones "
+                            "measured in THIS session. 'all' = every session saved that day; use it "
+                            "only when the request is explicitly about earlier, separate sessions."
+                        ),
                     },
                 },
                 "required": [],

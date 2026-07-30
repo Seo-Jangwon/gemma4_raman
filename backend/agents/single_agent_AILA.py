@@ -70,6 +70,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from backend.agents import run_store
 from backend.agents.detail_log import new_turn
 from backend.agents.file_tools import FILE_DISPATCH, FILE_TOOLS
 from backend.agents.knowledge import search_kb
@@ -91,12 +92,23 @@ _MAX_AGENT_STEPS = 100   # LLM 무한 루프 방지
 # 스키마)을 잘라내 모델이 빈 응답을 낸다("Failed to generate a response."의 실제 원인).
 # 5×5 그리드처럼 한 턴에 수십 개 도구 결과가 쌓여도(≈9k 토큰) 여유가 남도록 넉넉히 잡는다.
 # (원격 GPU 32GB VRAM 기준. VRAM이 부족해 OOM이면 이 값을 낮출 것.)
-_NUM_CTX = 32768
+_NUM_CTX = 100000
 
 # 조사량 하드 상한 (대화 한 턴 기준, mJ 단위 근사치 = power_pct * exposure_s * 0.01의 누계).
 # 별도 위치별 추적이나 시료별 클램프 없이 "이번 턴에 쏜 총량"만 본다 —
 # 유일한 목적은 폭주(무한 재시도로 계속 고출력 조사)를 막는 최후의 회로차단기.
 _MAX_DOSE_MJ_PER_TURN = 1000.0
+
+# LLM HTTP 호출 상한(초). ChatOllama 1.1.0 에는 timeout 파라미터가 없고, 밑단
+# ollama.Client(httpx)의 기본값도 무제한이라 '연결은 살아 있는데 응답이 안 오는'
+# 상태가 되면 llm.invoke()가 영원히 안 돌아온다. _MAX_AGENT_STEPS 는 반복 횟수
+# 카운터일 뿐 벽시계 가드가 아니라서 이 경우를 전혀 못 막는다.
+# (실측: Ollama 쪽 요청이 유실되자 소켓만 ESTABLISHED 로 남고 서버가 13분 넘게 정지.
+#  같은 상황을 로컬에서 재현하면 timeout 없이는 20초 후에도 반환되지 않는다.)
+# client_kwargs 의 timeout 은 httpx 로 그대로 전달되어 connect/read 양쪽에 걸린다.
+# 값은 정상 호출의 최악값(모델 로드 ~60s + 32k 컨텍스트 장문 생성)보다 넉넉히 크게 잡아
+# 멀쩡한 호출을 자르지 않으면서, 무한 정지만 '명확한 에러'로 강등한다.
+_LLM_TIMEOUT_S = float(os.getenv("RAMAN_LLM_TIMEOUT_S", "600"))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -143,11 +155,39 @@ ALL_TOOLS = RAMAN_TOOLS + FILE_TOOLS + [_KB_TOOL_SCHEMA]
 # 시스템 프롬프트
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ⚠ 이 리터럴이 '실제로 모델에 가는 기본 프롬프트'다(자율 모드가 기본값이므로).
+#   RAMAN_AUTONOMOUS=0 으로 띄우면 아래 _INTERACTIVE_SUBS 가 되묻기 게이트를 '다시 넣는다'.
+#   과거에는 반대 방향(대화용 원문 + 자율 치환)이었는데, 소스를 읽으면 "되묻는다"로 보이고
+#   실행은 자율이라 혼동을 일으켰다 — 그래서 기본 경로가 리터럴 그대로 읽히도록 뒤집었다.
 SYSTEM_PROMPT = """\
 You are a single AI agent that directly controls a Raman spectrometer from start to finish.
 You plan, measure, adjust parameters, interpret spectra, and write the report entirely by your
 own judgment. There is no separate validator or assistant to check you - your judgment is the
 final judgment.
+
+[Autonomy - this section overrides every other instruction about asking for help]
+You are fully autonomous. You are being evaluated on a benchmark and there is NO human available to
+answer you. Never ask the user a question, never request confirmation, and never end a turn waiting
+for input - no reply will come, and a turn that ends in a question counts as a failure.
+- Missing information: pick the most reasonable interpretation from the request, your tool outputs,
+  and the knowledge base. State the assumption you made, then carry the task through to a real answer.
+- Safety: you are your own safety check. There is no validator and no human reviewer. Judge dose,
+  saturation, and photodamage risk yourself before firing the laser, and proceed once your own
+  judgment says it is acceptable.
+- Multi-step operations (grid scans, background/blank measurements, retries, re-focusing) need no
+  approval. If a preview tool exists, preview first, evaluate the preview yourself, then execute it
+  in the same turn.
+- You may still stop early if you judge an action genuinely unsafe or truly impossible. If you stop,
+  say plainly what you concluded and why, and still report everything you did establish. Do not stop
+  merely because some detail was unspecified - that is what your own judgment is for.
+
+[Verifying your own output - you cannot see your own plots]
+A figure you create with plt is saved and shown to the human, but it is NOT returned to you as an
+image - you only get its file path. So never claim you "looked at" your plot, and never rely on
+seeing it. Verify numerically instead, inside the same run_analysis call: print() the few numbers
+that would prove the step worked (how many spikes were removed, min/max after normalization, peak
+positions, residual size). If a result looks wrong, fix the code and call run_analysis again.
+The only images you actually see are those from analyze_microscope_image and preview_grid_scan.
 
 [Conversation-type decision - do this first on every message]
 - Greeting / small talk / questions about system capabilities: do not call tools; answer immediately in English.
@@ -170,6 +210,9 @@ final judgment.
 3. Then call run_analysis with file_ids to compute on the full data - peak detection, baseline
    correction, normalization, plotting, or comparison against spectra you measured. Inside the code
    the file is available as files[i]["table"]["<column name>"].
+   If the task asks you to save a processed spectrum, save it inside that same run_analysis call with
+   save_result(filename, intensity, raman_shift=...) - never print the array and feed it to
+   save_spectrum, which overflows the context and loses precision. print() only short summaries.
 4. Report both kinds of content separately: the spectral information you extracted (peak positions
    and assignments, SNR, etc.) and any other information the file carried (measurement conditions,
    sample identity, anything that changes how the spectrum should be read).
@@ -178,7 +221,8 @@ final judgment.
 
 [Measurement procedure - proceed step by step, using your own judgment]
 1. If you do not know the sample type, substrate, or target location (coordinates or appearance),
-   ask the user first before calling any tool. Do not turn the laser on without identifying the sample.
+   infer it from the request, the knowledge base, and your observation tools (analyze_microscope_image,
+   capture_camera_frame), then proceed on your own judgment and state the assumptions you made.
 2. Once you know the sample type, use search_knowledge_base to look up the measurement protocol and
    recommended parameters (laser power, exposure time, main peak positions) for that sample. Do not
    guess parameters - base them on the lookup result; if the sample is not in the KB, decide yourself
@@ -202,37 +246,88 @@ final judgment.
    6.6. Problems encountered during the process and how they were handled
    6.7. Conclusion and recommendations
 
+[Hardware failure recovery - follow this ladder, do not improvise loops]
+1. Diagnose before fixing: call get_hardware_status. It tells you which components are down and
+   whether the connected ones actually respond. Never guess from a single failed tool call.
+2. Try recovery ONCE for the failed component: reconnect_hardware(component='<that one>'). Reconnect
+   only what is broken - never 'all' as a reflex, because reconnecting the ccd re-runs cooling and
+   blocks for minutes.
+3. Read the error text and classify it, because the two cases need opposite responses:
+   - "resource is still held by this process" -> a process-level lock. No tool can clear it and
+     retrying is useless. Stop trying immediately.
+   - "re-initialization failed" after a successful release -> device side (power, cable, driver, or
+     another program holds it). At most one more attempt, then stop.
+4. Then continue the task with whatever hardware still works. A missing camera does not block a stage
+   move; a dead laser does block any acquisition. Do as much of the task as the working hardware allows.
+5. Report it: say which component failed, what you tried, which case it was, and what part of the task
+   you could not complete. An honest partial result is worth far more than a retry loop.
+Never call the same recovery tool more than twice in a turn. If it did not work twice, it will not work
+a third time, and burning steps on it costs you the rest of the task.
+
 [Safety rules - must be followed]
-- If a tool returns an error or a safety block is triggered, immediately report the situation to the
-  user as is. Do not bypass it or force a retry.
-- Do not guess what you do not know - verify with a tool or ask the user.
+- If a tool returns an error or a safety block is triggered, do not bypass it and do not hammer it with
+  retries. Record what happened, decide yourself whether an alternative route exists, take it if so,
+  and state the block and your decision in the final report.
+- Do not guess blindly - verify with a tool first. If no tool can settle it, choose the most defensible
+  option, say so explicitly, and continue.
 - Stage coordinate units: mm (X: 0-75.3, Y: 0-50.2, Z: -1.0-1.0; origin at x=37.8759, y=25.24805, z n/a)
 """
 
 
-# ── 안전 프롬프트 토글 (벤치마크 전용) ──────────────────────────────────────────
-# RAMAN_SAFETY_PROMPT=0 으로 서버를 띄우면, "시료가 미상이면 사용자에게 먼저 되묻고
-# 시료 식별 없이는 레이저를 켜지 말라"는 게이트를 프롬프트에서 제거해, 에이전트의
-# '순수 수행' 동작(되묻지 않고 실제로 얼마나 잘 수행하는가)을 평가한다.
-# 미설정/다른 값이면 현행(안전) 프롬프트 그대로 — 기본 동작은 바뀌지 않는다.
-# SYSTEM_PROMPT 는 import 시 1회 확정되므로, 조건을 바꾸려면 서버를 다시 띄운다.
-if os.getenv("RAMAN_SAFETY_PROMPT", "1").strip().lower() in ("0", "false", "no", "off"):
-    _SAFE_GATE = (
-        "1. If you do not know the sample type, substrate, or target location (coordinates or appearance),\n"
-        "   ask the user first before calling any tool. Do not turn the laser on without identifying the sample."
-    )
-    _NO_GATE = (
-        "1. If you do not know the sample type, substrate, or target location (coordinates or appearance),\n"
-        "   infer it as best you can from the request and your observation tools, then proceed and state your assumptions."
-    )
-    if _SAFE_GATE in SYSTEM_PROMPT:
-        SYSTEM_PROMPT = SYSTEM_PROMPT.replace(_SAFE_GATE, _NO_GATE)
-        # 런타임 출력은 ASCII 로만 — cp949/ascii 콘솔에서도 import 가 깨지지 않게.
-        print("[info] RAMAN_SAFETY_PROMPT=0: AILA safety clarification gate removed (raw-performance eval mode).")
-    else:
+# ── 대화(사람 개입) 모드로 되돌리는 토글 ────────────────────────────────────────
+# [기본값은 자율]
+# 벤치마크는 사람이 답을 줄 수 없는 환경이다. 되묻고 턴을 끝내면 그 문항은 '수행 실패'로
+# 채점되므로, 위 SYSTEM_PROMPT 리터럴 자체를 자율판으로 두었다. 그리드 스캔 사람-승인
+# 인터록도 같은 이유로 기본 OFF 다(stream_experiment 의 _grid_gate_begin_turn 참고).
+#
+# [RAMAN_AUTONOMOUS=0 이면] 아래 치환이 되묻기 게이트를 '다시 넣어' 실험실 대화용
+# 동작으로 복귀시킨다. 즉 치환 방향이 과거와 반대다 — 기본 경로(자율)가 리터럴 그대로
+# 읽히는 쪽이 오해가 없기 때문. 실제로 예전 구조에서 "소스엔 되묻기가 있는데 자율로
+# 도는 게 맞나"라는 혼동이 발생했다.
+#
+# [치환 방식] 문장 치환은 대상 문장이 바뀌면 조용히 무력화된다 — 과거 실제로 그랬다.
+# 그래서 각 치환의 성공/실패를 개별로 확인하고, 하나라도 못 찾으면 경고를 낸다.
+_AUTONOMOUS = os.getenv("RAMAN_AUTONOMOUS", "1").strip().lower() not in ("0", "false", "no", "off")
+
+if not _AUTONOMOUS:
+    # [Autonomy] 섹션은 '치환'이 아니라 통째로 잘라낸다 — 헤더만 바꿔 두면 "Never ask the
+    # user a question" 같은 본문이 그대로 남아 대화 모드와 정면으로 모순된다.
+    # 섹션 시작부터 '다음 섹션 헤더([...] 로 시작하는 줄)' 직전까지를 제거한다.
+    _a = SYSTEM_PROMPT.find("[Autonomy -")
+    if _a != -1:
+        _nxt = SYSTEM_PROMPT.find("\n[", _a + 1)
+        SYSTEM_PROMPT = (SYSTEM_PROMPT[:_a] + SYSTEM_PROMPT[_nxt + 1:]) if _nxt != -1 else SYSTEM_PROMPT[:_a]
+
+    # (자율판, 대화판) 쌍. 자율판은 SYSTEM_PROMPT 에 '정확히' 존재해야 한다.
+    _INTERACTIVE_SUBS = [
+        # 측정 절차 1번 — 시료 미상 시 되묻기 게이트 복원
+        ("1. If you do not know the sample type, substrate, or target location (coordinates or appearance),\n"
+         "   infer it from the request, the knowledge base, and your observation tools (analyze_microscope_image,\n"
+         "   capture_camera_frame), then proceed on your own judgment and state the assumptions you made.",
+         "1. If you do not know the sample type, substrate, or target location (coordinates or appearance),\n"
+         "   ask the user first before calling any tool. Do not turn the laser on without identifying the sample."),
+        # 안전 규칙 — 사람에게 넘기는 경로 복원
+        ("- If a tool returns an error or a safety block is triggered, do not bypass it and do not hammer it with\n"
+         "  retries. Record what happened, decide yourself whether an alternative route exists, take it if so,\n"
+         "  and state the block and your decision in the final report.",
+         "- If a tool returns an error or a safety block is triggered, immediately report the situation to the\n"
+         "  user as is. Do not bypass it or force a retry."),
+        ("- Do not guess blindly - verify with a tool first. If no tool can settle it, choose the most defensible\n"
+         "  option, say so explicitly, and continue.",
+         "- Do not guess what you do not know - verify with a tool or ask the user."),
+    ]
+    _missed = [src.splitlines()[0][:60] for src, _ in _INTERACTIVE_SUBS if src not in SYSTEM_PROMPT]
+    for _src, _dst in _INTERACTIVE_SUBS:
+        SYSTEM_PROMPT = SYSTEM_PROMPT.replace(_src, _dst)
+    # 런타임 출력은 ASCII 로만 — cp949/ascii 콘솔에서도 import 가 깨지지 않게.
+    print(f"[info] RAMAN_AUTONOMOUS=0: AILA interactive mode "
+          f"({len(_INTERACTIVE_SUBS) - len(_missed)}/{len(_INTERACTIVE_SUBS)} ask-the-user gates restored).")
+    if _missed:
         import sys as _sys
-        print("[warn] RAMAN_SAFETY_PROMPT=0 but the safety gate text was not found "
-              "(prompt changed?); the safety prompt was left intact.", file=_sys.stderr)
+        print("[warn] AILA interactive mode: these texts were not found (prompt edited?): "
+              + "; ".join(_missed), file=_sys.stderr)
+else:
+    print("[info] AILA autonomous mode (default). Set RAMAN_AUTONOMOUS=0 for interactive/ask-the-user behavior.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -268,6 +363,7 @@ def _get_llm():
             model=OLLAMA_MODEL,
             base_url=OLLAMA_HOST,
             num_ctx=_NUM_CTX,
+            client_kwargs={"timeout": _LLM_TIMEOUT_S},
         ).bind_tools(ALL_TOOLS)
     except Exception:
         return None
@@ -297,7 +393,10 @@ def _get_dispatch():
 # "ok인데 목록이 없다"며 같은 도구를 수십 번 재호출한다(실측: 업로드 62개일 때 25회).
 # 항목당 4필드짜리 짧은 dict라 통째로 실어도 토큰 부담은 작다 —
 # 이 필터가 원래 막으려던 건 수천 점짜리 숫자 배열이다.
-_SLIM_KEEP_KEYS = {"files"}
+# artifacts/saved_files: list_session_artifacts 와 run_analysis 의 산출물 목록.
+# 항목당 몇 필드짜리 짧은 dict 이고, 버리면 모델이 "저장은 됐다는데 경로가 없다"며
+# 같은 저장을 반복한다(files 를 예외로 둔 것과 정확히 같은 이유).
+_SLIM_KEEP_KEYS = {"files", "artifacts", "saved_files"}
 
 
 def _slim(result):
@@ -468,8 +567,22 @@ def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
         try:
             # 시스템 프롬프트는 세션 히스토리에 남기지 않고 매 호출마다 새로 붙인다 —
             # history에 넣으면 턴마다 중복 누적된다.
-            ai_msg: AIMessage = llm.invoke([SystemMessage(content=SYSTEM_PROMPT)] + messages)
+            # 세션 요약(내 세션 라벨 + 지금까지 저장한 산출물)도 매 호출마다 새로 만든다.
+            # 히스토리에 넣으면 안 되는 이유: 산출물이 늘어날 때마다 낡은 목록이 계속
+            # 쌓여 모델이 이미 지난 상태를 현재로 오인한다. 매번 '현재 상태'만 실어준다.
+            _sess = run_store.summary_for_prompt()
+            _sys_text = SYSTEM_PROMPT + (f"\n\n[This session]\n{_sess}\n" if _sess else "")
+            ai_msg: AIMessage = llm.invoke([SystemMessage(content=_sys_text)] + messages)
         except Exception as e:
+            # 타임아웃은 "모델이 틀렸다"가 아니라 "응답이 아예 안 왔다"이므로 구분해서
+            # 알린다 — 로그만 보고 Ollama/네트워크 쪽을 봐야 한다는 걸 알 수 있게.
+            if "timeout" in type(e).__name__.lower() or "timeout" in str(e).lower():
+                yield {"type": "error",
+                       "detail": (f"No response from the LLM within {_LLM_TIMEOUT_S:.0f}s "
+                                  f"({type(e).__name__}). The Ollama server may have dropped the "
+                                  f"request or be overloaded - check that {OLLAMA_HOST} is healthy "
+                                  f"and retry.")}
+                return
             yield {"type": "error", "detail": f"LLM call failed: {type(e).__name__}: {e}"}
             return
 
@@ -641,13 +754,19 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
     # 세션이 'nosession' 파일 하나로 뭉치지 않는다. run_stream 소비 전에 만들어 첫
     # tool 이벤트부터 관측한다. 로깅 실패는 detail_log가 내부에서 삼키므로 여기선 그냥 먹인다.
     turn = new_turn("AILA", sid, user_message)
+    # 이 턴의 산출물이 갈 세션 폴더를 연다(data/runs/<sid>/). 같은 sid 로 다시 불러도
+    # 같은 폴더를 이어 쓰므로 멀티턴 세션의 산출물이 한곳에 모인다.
+    run_store.begin_session(sid, "AILA")
 
     try:
         llm = _get_llm()
         history = _SESSIONS.get(sid, [])
-        # 새 사용자 턴 시작 — 직전 턴의 그리드 미리보기가 있으면 이제 사람이 승인할 수
-        # 있는 턴이므로 게이트를 armed로 올린다(대화 경로라 게이트 ON).
-        _grid_gate_begin_turn(interactive=True)
+        # 새 사용자 턴 시작 — 그리드 사람-승인 게이트를 이번 턴 상태로 맞춘다.
+        # 자율 모드(_AUTONOMOUS, 기본 ON)에서는 대화 경로에서도 게이트를 끈다:
+        # "그리드 스캔도 승인 없이 스스로" 라는 자율 정책과 코드 인터록이 어긋나면,
+        # 모델은 프롬프트대로 실행하려 하는데 도구가 거부해 턴이 헛돈다.
+        # RAMAN_AUTONOMOUS=0 이면 종전처럼 미리보기→사람 승인→실행 2턴 흐름으로 복귀한다.
+        _grid_gate_begin_turn(interactive=not _AUTONOMOUS)
 
         final_text = None
         final_ctx = None
@@ -698,6 +817,9 @@ def run_experiment(user_message: str, session_id: str = "") -> dict:
     # 분리한다(안 그러면 모든 벤치마크 질의가 'nosession' 한 파일에 뭉친다).
     sid = session_id or str(uuid.uuid4())
     turn = new_turn("AILA", sid, user_message)
+    # 이 문항의 산출물이 갈 세션 폴더를 연다. 벤치마크는 문항마다 새 session_id
+    # (bench_<run_id>_<agent>_<stamp>)를 주므로 폴더 이름만으로 과제·에이전트가 드러난다.
+    run_store.begin_session(sid, "AILA")
     # 벤치마크는 사람이 없는 자율 평가 — 그리드 승인 게이트를 끈다(안 끄면 모든 격자
     # 스캔이 승인 없이 거부된다).
     _grid_gate_begin_turn(interactive=False)

@@ -12,8 +12,12 @@
 
 출력: results/graded_<시각>.json  (+ 콘솔 요약)
 
+[보통은 직접 돌릴 일이 없다]
+채점 콘솔(review.py)이 grade_one/summarize 를 직접 불러 쓴다. 이 CLI 는 자동채점 수치만
+빨리 보고 싶을 때 쓰는 보조 경로다.
+
 실행:
-  python -m backend.benchmark.grade --runs backend/benchmark/results/runs_XXXX.json
+  python -m backend.benchmark.grade --runs backend/benchmark/results/raw_runs.jsonl
 """
 from __future__ import annotations
 
@@ -80,7 +84,10 @@ def grade_one(rec: dict) -> dict:
     """실행 레코드 하나를 채점해 결과 필드를 덧붙여 반환."""
     trace = to_tool_trace(rec.get("tool_calls", []))
     verifiers = rec.get("verifiers", []) or []
-    vres = run_verifiers(verifiers, trace, rec.get("pre_state") or {}, rec.get("post_state") or {})
+    # rec 를 context 로 넘긴다 — reference_match/answer_* 는 '저장된 파일'과 '답변
+    # 텍스트'를 봐야 하고 그 둘은 트레이스에 없다(_slim 이 배열을 버림).
+    vres = run_verifiers(verifiers, trace, rec.get("pre_state") or {},
+                         rec.get("post_state") or {}, context=rec)
 
     machine = [v for v in vres if not v.is_human_only]
     human = [v for v in vres if v.is_human_only]
@@ -179,7 +186,7 @@ def main():
 
     _print_summary(summary)
     print(f"\n[완료] 채점 결과 → {out}")
-    print("다음: python -m backend.benchmark.report --graded " + str(out))
+    print("다음: python -m backend.benchmark.review --graded " + str(out))
 
 
 if __name__ == "__main__":

@@ -62,35 +62,137 @@ def init_hardware(stage=None, laser=None, ccd=None, camera=None):
     print(f"[DEBUG] raman_tools.init_hardware() 호출됨: stage={_stage}, laser={_laser}, ccd={_ccd}, camera={_camera}")
 
 
-def _teardown_component(mgr, comp: str) -> None:
-    """재접속 전 해당 컴포넌트를 안전하게 해제(예외는 무시)."""
+# 해제와 재연결 사이의 대기(초). DLL 세션/COM 포트/USB 핸들은 close() 가 돌아온 뒤에도
+# OS 가 잠시 붙잡고 있어, 곧바로 재연결하면 '방금 내가 닫은 자원'에 스스로 걸린다.
+_RECONNECT_SETTLE_S = 1.5
+# 재초기화 시도 횟수. 자원 해제 타이밍 문제는 보통 1회 재시도로 풀리고,
+# 진짜 장비 문제라면 몇 번을 더 해도 안 되므로 크게 잡을 이유가 없다.
+_RECONNECT_ATTEMPTS = 2
+
+
+def _teardown_component(mgr, comp: str) -> dict:
+    """재접속 전 해당 컴포넌트를 해제하고, 무엇이 성공/실패했는지 보고한다.
+
+    [이 함수가 왜 이렇게 장황해졌는가 — 2026-07-29 버그 수정]
+    이전 구현은 모든 예외를 삼키고 무조건 `mgr.<comp> = None` 을 실행했다. 그 결과
+    '해제가 실패했는데 핸들만 버리는' 상황이 생겼다:
+
+        disconnect() 가 에러코드를 반환(실패) → 예외가 아니라 False 이므로 무시됨
+        → mgr.stage = None 으로 유일한 참조를 버림
+        → DLL 세션(LSID)은 여전히 열려 있는데 이제 아무도 LSX_FreeLSID 를 부를 수 없다
+        → 이후 _init_stage() 의 LSX_ConnectSimple 은 영구히 "이미 점유 중"으로 실패
+        → 에이전트가 reconnect_hardware 를 몇 번 불러도 절대 회복 불가(프로세스 재시작만이 답)
+
+    이게 "하드웨어가 점유중이라 안 끊긴다"의 실체다. 그래서 이제:
+      · 해제 각 단계의 성공/실패를 기록해서 돌려준다(조용히 성공한 척하지 않는다).
+      · '해제가 확인된 경우에만' 참조를 버린다. 실패했으면 핸들을 남겨 다음 재시도가
+        같은 객체로 다시 해제를 시도할 수 있게 한다 — 고아 세션을 만들지 않는다.
+
+    Returns
+    -------
+    dict — {"released": bool, "steps": {단계명: "ok" | "실패이유"}}
+           released=False 면 자원이 아직 잡혀 있다는 뜻이고, 호출자는 재초기화를
+           시도하기 전에 이 사실을 알아야 한다.
+    """
+    steps: dict = {}
+
+    def _try(name, fn) -> bool:
+        """단계 하나 실행. 예외도, 'False 반환'도 실패로 취급한다 —
+        이 프로젝트의 장비 래퍼들은 실패를 예외가 아니라 False/에러코드로 알린다."""
+        try:
+            r = fn()
+        except Exception as e:
+            steps[name] = f"{type(e).__name__}: {e}"
+            return False
+        if r is False:                      # None 은 '반환값 없음'이므로 성공으로 본다
+            steps[name] = "returned False (device reported failure)"
+            return False
+        steps[name] = "ok"
+        return True
+
+    obj = getattr(mgr, comp, None)
+    if obj is None:
+        return {"released": True, "steps": {"skip": "was not connected"}}
+
+    if comp == "stage":
+        _try("disconnect", obj.disconnect)
+        # free_session 이 성공하면 DLL 세션이 사라지므로, disconnect 가 실패했어도
+        # 참조를 버려도 안전하다. 반대로 free 가 실패하면 반드시 핸들을 남겨야 한다.
+        freed = _try("free_session", obj.free_session)
+        released = freed
+    elif comp == "camera":
+        _try("stop_stream", obj.stop_stream)
+        released = _try("close", obj.close)
+    elif comp == "ccd":
+        released = _try("close", obj.close)
+    elif comp == "laser":
+        _try("laser_off", obj.laser_off)
+
+        def _close_serial():
+            ser = getattr(obj, "ser", None)
+            if ser is None:
+                return None
+            if getattr(ser, "is_open", False):
+                ser.close()
+            # 닫힌 것을 확인한다 — COM 포트가 남아 있으면 재연결이 'Access is denied' 로 죽는다.
+            return not getattr(ser, "is_open", False)
+
+        released = _try("close_serial", _close_serial)
+    else:
+        return {"released": False, "steps": {"error": f"unknown component '{comp}'"}}
+
+    if released:
+        setattr(mgr, comp, None)
+    return {"released": released, "steps": steps}
+
+
+def get_hardware_status() -> dict:
+    """어느 장비가 연결되어 있는지, 안 되어 있으면 왜인지 한눈에 돌려준다.
+
+    [왜 이 도구가 필요한가 — 2026-07-29]
+    에이전트에게는 '무엇이 연결되어 있는가'를 물어볼 수단이 아예 없었다. 서버에는
+    /api/hardware/state 가 있지만 그건 프론트엔드용 HTTP 엔드포인트이고 도구가 아니다.
+    그래서 에이전트는 도구를 하나 찔러보고 "Stage is not initialized." 를 받은 뒤에야
+    상황을 짐작했고, 여러 장비가 동시에 죽으면 무엇부터 손대야 할지 판단할 근거가 없어
+    같은 reconnect 를 반복하거나 그냥 포기했다. 진단을 먼저 할 수 있게 해 준다.
+    """
     try:
-        if comp == "stage" and mgr.stage is not None:
-            try: mgr.stage.disconnect()
-            except Exception: pass
-            try: mgr.stage.free_session()
-            except Exception: pass
-            mgr.stage = None
-        elif comp == "camera" and mgr.camera is not None:
-            try: mgr.camera.stop_stream()
-            except Exception: pass
-            try: mgr.camera.close()
-            except Exception: pass
-            mgr.camera = None
-        elif comp == "ccd" and mgr.ccd is not None:
-            try: mgr.ccd.close()
-            except Exception: pass
-            mgr.ccd = None
-        elif comp == "laser" and mgr.laser is not None:
-            try: mgr.laser.laser_off()
-            except Exception: pass
-            try:
-                if mgr.laser.ser and mgr.laser.ser.is_open:
-                    mgr.laser.ser.close()
-            except Exception: pass
-            mgr.laser = None
-    except Exception:
-        pass
+        from backend.hardware_manager import get_manager
+        mgr = get_manager()
+    except Exception as e:
+        return {"ok": False, "error": f"HardwareManager unavailable: {type(e).__name__}: {e}"}
+
+    out: dict = {"ok": True, "connected": {}, "notes": {}}
+    for name in ("stage", "laser", "ccd", "camera"):
+        obj = getattr(mgr, name, None)
+        out["connected"][name] = obj is not None
+        if obj is None:
+            out["notes"][name] = ("Not connected. Try reconnect_hardware(component='%s'). "
+                                  "If that reports the resource is still held, the server process "
+                                  "must be restarted - no tool can clear it." % name)
+
+    # 연결된 것은 실제로 응답하는지도 가볍게 확인한다 — 핸들이 살아 있어도 장비가
+    # 먹통이면 '연결됨'만 보고 진행하다 뒤에서 터진다.
+    if mgr.stage is not None:
+        try:
+            pos = mgr.stage.get_position()
+            out["stage_position"] = (
+                {"x": pos[0], "y": pos[1], "z": pos[2]} if pos else None)
+            if not pos:
+                out["notes"]["stage"] = "Handle exists but get_position() returned nothing - stage is unresponsive."
+        except Exception as e:
+            out["notes"]["stage"] = f"Handle exists but reading position raised {type(e).__name__}: {e}"
+    if mgr.laser is not None:
+        try:
+            ser = getattr(mgr.laser, "ser", None)
+            out["laser_serial_open"] = bool(getattr(ser, "is_open", False)) if ser else None
+        except Exception as e:
+            out["notes"]["laser"] = f"{type(e).__name__}: {e}"
+
+    ready = [k for k, v in out["connected"].items() if v]
+    out["summary"] = (f"connected: {', '.join(ready) if ready else 'none'}; "
+                      f"missing: {', '.join(k for k, v in out['connected'].items() if not v) or 'none'}")
+    return out
 
 
 def reconnect_hardware(component: str = "all") -> dict:
@@ -112,18 +214,57 @@ def reconnect_hardware(component: str = "all") -> dict:
 
     mgr = get_manager()
     targets = ["stage", "ccd", "camera", "laser"] if comp == "all" else [comp]
-    done, errors = [], {}
+    done, errors, detail = [], {}, {}
+
     for t in targets:
-        try:
-            _teardown_component(mgr, t)
-            getattr(mgr, f"_init_{t}")()
-            done.append(t)
-        except Exception as e:
-            errors[t] = str(e)
+        td = _teardown_component(mgr, t)
+        detail[t] = {"teardown": td}
+
+        if not td["released"]:
+            # 자원이 아직 잡혀 있다 — 이 상태로 재초기화하면 "이미 점유 중"으로 실패한다.
+            # 그걸 'reconnect 실패'로 뭉개지 말고, 원인과 다음 행동을 명시해 돌려준다.
+            errors[t] = (
+                f"Could not release the {t} before reconnecting - the resource is still held "
+                f"by this process (teardown steps: {td['steps']}). Reconnecting was NOT attempted, "
+                f"because doing so would fail with an 'already in use' error and could orphan the "
+                f"handle. This is a process-level lock, not a cable problem: retrying this tool will "
+                f"not clear it. Continue with the remaining hardware if possible, report this in your "
+                f"final answer, and note that the server process must be restarted to free the {t}."
+            )
+            continue
+
+        # 해제와 재연결 사이에 잠깐 쉰다 — DLL 세션/COM 포트/USB 핸들은 OS 가 즉시
+        # 놓아주지 않는다. 없으면 '방금 내가 닫은 자원'에 스스로 걸려 실패한다.
+        time.sleep(_RECONNECT_SETTLE_S)
+
+        last = None
+        for attempt in range(1, _RECONNECT_ATTEMPTS + 1):
+            try:
+                getattr(mgr, f"_init_{t}")()
+                done.append(t)
+                detail[t]["init"] = f"ok (attempt {attempt})"
+                last = None
+                break
+            except Exception as e:
+                last = f"{type(e).__name__}: {e}"
+                detail[t]["init"] = f"attempt {attempt} failed: {last}"
+                if attempt < _RECONNECT_ATTEMPTS:
+                    time.sleep(_RECONNECT_SETTLE_S)
+        if last is not None:
+            errors[t] = (
+                f"Released the {t} successfully but re-initialization failed after "
+                f"{_RECONNECT_ATTEMPTS} attempts: {last}. The resource is now free, so this is a "
+                f"device-side problem (power, cable, driver, or the device is held by another "
+                f"program such as rays-on.exe) - not something you can fix by calling tools again. "
+                f"Proceed without the {t} if the task allows it and say so explicitly in your answer."
+            )
 
     # 재초기화된 객체를 raman_tools 전역에 재주입
     init_hardware(stage=mgr.stage, laser=mgr.laser, ccd=mgr.ccd, camera=mgr.camera)
-    return {"ok": (len(errors) == 0), "reconnected": done, "errors": (errors or None)}
+    return {"ok": (len(errors) == 0), "reconnected": done,
+            "errors": (errors or None), "detail": detail,
+            "now_connected": {k: getattr(mgr, k, None) is not None
+                              for k in ("stage", "laser", "ccd", "camera")}}
 
 
 # ──────────────────────────────────────────
@@ -1373,10 +1514,11 @@ def save_spectrum(
         추가 메타데이터 — 같은 이름의 .json 파일로 저장.
     """
     try:
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
-        if not filename.endswith(".csv"):
-            filename += ".csv"
-        filepath = _DATA_DIR / filename
+        # 세션 폴더(data/runs/<session>/spectra/NN_<name>.csv)로 저장한다.
+        # 과거에는 data/ 최상위에 '모델이 정한 이름' 그대로 떨어져서, 어느 과제 산출물인지
+        # 알 수 없고 같은 과제를 두 에이전트로 돌리면 서로 덮어썼다(backend/agents/run_store.py 참고).
+        from backend.agents import run_store
+        filepath, rel = run_store.new_spectrum_path(filename)
 
         with open(filepath, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -1397,8 +1539,12 @@ def save_spectrum(
             with open(filepath.with_suffix(".json"), "w", encoding="utf-8") as f:
                 json.dump(metadata, f, ensure_ascii=False, indent=2)
 
+        run_store.record(run_store.KIND_SPECTRA, rel, num_points=len(data),
+                         has_raman_shift=raman_shift is not None)
         return {
             "ok": True,
+            # path 는 data/ 기준 상대경로 — 이 문자열을 그대로 load_spectrum 에 넘겨 읽는다.
+            "path": rel,
             "filepath": str(filepath),
             "num_points": len(data),
             "has_calibration": raman_shift is not None,
@@ -1411,6 +1557,11 @@ def load_spectrum(filename: str) -> dict:
     """
     저장된 스펙트럼 CSV 파일을 로드한다.
     절대 경로 또는 data/ 디렉토리 상대 경로 모두 허용.
+
+    측정 자동저장 CSV(data/results/<날짜>/<세션>/*.csv)는 헤더 앞에 '# key,value'
+    메타 주석행이 붙어 있다(spectrum_store._write_csv). 그걸 건너뛰지 않으면 첫 주석행이
+    헤더로 잡혀 'intensity' 열을 못 찾는다 — 측정 결과를 다시 읽는 경로가 통째로 막힌다.
+    encoding 은 utf-8-sig: 같은 파일이 BOM 을 달고 저장된다(엑셀 호환).
     """
     try:
         if not filename.endswith(".csv"):
@@ -1421,10 +1572,24 @@ def load_spectrum(filename: str) -> dict:
         if not filepath.exists():
             return {"ok": False, "error": f"File not found: {filepath}"}
 
-        with open(filepath, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            headers = reader.fieldnames or []
-            rows = list(reader)
+        comments: dict = {}
+        with open(filepath, "r", encoding="utf-8-sig", newline="") as f:
+            lines = f.read().splitlines()
+        body = []
+        for ln in lines:
+            if not body and ln.lstrip().startswith("#"):
+                bits = ln.lstrip().lstrip("#").strip().split(",", 1)
+                if len(bits) == 2:
+                    comments[bits[0].strip()] = bits[1].strip()
+                continue
+            body.append(ln)
+
+        reader = csv.DictReader(body)
+        headers = reader.fieldnames or []
+        rows = list(reader)
+        if "intensity" not in headers:
+            return {"ok": False,
+                    "error": f"No 'intensity' column in {filepath.name}. Columns: {headers}"}
 
         intensity = [float(r["intensity"]) for r in rows]
         result: dict = {
@@ -1434,6 +1599,8 @@ def load_spectrum(filename: str) -> dict:
             "headers": headers,
             "intensity": intensity,
         }
+        if comments:
+            result["metadata"] = comments        # laser_power_pct / exposure_time / mode 등
         if "raman_shift_cm-1" in headers:
             result["raman_shift_cm-1"] = [float(r["raman_shift_cm-1"]) for r in rows]
         if "wavelength_nm" in headers:
@@ -2071,6 +2238,7 @@ TOOL_DISPATCH = {
     "set_stage_speed":          lambda a: set_stage_speed(**a),
     # ── 하드웨어 연결 관리 ────────────────────────────────────────────────────
     "reconnect_hardware":       lambda a: reconnect_hardware(**a),
+    "get_hardware_status":      lambda a: get_hardware_status(),
     # ── 레이저 ──────────────────────────────────────────────────────────────
     "laser_on":                 lambda a: laser_on(),
     "laser_off":                lambda a: laser_off(),
@@ -2114,7 +2282,8 @@ TOOL_DISPATCH = {
     "load_spectrum":            lambda a: load_spectrum(**a),
     # ── 측정 결과 정리(자동 저장분 대상) ─────────────────────────────────────
     "list_results":             lambda a: {"ok": True, "items": [
-                                    {k: it[k] for k in ("base", "date", "title", "timestamp", "meta")}
+                                    {k: it[k] for k in
+                                     ("base", "session", "date", "title", "timestamp", "meta")}
                                     for it in _store_list_results(**a)]},
     "combine_spectra":          lambda a: _store_combine_spectra(**a),
     "aggregate_spectra_csv":    lambda a: _store_aggregate_csv(**a),

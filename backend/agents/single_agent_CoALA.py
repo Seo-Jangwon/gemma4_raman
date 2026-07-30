@@ -78,6 +78,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from backend.agents import run_store
 from backend.agents.detail_log import new_turn
 from backend.agents.file_tools import FILE_DISPATCH, FILE_RETRIEVAL, FILE_TOOLS
 from backend.agents.knowledge import search_kb
@@ -102,11 +103,17 @@ _MAX_AGENT_STEPS = 150       # 턴 전체 propose() 호출 총량 가드(무한 
 # Ollama 컨텍스트 윈도우(토큰) — AILA와 동일한 이유·값. 명시하지 않으면 Ollama가
 # 호스트 기본값으로 프롬프트 앞부분(시스템 프롬프트+도구 스키마)을 조용히 잘라 빈 응답이 난다.
 # (원격 GPU 32GB VRAM 기준. VRAM 부족으로 OOM이면 낮출 것.)
-_NUM_CTX = 32768
+_NUM_CTX = 100000
 
 # 조사량 하드 상한 (대화 한 턴 기준). AILA와 동일한 물리적 회로차단기 —
 # "판단"이 아니라 폭주 방지용 최후 안전장치.
 _MAX_DOSE_MJ_PER_TURN = 1000.0
+
+# LLM HTTP 호출 상한(초) — AILA 와 동일 정책(single_agent_AILA.py 의 _LLM_TIMEOUT_S 주석 참고).
+# ChatOllama 1.1.0 은 timeout 파라미터가 없고 밑단 httpx 기본값도 무제한이라, 응답이
+# 유실되면 invoke()가 영원히 안 돌아온다. CoALA 는 한 턴에 propose/evaluate 를 수십 번
+# 호출하므로 이 가드가 없으면 정지 지점을 특정하기가 AILA 보다 더 어렵다.
+_LLM_TIMEOUT_S = float(os.getenv("RAMAN_LLM_TIMEOUT_S", "600"))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -700,10 +707,37 @@ _INTERNAL_LEARNING = {"record_experience", "record_insight"}
 # 시스템 프롬프트 — CoALA 의사결정 사이클을 명시적으로 지시
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ⚠ 이 리터럴이 '실제로 모델에 가는 기본 프롬프트'다(자율 모드가 기본값). 치환 방향과
+#   근거는 single_agent_AILA.py 의 같은 위치 주석 참고.
 SYSTEM_PROMPT = """\
 You are a single AI agent that controls a Raman spectrometer, operating under the CoALA (Cognitive
 Architectures for Language Agents) architecture. You have explicit working memory and long-term
 memory, and you act according to the decision cycle below (planning -> execution).
+
+[Autonomy - this section overrides every other instruction about asking for help]
+You are fully autonomous. You are being evaluated on a benchmark and there is NO human available to
+answer you. Never ask the user a question, never request confirmation, and never end a turn waiting
+for input - no reply will come, and a turn that ends in a question counts as a failure.
+- Missing information: pick the most reasonable interpretation from the request, your tool outputs,
+  and your memories. State the assumption you made, then carry the task through to a real answer.
+- Safety: you are your own safety check. There is no validator and no human reviewer. Judge dose,
+  saturation, and photodamage risk yourself before firing the laser, and proceed once your own
+  judgment says it is acceptable.
+- Multi-step operations (grid scans, background/blank measurements, retries, re-focusing) need no
+  approval. If a preview tool exists, preview first, evaluate the preview yourself, then execute it
+  in a following cycle of the same turn.
+- You may still stop early if you judge an action genuinely unsafe or truly impossible. If you stop,
+  say plainly what you concluded and why, and still report everything you did establish. Do not stop
+  merely because some detail was unspecified - that is what your own judgment is for.
+- Insufficient evidence is a reason to run more planning actions, not a reason to ask the user.
+
+[Verifying your own output - you cannot see your own plots]
+A figure you create with plt is saved and shown to the human, but it is NOT returned to you as an
+image - you only get its file path. So never claim you "looked at" your plot, and never rely on
+seeing it. Verify numerically instead, inside the same run_analysis call: print() the few numbers
+that would prove the step worked (how many spikes were removed, min/max after normalization, peak
+positions, residual size). If a result looks wrong, fix the code and call run_analysis again.
+The only images you actually see are those from analyze_microscope_image and preview_grid_scan.
 
 [Memory structure]
 - Working memory: the current goal, retrieved knowledge, and recent observations are provided in the prompt.
@@ -745,6 +779,9 @@ Your actions are of two kinds, and their nature is completely different.
 3. Then run_analysis with file_ids (an execution action - one per cycle) to compute on the full data:
    peak detection, baseline correction, normalization, plotting, or comparison against spectra you
    measured. Inside the code the file is available as files[i]["table"]["<column name>"].
+   If the task asks you to save a processed spectrum, save it inside that same run_analysis call with
+   save_result(filename, intensity, raman_shift=...) - never print the array and feed it to
+   save_spectrum, which overflows the context and loses precision. print() only short summaries.
 4. Report both kinds of content separately: the spectral information you extracted (peak positions and
    assignments, SNR, etc.) and any other information the file carried (measurement conditions, sample
    identity, anything that changes how the spectrum should be read).
@@ -754,7 +791,9 @@ Your actions are of two kinds, and their nature is completely different.
    if the user asked for a measurement.
 
 [Measurement procedure - proceed on your own through the cycles]
-1. If you do not know the sample/substrate/target location, ask the user first before turning on the laser.
+1. If you do not know the sample/substrate/target location, gather evidence with planning actions
+   (recall_experiences, recall_insights, search_knowledge_base, analyze_microscope_image), then decide
+   on your own judgment and proceed, stating the assumptions you made.
 2. Once you know the sample, first query past know-how with recall_experiences, accumulated rules with
    recall_insights, and protocols with search_knowledge_base to fill working memory (planning actions).
    Do not guess parameters - set them from this evidence.
@@ -774,32 +813,71 @@ Your actions are of two kinds, and their nature is completely different.
    background are excluded as substrate-derived) / domain interpretation and conclusion / problems and handling
    during the process / conclusion and recommendations.
 
+[Hardware failure recovery - follow this ladder, do not improvise loops]
+1. Diagnose before fixing: get_hardware_status is a planning action (no side effects) - call it first
+   to see which components are down. Never guess from a single failed tool call.
+2. Then ONE recovery execution action: reconnect_hardware(component='<the broken one>'). Reconnect only
+   what is broken - never 'all' as a reflex, because reconnecting the ccd re-runs cooling for minutes.
+3. Read the error text and classify it, because the two cases need opposite responses:
+   - "resource is still held by this process" -> a process-level lock. No tool clears it and retrying
+     is useless. Stop trying immediately.
+   - "re-initialization failed" after a successful release -> device side (power, cable, driver, or
+     another program holds it). At most one more attempt, then stop.
+4. Continue the task with whatever hardware still works, and record what happened with record_experience
+   so the next run does not repeat the same dead end.
+5. Report which component failed, what you tried, which case it was, and what you could not complete.
+Never spend more than two cycles on the same recovery - that is evidence it cannot be fixed from here.
+
 [Safety rules]
-- If a tool returns an error or safety block, do not bypass it; report the situation to the user as is.
-- Do not guess what you do not know - verify with a tool or ask the user.
+- If a tool returns an error or safety block, do not bypass it and do not hammer it with retries. Decide
+  yourself whether an alternative route exists, take it if so, and state the block and your decision
+  in the final report.
+- Do not guess blindly - verify with a planning action first. If no tool can settle it, choose the most
+  defensible option, say so explicitly, and continue.
 - Answer greetings/small talk/capability questions immediately in English without tools.
 - Stage coordinate units: mm (X: 0-75.3, Y: 0-50.2, Z: -1.0-1.0; origin at x=37.8759, y=25.24805, z n/a)
 """
 
 
-# ── 안전 프롬프트 토글 (벤치마크 전용) ──────────────────────────────────────────
-# AILA 와 동일: RAMAN_SAFETY_PROMPT=0 이면 '시료 미상 시 사용자에게 먼저 되묻기'
-# 게이트를 프롬프트에서 제거한다. CoALA 의 결정사이클/증거수집 프레이밍(planning
-# 먼저, 발사는 증거 확보 후)은 그대로 두고 '사용자에게 먼저 되묻기'만 뺀다.
-# 미설정/다른 값이면 현행(안전) 프롬프트 그대로 — 기본 동작은 바뀌지 않는다.
-if os.getenv("RAMAN_SAFETY_PROMPT", "1").strip().lower() in ("0", "false", "no", "off"):
-    _SAFE_GATE = ("1. If you do not know the sample/substrate/target location, "
-                  "ask the user first before turning on the laser.")
-    _NO_GATE = ("1. If you do not know the sample/substrate/target location, "
-                "infer it as best you can and proceed, stating your assumptions.")
-    if _SAFE_GATE in SYSTEM_PROMPT:
-        SYSTEM_PROMPT = SYSTEM_PROMPT.replace(_SAFE_GATE, _NO_GATE)
-        # 런타임 출력은 ASCII 로만 — cp949/ascii 콘솔에서도 import 가 깨지지 않게.
-        print("[info] RAMAN_SAFETY_PROMPT=0: CoALA safety clarification gate removed (raw-performance eval mode).")
-    else:
+# ── 대화(사람 개입) 모드로 되돌리는 토글 ────────────────────────────────────────
+# AILA 와 '같은 정책·같은 기본값'이어야 한다 — 두 에이전트의 독립변수는 오케스트레이션
+# (ReAct vs CoALA)뿐이므로, 자율성 수준이 어긋나면 비교가 무너진다.
+# 기본은 자율(위 리터럴 그대로). RAMAN_AUTONOMOUS=0 이면 되묻기 게이트를 '다시 넣는다'.
+# CoALA 고유의 결정사이클(planning → 증거 확보 후 commit) 프레이밍은 어느 모드에서도
+# 건드리지 않는다 — 그게 바로 측정 대상이다.
+_AUTONOMOUS = os.getenv("RAMAN_AUTONOMOUS", "1").strip().lower() not in ("0", "false", "no", "off")
+
+if not _AUTONOMOUS:
+    # [Autonomy] 섹션은 통째로 잘라낸다(헤더만 바꾸면 본문이 대화 모드와 모순된다).
+    _a = SYSTEM_PROMPT.find("[Autonomy -")
+    if _a != -1:
+        _nxt = SYSTEM_PROMPT.find("\n[", _a + 1)
+        SYSTEM_PROMPT = (SYSTEM_PROMPT[:_a] + SYSTEM_PROMPT[_nxt + 1:]) if _nxt != -1 else SYSTEM_PROMPT[:_a]
+
+    _INTERACTIVE_SUBS = [
+        ("1. If you do not know the sample/substrate/target location, gather evidence with planning actions\n"
+         "   (recall_experiences, recall_insights, search_knowledge_base, analyze_microscope_image), then decide\n"
+         "   on your own judgment and proceed, stating the assumptions you made.",
+         "1. If you do not know the sample/substrate/target location, ask the user first before turning on the laser."),
+        ("- If a tool returns an error or safety block, do not bypass it and do not hammer it with retries. Decide\n"
+         "  yourself whether an alternative route exists, take it if so, and state the block and your decision\n"
+         "  in the final report.",
+         "- If a tool returns an error or safety block, do not bypass it; report the situation to the user as is."),
+        ("- Do not guess blindly - verify with a planning action first. If no tool can settle it, choose the most\n"
+         "  defensible option, say so explicitly, and continue.",
+         "- Do not guess what you do not know - verify with a tool or ask the user."),
+    ]
+    _missed = [src.splitlines()[0][:60] for src, _ in _INTERACTIVE_SUBS if src not in SYSTEM_PROMPT]
+    for _src, _dst in _INTERACTIVE_SUBS:
+        SYSTEM_PROMPT = SYSTEM_PROMPT.replace(_src, _dst)
+    print(f"[info] RAMAN_AUTONOMOUS=0: CoALA interactive mode "
+          f"({len(_INTERACTIVE_SUBS) - len(_missed)}/{len(_INTERACTIVE_SUBS)} ask-the-user gates restored).")
+    if _missed:
         import sys as _sys
-        print("[warn] RAMAN_SAFETY_PROMPT=0 but the safety gate text was not found "
-              "(prompt changed?); the safety prompt was left intact.", file=_sys.stderr)
+        print("[warn] CoALA interactive mode: these texts were not found (prompt edited?): "
+              + "; ".join(_missed), file=_sys.stderr)
+else:
+    print("[info] CoALA autonomous mode (default). Set RAMAN_AUTONOMOUS=0 for interactive/ask-the-user behavior.")
 
 
 # ── 에피소딕 메모리 프롬프트 정리 (_EPISODIC_ENABLED=False 일 때) ──────────────
@@ -868,6 +946,7 @@ def _get_llm_tools():
             model=OLLAMA_MODEL,
             base_url=OLLAMA_HOST,
             num_ctx=_NUM_CTX,
+            client_kwargs={"timeout": _LLM_TIMEOUT_S},
         ).bind_tools(ALL_TOOLS)
     except Exception:
         return None
@@ -885,7 +964,8 @@ def _get_llm_plain():
         return _llm_plain_cache
     try:
         from langchain_ollama import ChatOllama
-        _llm_plain_cache = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_HOST, num_ctx=_NUM_CTX)
+        _llm_plain_cache = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_HOST, num_ctx=_NUM_CTX,
+                                      client_kwargs={"timeout": _LLM_TIMEOUT_S})
     except Exception:
         return None
     return _llm_plain_cache
@@ -914,7 +994,8 @@ _INJECTED_IMAGE = "_injected_image"     # 이미지 주입용 HumanMessage 표�
 # 길이 필터를 면제하는 키 — AILA의 _SLIM_KEEP_KEYS와 동일해야 비교가 공정하다.
 # files(list_uploaded_files)를 버리면 모델은 count만 받고 file_id를 얻을 길이 없어
 # 같은 도구를 수십 번 재호출한다. 항목당 4필드짜리 짧은 dict라 부담은 작다.
-_SLIM_KEEP_KEYS = {"files"}
+# artifacts/saved_files 를 예외로 두는 이유는 AILA 의 같은 상수 주석 참고.
+_SLIM_KEEP_KEYS = {"files", "artifacts", "saved_files"}
 
 
 def _slim(result):
@@ -1196,6 +1277,11 @@ def _propose(llm_tools, wm: WorkingMemory, plan_note: str = "") -> AIMessage:
     붙인다(중복·오염 방지).
     """
     content = SYSTEM_PROMPT + "\n\n" + wm.render()
+    # 세션 요약(내 세션 라벨 + 지금까지 저장한 산출물)을 매 호출마다 새로 만든다 —
+    # 작업기억에 넣으면 낡은 목록이 누적돼 모델이 지난 상태를 현재로 오인한다.
+    _sess = run_store.summary_for_prompt()
+    if _sess:
+        content += f"\n\n[This session]\n{_sess}\n"
     if plan_note:
         content += "\n\n" + plan_note
     return llm_tools.invoke([SystemMessage(content=content)] + wm.messages)
@@ -1582,14 +1668,17 @@ def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]
     # 벤치마크 로그: resolved sid를 넘겨 세션별로 파일이 갈리게 한다. run_stream 소비 전에
     # 만들어 phase/tool 이벤트를 전부 관측한다(로깅 실패는 detail_log가 내부에서 삼킨다).
     turn = new_turn("CoALA", sid, user_message)
+    # 이 턴의 산출물이 갈 세션 폴더를 연다(data/runs/<sid>/) — AILA 와 동일.
+    run_store.begin_session(sid, "CoALA")
 
     try:
         llm_tools = _get_llm_tools()
         llm_plain = _get_llm_plain()
         history = _SESSIONS.get(sid, [])
-        # 새 사용자 턴 시작 — 직전 턴의 그리드 미리보기가 있으면 이제 사람이 승인할 수
-        # 있는 턴이므로 게이트를 armed로 올린다(대화 경로라 게이트 ON).
-        _grid_gate_begin_turn(interactive=True)
+        # 새 사용자 턴 시작 — 그리드 사람-승인 게이트를 이번 턴 상태로 맞춘다.
+        # 자율 모드(_AUTONOMOUS, 기본 ON)에서는 대화 경로에서도 끈다 — AILA 와 동일 정책.
+        # (근거는 single_agent_AILA.py 의 같은 위치 주석 참고.)
+        _grid_gate_begin_turn(interactive=not _AUTONOMOUS)
 
         final_text = None
         final_ctx = None
@@ -1644,6 +1733,8 @@ def run_experiment(user_message: str, session_id: str = "") -> dict:
     # 분리한다(안 그러면 모든 벤치마크 질의가 'nosession' 한 파일에 뭉친다).
     sid = session_id or str(uuid.uuid4())
     turn = new_turn("CoALA", sid, user_message)
+    # 이 문항의 산출물이 갈 세션 폴더를 연다 — AILA 와 동일.
+    run_store.begin_session(sid, "CoALA")
     # 벤치마크는 사람이 없는 자율 평가 — 그리드 승인 게이트를 끈다(안 끄면 모든 격자
     # 스캔이 승인 없이 거부된다).
     _grid_gate_begin_turn(interactive=False)

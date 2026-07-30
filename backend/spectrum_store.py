@@ -4,13 +4,26 @@
   채팅 인라인 표시용 PNG 를 렌더한다. CoALA·AILA 두 에이전트가 공유하는 순수
   유틸(하드웨어 import 없음) — acquire_spectrum 이 측정 직후 이걸 호출한다.
 
-  저장 레이아웃:
-    data/results/<YYYY-MM-DD>/<HHMMSS_mmm>_<tag>.png   ← 스펙트럼 플롯(채팅 표시용)
-    data/results/<YYYY-MM-DD>/<HHMMSS_mmm>_<tag>.csv   ← 스펙트럼 데이터(엑셀 호환)
-    data/results/<YYYY-MM-DD>/<HHMMSS_mmm>_<tag>.json  ← 원본 결과+메타(합본/재렌더용)
+  저장 레이아웃 — 개별 측정은 '날짜/세션' 아래로 모은다:
+    data/results/<YYYY-MM-DD>/<세션>/<HHMMSS_mmm>_<tag>.png   ← 플롯(채팅 표시용)
+    data/results/<YYYY-MM-DD>/<세션>/<HHMMSS_mmm>_<tag>.csv   ← 데이터(엑셀 호환)
+    data/results/<YYYY-MM-DD>/<세션>/<HHMMSS_mmm>_<tag>.json  ← 원본 결과+메타
+    data/results/<YYYY-MM-DD>/<세션>/fig<HHMMSS_mmm>_<i>.png  ← run_analysis 그림
+  세션 경계를 넘는 것들만 날짜 폴더 직속에 남는다('_' 접두라 측정 목록에 안 잡힌다):
+    _scene_*.npz/.png     현미경 장면(스테이지 좌표계 기준이라 세션 무관)
+    _combined_*.png / _summary_*.csv / _bundle_*.zip / _<tag>_*.png  집계·미리보기
+
+  <세션> 은 run_store 의 세션 라벨(= 벤치의 'bench_<문항>_<에이전트>_<시각>')이다.
+  세션이 없으면 '_unassigned'. 예전에는 개별 측정이 날짜 폴더에 그대로 쏟아져서
+  (하루 85개 파일) 어느 문항·어느 에이전트의 측정인지 파일만 보고는 알 수 없었다.
+
+  하위호환: list_results 는 세션 폴더와 '날짜 폴더 직속(구버전)' 을 모두 읽는다 —
+  이미 쌓인 결과가 갑자기 안 보이면 안 되므로. 구버전 파일을 세션 폴더로 정리하려면
+  backend/tools/migrate_results.py 를 쓴다.
 
   PNG/JSON URL 은 '/api/results/...' 로 서빙된다(vite proxy 가 /api 만 통과시키므로
-  결과 파일도 /api 아래에 둔다). server.py 가 이 경로를 정적 서빙한다.
+  결과 파일도 /api 아래에 둔다). server.py 가 이 경로를 StaticFiles 로 정적 서빙하고,
+  StaticFiles 는 하위 폴더를 그대로 서빙하므로 URL 에 세션이 한 단계 끼어도 문제없다.
 """
 from __future__ import annotations
 
@@ -33,6 +46,21 @@ plt.rcParams["axes.unicode_minus"] = False
 # data/results (세션 저장소 data/sessions 와 같은 부모) — server.py 가 /api/results 로 서빙
 RESULTS_ROOT = Path(__file__).resolve().parent.parent / "data" / "results"
 URL_PREFIX = "/api/results"      # 프론트에서 접근하는 공개 경로
+UNASSIGNED = "_unassigned"       # 세션 없이 나온 산출물이 떨어지는 폴더
+
+
+def session_folder() -> str:
+    """개별 측정을 담을 하위 폴더명 = 현재 run_store 세션 라벨.
+
+    import 를 함수 안에서 하는 이유: spectrum_store 는 '하드웨어/에이전트 import 없는
+    순수 유틸' 이라는 계약이 있어 모듈 수준 의존을 만들지 않는다. 세션 조회가 실패해도
+    측정 저장은 반드시 성공해야 하므로 예외는 삼키고 _unassigned 로 떨어뜨린다.
+    """
+    try:
+        from backend.agents import run_store
+        return run_store.current().get("label") or UNASSIGNED
+    except Exception:
+        return UNASSIGNED
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -191,7 +219,8 @@ def save_spectrum(result: dict, meta: dict | None = None) -> dict:
 
     Returns
     -------
-    dict — {ok, title, timestamp, dir, files:{png,csv,json}, image_url, csv_url, json_url}
+    dict — {ok, title, timestamp, session, dir, files:{png,csv,json},
+            image_url, csv_url, json_url}
            실패해도 측정 자체를 막지 않도록 예외를 삼키고 {ok: False, error} 를 돌려준다.
     """
     if not result or not result.get("ok"):
@@ -202,8 +231,9 @@ def save_spectrum(result: dict, meta: dict | None = None) -> dict:
         stamp = now.strftime("%H%M%S_") + f"{now.microsecond // 1000:03d}"
         tag = _safe_tag(meta)
         base = f"{stamp}_{tag}"
+        sess = session_folder()
 
-        out_dir = RESULTS_ROOT / date_dir
+        out_dir = RESULTS_ROOT / date_dir / sess
         out_dir.mkdir(parents=True, exist_ok=True)
 
         png_path = out_dir / f"{base}.png"
@@ -214,18 +244,29 @@ def save_spectrum(result: dict, meta: dict | None = None) -> dict:
         render_png(result, png_path, title)
         _write_csv(result, csv_path)
         # json: 원본 결과 + 메타 + 제목 (합본 재렌더·검색용)
+        # session 을 안에도 적어 둔다 — 파일을 옮겨도 귀속이 남는다.
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump({"title": title, "meta": meta or {},
+            json.dump({"title": title, "meta": meta or {}, "session": sess,
                        "timestamp": now.isoformat(), "result": result},
                       f, ensure_ascii=False)
 
         def url(p: Path) -> str:
-            return f"{URL_PREFIX}/{date_dir}/{p.name}"
+            return f"{URL_PREFIX}/{date_dir}/{sess}/{p.name}"
+
+        # 세션 manifest 에 측정을 등록한다 — 에이전트가 list_session_artifacts 로
+        # '내가 이번 세션에 뭘 측정했는지'를 스스로 찾을 수 있어야 하므로.
+        try:
+            from backend.agents import run_store
+            run_store.record(run_store.KIND_MEASUREMENT, f"results/{date_dir}/{sess}/{base}.csv",
+                             title=title, tag=tag, image=f"{base}.png")
+        except Exception:
+            pass          # 부기 실패가 측정 저장을 깨뜨리면 안 된다
 
         return {
             "ok": True,
             "title": title,
             "timestamp": now.isoformat(),
+            "session": sess,
             "dir": str(out_dir),
             "files": {"png": str(png_path), "csv": str(csv_path), "json": str(json_path)},
             "image_url": url(png_path),
@@ -249,26 +290,46 @@ def _url(date: str, name: str) -> str:
     return f"{URL_PREFIX}/{date}/{name}"
 
 
-def list_results(date: str | None = None) -> list[dict]:
+def list_results(date: str | None = None, scope: str = "session") -> list[dict]:
     """해당 날짜(기본 오늘)에 저장된 개별 측정 목록을 시각 순으로 돌려준다.
 
-    각 항목: {base, date, title, timestamp, meta, result, png/csv/json(Path)}.
-    합본/요약/zip 등 생성물('_' 접두)은 제외한다.
+    각 항목: {base, session, date, title, timestamp, meta, result, png/csv/json(Path)}.
+    합본/요약/zip 등 생성물('_' 접두 파일)은 제외한다.
+
+    scope
+    -----
+    "session" (기본) 현재 run_store 세션의 측정만. 세션이 없으면 전체와 같다.
+    "all"            그 날짜의 모든 세션.
+
+    기본을 session 으로 둔 이유: 이 목록이 run_analysis 샌드박스에 spectra 로 주입되고
+    combine/aggregate/bundle 의 대상이 된다. 전체를 주면 벤치마크에서 앞선 문항들의
+    측정이 다음 문항 코드에 섞여 들어가(문항 간 오염) 채점이 무의미해지고, 하루가
+    쌓일수록 주입량도 같이 커진다. 여러 세션을 일부러 합칠 때만 scope="all" 을 준다.
+
+    구버전(날짜 폴더 직속) 파일도 함께 읽는다 — session 은 빈 문자열이 되고,
+    scope="session" 이어도 '귀속 불명' 이므로 배제하지 않는다(안 보이면 유실로 보인다).
     """
     d = _resolve_date(date)
     day_dir = RESULTS_ROOT / d
     if not day_dir.exists():
         return []
+
+    cur = session_folder() if scope == "session" else ""
     items = []
-    for jp in sorted(day_dir.glob("*.json")):
+    # 세션 하위 폴더 + 구버전(날짜 폴더 직속). '_' 접두 파일은 생성물이라 제외한다.
+    for jp in list(day_dir.glob("*/*.json")) + list(day_dir.glob("*.json")):
         if jp.stem.startswith("_"):
+            continue
+        sess = jp.parent.name if jp.parent != day_dir else ""
+        # 구버전 파일(sess=="")은 귀속 불명이므로 세션 필터에서 걸러내지 않는다.
+        if cur and sess and sess != cur:
             continue
         try:
             payload = json.loads(jp.read_text(encoding="utf-8"))
         except Exception:
             continue
         items.append({
-            "base": jp.stem, "date": d,
+            "base": jp.stem, "session": sess, "date": d,
             "title": payload.get("title", ""),
             "timestamp": payload.get("timestamp", ""),
             "meta": payload.get("meta", {}) or {},
@@ -277,23 +338,28 @@ def list_results(date: str | None = None) -> list[dict]:
             "csv": jp.with_suffix(".csv"),
             "json": jp,
         })
+    # 시각 순. 파일명 정렬로는 세션 폴더가 먼저 묶여 시간 순서가 깨진다.
+    items.sort(key=lambda it: (it["timestamp"] or "", it["base"]))
     return items
 
 
-def _select(date: str | None, names: list[str] | None) -> tuple[str, list[dict]]:
+def _select(date: str | None, names: list[str] | None,
+            scope: str = "session") -> tuple[str, list[dict]]:
     d = _resolve_date(date)
-    items = list_results(d)
+    items = list_results(d, scope=scope)
     if names:
         want = set(names)
+        # base(=파일 stem)로 고른다 — 세션이 폴더로 갈렸어도 모델이 보는 이름은 그대로다.
         items = [it for it in items if it["base"] in want]
     return d, items
 
 
 def combine_spectra(date: str | None = None, names: list[str] | None = None,
-                    out_name: str | None = None, max_cols: int = 4) -> dict:
+                    out_name: str | None = None, max_cols: int = 4,
+                    scope: str = "session") -> dict:
     """저장된 여러 스펙트럼을 한 장(격자)으로 렌더한다(#2). 제목은 각 측정의
     저장 제목(좌표·조건 자동 생성)을 그대로 쓴다. 반환 saved.image_url 로 채팅 표시."""
-    d, items = _select(date, names)
+    d, items = _select(date, names, scope)
     if not items:
         return {"ok": False, "error": f"No measurement results to combine on {d}."}
     n = len(items)
@@ -328,10 +394,10 @@ def combine_spectra(date: str | None = None, names: list[str] | None = None,
 
 
 def aggregate_spectra_csv(date: str | None = None, names: list[str] | None = None,
-                          out_name: str | None = None) -> dict:
+                          out_name: str | None = None, scope: str = "session") -> dict:
     """저장된 여러 측정을 실험당 한 행으로 요약한 CSV 를 만든다(#3).
     열: 날짜/시각/제목/좌표/파워/노출/모드/최대세기/총세기/피크위치."""
-    d, items = _select(date, names)
+    d, items = _select(date, names, scope)
     if not items:
         return {"ok": False, "error": f"No measurement results to summarize on {d}."}
     day_dir = RESULTS_ROOT / d
@@ -373,7 +439,10 @@ def save_scene(image, extent: list | None = None, meta: dict | None = None) -> d
     try:
         arr = np.asarray(image)
         day = datetime.now().strftime("%Y-%m-%d")
-        out_dir = RESULTS_ROOT / day
+        # 측정과 같은 세션 폴더에 둔다. '_scene_' 접두는 유지 — list_results 가 '_'
+        # 접두를 개별 측정에서 제외하고, bundle 에도 안 실리게 하는 표식이다.
+        sess = session_folder()
+        out_dir = RESULTS_ROOT / day / sess
         out_dir.mkdir(parents=True, exist_ok=True)
         now = datetime.now()
         stamp = now.strftime("%H%M%S_") + f"{now.microsecond // 1000:03d}"
@@ -389,8 +458,8 @@ def save_scene(image, extent: list | None = None, meta: dict | None = None) -> d
         fig.tight_layout()
         fig.savefig(png_path, bbox_inches="tight")
         plt.close(fig)
-        return {"ok": True, "image_url": _url(day, png_path.name),
-                "scene_npz": str(npz_path), "extent": extent}
+        return {"ok": True, "image_url": f"{URL_PREFIX}/{day}/{sess}/{png_path.name}",
+                "session": sess, "scene_npz": str(npz_path), "extent": extent}
     except Exception as e:
         return {"ok": False, "error": f"Failed to save microscope image: {e}"}
 
@@ -414,19 +483,38 @@ def save_preview_png(png_bytes: bytes, tag: str = "preview") -> dict:
         return {"ok": False, "error": f"Failed to save preview image: {e}"}
 
 
-def latest_scene(date: str | None = None) -> str | None:
-    """해당 날짜(기본 오늘)의 가장 최근 scene npz 경로. 없으면 None."""
+def latest_scene(date: str | None = None, scope: str = "session") -> str | None:
+    """가장 최근 scene npz 경로. 없으면 None.
+
+    이 값이 run_analysis 의 `microscope_image` 로 주입되므로 '남의 세션 장면'을
+    돌려주면 안 된다 — 다른 문항이 찍은 현미경 사진 위에 피크맵을 겹치게 되고,
+    그건 없는 것보다 나쁘다(조용히 틀린 결과가 나온다).
+
+    구버전 폴백은 '날짜 폴더 직속'에만 적용한다. 리팩터 이전 장면들이 모여 있는
+    단일 풀이고, migrate_results 로 정리하면 자연히 비어서 폴백이 죽는다. 형제
+    세션 폴더는 절대 뒤지지 않는다.
+    """
     day_dir = RESULTS_ROOT / _resolve_date(date)
     if not day_dir.exists():
         return None
-    scenes = sorted(day_dir.glob("_scene_*.npz"))
+    if scope == "session":
+        sess_dir = day_dir / session_folder()
+        scenes = sorted(sess_dir.glob("_scene_*.npz")) if sess_dir.exists() else []
+        if scenes:
+            return str(scenes[-1])
+        scenes = sorted(day_dir.glob("_scene_*.npz"))        # 구버전 폴백
+        return str(scenes[-1]) if scenes else None
+    # scope="all": 그날 아무 세션에서든 가장 최근 것(수동 조사용)
+    scenes = sorted(day_dir.glob("_scene_*.npz")) + sorted(day_dir.glob("*/_scene_*.npz"))
+    scenes.sort(key=lambda p: p.name)
     return str(scenes[-1]) if scenes else None
 
 
 def bundle_results(date: str | None = None, names: list[str] | None = None,
-                   include: tuple[str, ...] = ("png", "csv", "json")) -> dict:
+                   include: tuple[str, ...] = ("png", "csv", "json"),
+                   scope: str = "session") -> dict:
     """저장된 측정 파일들을 zip 하나로 묶어 다운로드 URL 을 돌려준다(#4)."""
-    d, items = _select(date, names)
+    d, items = _select(date, names, scope)
     if not items:
         return {"ok": False, "error": f"No measurement results to bundle on {d}."}
     day_dir = RESULTS_ROOT / d
@@ -440,7 +528,10 @@ def bundle_results(date: str | None = None, names: list[str] | None = None,
             for ext in include:
                 p = it[ext]
                 if isinstance(p, Path) and p.exists():
-                    z.write(p, arcname=p.name)
+                    # 세션을 zip 안에서도 폴더로 유지한다 — scope="all" 로 여러 세션을
+                    # 묶으면 같은 이름이 서로 덮어쓸 수 있고, 풀었을 때 귀속도 사라진다.
+                    arc = f"{it['session']}/{p.name}" if it.get("session") else p.name
+                    z.write(p, arcname=arc)
                     n_files += 1
     return {"ok": True, "count": len(items), "files": n_files,
             "saved": {"title": f"Bundle (zip) · {len(items)} measurements / {n_files} files",

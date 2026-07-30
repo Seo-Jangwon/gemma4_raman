@@ -1,0 +1,228 @@
+# -*- coding: utf-8 -*-
+"""세션 단위 산출물 저장소 — AILA/CoALA 두 에이전트 공용.
+
+[왜 필요한가 — 2026-07-29]
+이전에는 에이전트가 만든 파일이 전부 data/ 최상위에 '모델이 정한 이름'으로 흩어졌다.
+실측된 상태:
+
+    data/T039_despiked.csv          <- 그래도 과제 ID 가 있는 경우
+    data/T046_processed.csv
+    data/processed_spectrum.csv     <- 어느 과제 산출물인지 알 수 없음
+    data/bg_corrected_default.csv   <- 동상. 두 번 돌리면 조용히 덮어씀
+
+문제가 셋이었다:
+  1. 귀속 불가 — 파일만 보고 어느 과제/어느 에이전트/몇 번째 실행인지 알 수 없다.
+     채점은 "T046 의 저장 결과를 레퍼런스와 비교"인데 그 파일을 특정할 수 없다.
+  2. 충돌 — 같은 과제를 AILA/CoALA 로 두 번 돌리면 뒤가 앞을 덮는다. 파일명이
+     모델 재량이라 두 에이전트가 같은 이름을 고르는 일이 실제로 일어난다.
+  3. 자기 참조 불가 — 에이전트가 "내가 방금/직전 턴에 무엇을 저장했는지" 물어볼
+     수단이 없었다. 멀티턴 과제에서 직전 산출물을 이어받지 못한다.
+
+[구조]
+    data/runs/<session_label>/
+        manifest.json          세션 메타 + 모든 산출물 인덱스(다른 곳에 있는 것까지)
+        spectra/NN_<name>.csv  처리된 스펙트럼 (save_result / save_spectrum)
+
+session_label 은 session_id 를 파일명 안전화한 것이다. 벤치마크는
+`bench_<run_id>_<agent>_<stamp>`(예: bench_T046_AILA_20260729_131500)를 넘기므로
+디렉터리 이름만으로 과제·에이전트·실행시각이 전부 드러난다.
+
+[data/results 쪽은 spectrum_store 가 담당한다]
+acquire_spectrum 자동 저장물과 run_analysis 그림은 프론트 서빙(URL_PREFIX)·분석 주입
+(list_results) 계약이 걸려 있어 data/runs 로 끌어오지 않는다. 대신 그쪽도 세션별로
+갈라져 있다 — data/results/<date>/<session_label>/ (spectrum_store 문서 참고). 이 모듈은
+manifest 에 그 '포인터'를 기록해, 세션 하나만 보면 흩어진 산출물을 다 찾을 수 있게 한다.
+즉 "새로 쓰는 것은 세션 디렉터리로, 계약이 걸린 것은 제자리에서 세션별로 + manifest
+인덱싱"이 이 모듈의 방침이다.
+
+[실패 격리]
+저장소 부기(manifest)가 실패해도 실험은 굴러가야 한다 — 모든 I/O 는 예외를 삼키고
+stderr 경고만 낸다. 반대로 '실제 산출물 쓰기'는 삼키지 않는다(그건 결과 유실이므로).
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+import threading
+from datetime import datetime
+from pathlib import Path
+
+# backend/agents/run_store.py → parents[2] = 프로젝트 루트
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = _PROJECT_ROOT / "data"
+RUNS_ROOT = DATA_ROOT / "runs"
+
+# 산출물 종류. 디렉터리를 갖는 것은 spectra 뿐이고 나머지는 '제자리 + 인덱싱'이다.
+KIND_SPECTRA = "spectra"
+KIND_FIGURE = "figure"
+KIND_MEASUREMENT = "measurement"
+_DIR_KINDS = {KIND_SPECTRA}
+
+_LOCK = threading.Lock()
+
+# 현재 턴의 세션. 서버가 세션을 병렬 처리할 수 있으나 이 프로젝트는 단일 사용자
+# 로컬 도구이고 벤치마크도 문항을 순차 실행한다(run_bench.py) — 전역 1개로 충분하다.
+# 병렬 실행을 하게 되면 이걸 contextvars.ContextVar 로 바꿔야 한다.
+_current: dict = {"session_id": "", "agent": "", "label": ""}
+
+
+def _sanitize(text: str) -> str:
+    """파일/디렉터리명에 안전한 형태로. detail_log._sanitize 와 같은 규칙 —
+    같은 세션이 DetailLog 와 data/runs 에서 같은 이름으로 보여야 대조가 쉽다."""
+    return re.sub(r"[^0-9A-Za-z_-]", "-", str(text))[:64] or "nosession"
+
+
+def _safe_name(name, fallback: str = "result") -> str:
+    """모델이 준 산출물 이름을 한 조각짜리 안전한 stem 으로 강제한다.
+    디렉터리 성분은 통째로 버린다 — 생성 코드/모델 인자는 신뢰할 수 없다."""
+    raw = str(name or "").strip()
+    tail = raw.replace("\\", "/").rstrip("/").split("/")[-1]
+    tail = tail.replace(":", "_")
+    if tail.lower().endswith(".csv"):
+        tail = tail[:-4]
+    safe = "".join(c for c in tail if c.isalnum() or c in "._- ").strip(" .")
+    safe = re.sub(r"\s+", "_", safe)
+    return safe[:60] or fallback
+
+
+# ── 세션 경계 ────────────────────────────────────────────────────────────────
+def begin_session(session_id: str, agent: str = "") -> dict:
+    """턴 시작 시 에이전트 루프가 호출한다. 같은 session_id 로 다시 불러도
+    같은 디렉터리를 계속 쓴다(멀티턴 세션의 산출물이 한곳에 모여야 하므로)."""
+    label = _sanitize(session_id)
+    _current.update({"session_id": str(session_id or ""), "agent": str(agent or ""), "label": label})
+    try:
+        d = RUNS_ROOT / label
+        d.mkdir(parents=True, exist_ok=True)
+        mpath = d / "manifest.json"
+        if not mpath.exists():
+            _write_manifest({
+                "session_id": _current["session_id"],
+                "agent": _current["agent"],
+                "label": label,
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "artifacts": [],
+            })
+    except Exception as e:
+        print(f"[warn] run_store.begin_session: {type(e).__name__}: {e}", file=sys.stderr)
+    return current()
+
+
+def current() -> dict:
+    """현재 세션 정보. label 이 빈 문자열이면 아직 세션이 열리지 않은 상태."""
+    label = _current["label"]
+    return {
+        "session_id": _current["session_id"],
+        "agent": _current["agent"],
+        "label": label,
+        "dir": str(RUNS_ROOT / label) if label else "",
+        "rel_dir": f"runs/{label}" if label else "",
+    }
+
+
+def session_dir() -> Path:
+    """현재 세션 디렉터리. 세션이 없으면 '_unassigned' 로 떨어뜨린다 —
+    산출물을 버리는 것보다 한곳에 모아두는 편이 낫다(원인 추적 가능)."""
+    label = _current["label"] or "_unassigned"
+    d = RUNS_ROOT / label
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+# ── manifest ─────────────────────────────────────────────────────────────────
+def _manifest_path() -> Path:
+    return session_dir() / "manifest.json"
+
+
+def _write_manifest(doc: dict) -> None:
+    _manifest_path().write_text(
+        json.dumps(doc, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+
+
+def manifest() -> dict:
+    try:
+        p = _manifest_path()
+        if p.exists():
+            return json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[warn] run_store.manifest: {type(e).__name__}: {e}", file=sys.stderr)
+    return {"session_id": _current["session_id"], "label": _current["label"], "artifacts": []}
+
+
+def record(kind: str, rel_path: str, **meta) -> dict:
+    """산출물 1건을 manifest 에 인덱싱한다. rel_path 는 data/ 기준 상대경로
+    (그대로 load_spectrum 에 넘길 수 있는 형태) 또는 서빙 URL.
+
+    같은 rel_path 를 다시 기록하면 덮어쓴다 — 덮어쓴 파일이 두 줄로 남지 않게.
+    """
+    entry = {"kind": kind, "path": rel_path,
+             "saved_at": datetime.now().strftime("%H:%M:%S"), **meta}
+    try:
+        with _LOCK:
+            doc = manifest()
+            arts = [a for a in doc.get("artifacts", []) if a.get("path") != rel_path]
+            arts.append(entry)
+            doc["artifacts"] = arts
+            doc.setdefault("session_id", _current["session_id"])
+            doc.setdefault("label", _current["label"])
+            doc["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            _write_manifest(doc)
+    except Exception as e:
+        print(f"[warn] run_store.record: {type(e).__name__}: {e}", file=sys.stderr)
+    return entry
+
+
+def next_index(kind: str) -> int:
+    """이 종류의 다음 순번(1부터). 파일명 앞에 붙여 저장 순서를 이름에 새긴다 —
+    '어느 것이 최종 산출물인가'를 파일 목록만 보고 알 수 있게."""
+    return sum(1 for a in manifest().get("artifacts", []) if a.get("kind") == kind) + 1
+
+
+# ── 산출물 경로 발급 ──────────────────────────────────────────────────────────
+def new_spectrum_path(name, ext: str = ".csv") -> tuple[Path, str]:
+    """처리된 스펙트럼 저장 경로를 발급한다.
+
+    Returns (절대경로, data/ 기준 상대경로).
+    상대경로는 load_spectrum(그 문자열) 로 바로 다시 읽을 수 있는 형태다.
+    """
+    d = session_dir() / KIND_SPECTRA
+    d.mkdir(parents=True, exist_ok=True)
+    stem = f"{next_index(KIND_SPECTRA):02d}_{_safe_name(name)}"
+    p = d / f"{stem}{ext}"
+    # 같은 순번+이름이 이미 있으면(같은 턴 내 중복) 뒤에 -2, -3 을 붙인다.
+    n = 2
+    while p.exists():
+        p = d / f"{stem}-{n}{ext}"
+        n += 1
+    label = _current["label"] or "_unassigned"
+    return p, f"runs/{label}/{KIND_SPECTRA}/{p.name}"
+
+
+# ── 에이전트용 조회 ───────────────────────────────────────────────────────────
+def list_artifacts(kind: str | None = None) -> list[dict]:
+    arts = manifest().get("artifacts", [])
+    if kind:
+        arts = [a for a in arts if a.get("kind") == kind]
+    return arts
+
+
+def summary_for_prompt() -> str:
+    """시스템 프롬프트에 실을 짧은 세션 요약. 토큰을 아끼려 최근 것만, 한 줄씩."""
+    cur = current()
+    if not cur["label"]:
+        return ""
+    arts = list_artifacts()
+    head = (f"Your session label is `{cur['label']}`. Files you save go under "
+            f"`{cur['rel_dir']}/`, and spectra you measure are auto-saved under "
+            f"`results/<date>/{cur['label']}/`. Both are listed below and both are "
+            f"readable with load_spectrum('<path>').")
+    if not arts:
+        return head + " You have not saved any artifact in this session yet."
+    lines = [f"  - [{a.get('kind')}] {a.get('path')}"
+             + (f"  ({a.get('num_points')} pts)" if a.get("num_points") else "")
+             for a in arts[-12:]]
+    more = "" if len(arts) <= 12 else f"  ... and {len(arts) - 12} earlier artifact(s)\n"
+    return (head + f" Artifacts you have already saved in this session ({len(arts)}):\n"
+            + more + "\n".join(lines)
+            + "\nRead any of these back with load_spectrum('<path>') or run_analysis.")

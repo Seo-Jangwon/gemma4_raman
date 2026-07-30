@@ -9,7 +9,9 @@
       os/sys/subprocess/socket/open 등은 AST 검사 단계에서 거부.
     · 제한된 builtins — 파일/네트워크/eval/exec/__import__/getattr 류 차단.
     · 타임아웃 — 무한 루프 방지(부모가 프로세스 kill).
-    · 파일 출력은 data/results 로만 — matplotlib 그림만 자동 저장되어 채팅에 표시.
+    · 파일 출력은 data/ 아래로만 — matplotlib 그림은 data/results 에 자동 저장되어
+      채팅에 표시되고, 계산된 배열은 save_result() 로만 data/ 에 쓸 수 있다.
+      생성 코드가 경로를 직접 만질 방법은 없다(파일명은 훅이 basename 으로 강제).
 
   실행 컨텍스트에 미리 주입되는 것:
     spectra : list[dict]  — 저장된 측정들. 각 dict:
@@ -20,6 +22,16 @@
         table(dict: 컬럼명 → 숫자면 np.ndarray, 문자면 list[str])
     np      : numpy
     plt     : matplotlib.pyplot   (그림을 만들면 자동 저장됨)
+    save_result : 계산 결과 배열을 CSV 로 저장하는 훅 (아래 참고)
+
+  [save_result 가 왜 있는가 — 컨텍스트 왕복 제거]
+  이 샌드박스는 파일을 못 쓰므로, 원래는 계산 결과를 밖으로 빼는 통로가 print() 뿐이었다.
+  그래서 "보정해서 저장하라"류 과제에서 모델은 ① 배열 전체를 print 하고 ② 그걸 읽어서
+  ③ save_spectrum(data=[...]) 인자로 통째로 다시 뱉어야 했다. 1801점짜리 스펙트럼 하나가
+  컨텍스트를 2만 토큰씩 왕복하는 셈이라, 프롬프트(30k)만으로 창(32k)이 차고 생성이
+  중간에 잘려 빈 응답이 나왔다("Failed to generate a response."의 실제 원인).
+  save_result 는 그 왕복을 없앤다 — 숫자는 샌드박스 밖으로 나가지 않고, 모델은 저장된
+  경로 한 줄만 받는다. 부수 효과로 정밀도 손실도 사라진다(모델이 float 을 옮겨 적지 않으므로).
 
   ※ 첨부 파일도 microscope_image 와 똑같은 원칙으로 들어온다 — 파일을 '읽는' 것은
     신뢰된 부모(upload_store)이고, 생성된 코드는 이미 파싱된 변수만 만진다.
@@ -60,6 +72,18 @@ _SAFE_BUILTIN_NAMES = [
     "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
     "ZeroDivisionError", "RuntimeError", "StopIteration", "ArithmeticError",
 ]
+
+
+# stdout 상한. 이걸 넘으면 잘라내고 "대신 save_result 를 쓰라"고 안내한다.
+# 원래 무제한이라, 모델이 배열을 통째로 print 하면 그 문자열이 그대로 다음 프롬프트에
+# 실려 컨텍스트를 고갈시켰다. 4000자면 진단용 print(피크 위치, 통계 등)는 다 들어간다.
+_MAX_STDOUT_CHARS = 4000
+
+# save_result 로 한 번의 실행에서 만들 수 있는 파일 수 상한(폭주 방지).
+# saved_files 는 에이전트의 _SLIM_KEEP_KEYS 에 있어 길이와 무관하게 모델에 전달되므로
+# _slim 의 32 제한에 묶이지 않는다 — 이 값은 순수하게 '한 번의 실행에서 디스크를
+# 어지럽히지 않게' 하는 상한이다.
+_MAX_SAVED_FILES = 20
 
 
 def validate_code(code: str) -> None:
@@ -103,6 +127,134 @@ def _safe_builtins() -> dict:
     return d
 
 
+def _clip_stdout(s: str) -> tuple[str, bool]:
+    """stdout 을 상한까지 자른다. (잘린 문자열, 잘렸는지) 반환.
+
+    잘린 경우 안내문을 덧붙인다 — 모델이 "출력이 왜 끊겼지" 하고 같은 코드를 다시
+    돌리는 대신, 배열은 save_result 로 저장해야 한다는 걸 알게 하려는 것.
+    """
+    if len(s) <= _MAX_STDOUT_CHARS:
+        return s, False
+    return (
+        s[:_MAX_STDOUT_CHARS]
+        + f"\n\n...[stdout truncated at {_MAX_STDOUT_CHARS} chars of {len(s)} total]\n"
+          "Do NOT print large arrays - the output is cut off and it wastes the context window. "
+          "Save arrays with save_result(filename, intensity, raman_shift=...) instead; "
+          "it returns the saved path. print() only small summaries (counts, peak positions, statistics).",
+        True,
+    )
+
+
+def _sanitize_filename(name) -> str:
+    """save_result 에 넘어온 파일명을 data/ 바로 아래의 단일 .csv 파일명으로 강제한다.
+
+    생성 코드는 신뢰할 수 없으므로 디렉터리 성분을 통째로 버린다 — '../../x',
+    'C:/Windows/x', 'sub/dir/x' 모두 마지막 조각만 남기고, 거기서 다시 경로
+    구분자와 위험 문자를 제거한다. 즉 어떤 입력이 와도 data/<safe>.csv 밖으로는
+    나갈 수 없다.
+    """
+    raw = str(name or "").strip()
+    if not raw:
+        raise ValueError("save_result: filename is empty.")
+    # 구분자를 통일한 뒤 마지막 조각만 취한다(드라이브 문자·상위참조 제거).
+    tail = raw.replace("\\", "/").rstrip("/").split("/")[-1]
+    tail = tail.replace(":", "_")
+    safe = "".join(c for c in tail if c.isalnum() or c in "._- ").strip(" .")
+    if not safe:
+        raise ValueError(f"save_result: filename {raw!r} has no usable characters.")
+    if not safe.lower().endswith(".csv"):
+        safe += ".csv"
+    return safe
+
+
+def _make_save_result(data_dir, saved: list, rel_prefix: str = "", start_index: int = 1):
+    """샌드박스에 주입할 save_result 훅을 만든다.
+
+    이 함수 자체는 '신뢰된 부모 코드'라서 open/Path 를 자유롭게 쓴다 — AST 금지 목록은
+    exec 되는 생성 코드의 텍스트에만 적용된다. 생성 코드가 통제하는 것은 인자뿐이고,
+    파일명은 _sanitize_filename 이, 경로는 data_dir 고정이 막는다.
+
+    CSV 포맷은 raman_tools.save_spectrum 과 정확히 동일하게 맞춘다 — 같은 과제를 어느
+    경로로 풀든 산출물이 같아야 채점(참조 스펙트럼과의 수치 비교)이 성립하고,
+    load_spectrum 으로 그대로 다시 읽힌다.
+
+    [rel_prefix / start_index — 세션 귀속]
+    샌드박스는 별도 서브프로세스라 run_store 의 '현재 세션'을 공유하지 못한다. 그래서
+    부모가 세션 디렉터리(data_dir)와 data/ 기준 상대경로 접두사(rel_prefix), 그리고
+    이 세션에서 이미 쓴 개수(start_index)를 payload 로 넘겨준다. 파일명 앞에 순번을
+    붙이는 이유는 목록만 보고 '어느 것이 최종 산출물인가'를 알 수 있게 하려는 것.
+    """
+    import csv as _csv
+
+    def save_result(filename, intensity, raman_shift=None, wavelength_nm=None,
+                    metadata=None) -> str:
+        """계산된 스펙트럼을 세션 폴더에 저장하고 data/ 기준 상대경로를 돌려준다.
+
+        intensity 는 필수, raman_shift / wavelength_nm 은 선택. 값은 float 그대로
+        기록한다(포맷팅하지 않는다) — repr 왕복 정밀도가 유지되어야 하므로.
+        """
+        if len(saved) >= _MAX_SAVED_FILES:
+            raise RuntimeError(
+                f"save_result: too many files in one run (max {_MAX_SAVED_FILES}).")
+
+        stem = _sanitize_filename(filename)[:-4]          # .csv 제거
+        safe = f"{start_index + len(saved):02d}_{stem}.csv"
+
+        def _col(v, label):
+            if v is None:
+                return None
+            seq = [float(x) for x in v]
+            if not seq:
+                raise ValueError(f"save_result: {label} is empty.")
+            return seq
+
+        ints = _col(intensity, "intensity")
+        if ints is None:
+            raise ValueError("save_result: intensity is required.")
+        shift = _col(raman_shift, "raman_shift")
+        wl = _col(wavelength_nm, "wavelength_nm")
+        for label, seq in (("raman_shift", shift), ("wavelength_nm", wl)):
+            if seq is not None and len(seq) != len(ints):
+                raise ValueError(
+                    f"save_result: {label} has {len(seq)} points but intensity has "
+                    f"{len(ints)} - they must match.")
+
+        data_dir.mkdir(parents=True, exist_ok=True)
+        path = data_dir / safe
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = _csv.writer(f)
+            if shift is not None and wl is not None:
+                w.writerow(["pixel_index", "raman_shift_cm-1", "wavelength_nm", "intensity"])
+                for i, (a, b, c) in enumerate(zip(shift, wl, ints)):
+                    w.writerow([i, a, b, c])
+            elif shift is not None:
+                w.writerow(["pixel_index", "raman_shift_cm-1", "intensity"])
+                for i, (a, c) in enumerate(zip(shift, ints)):
+                    w.writerow([i, a, c])
+            else:
+                w.writerow(["pixel_index", "intensity"])
+                for i, c in enumerate(ints):
+                    w.writerow([i, c])
+
+        if metadata:
+            # dict 가 아닌 게 와도 죽지 않게 — 저장 자체가 실패하면 안 된다.
+            try:
+                path.with_suffix(".json").write_text(
+                    json.dumps(metadata, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8")
+            except Exception:
+                pass
+
+        # data/ 기준 상대경로를 돌려준다 — 이 문자열을 그대로 load_spectrum 에 넘겨
+        # 다시 읽을 수 있다(부모가 manifest 에도 이 경로로 인덱싱한다).
+        rel = f"{rel_prefix}{safe}" if rel_prefix else safe
+        saved.append({"path": rel, "num_points": len(ints),
+                      "has_raman_shift": shift is not None})
+        return rel
+
+    return save_result
+
+
 # ── 서브프로세스 진입점: python -m backend.analysis_sandbox <payload.json> ──────
 def _main(payload_path: str) -> None:
     import io
@@ -127,6 +279,9 @@ def _main(payload_path: str) -> None:
 
     buf = io.StringIO()
     result: dict = {"ok": False}
+    # try 바깥에서 만든다 — save_result 로 파일을 쓴 뒤 코드가 죽어도, 무엇이
+    # 이미 저장됐는지는 에러 응답에도 실려야 모델이 같은 파일을 또 쓰지 않는다.
+    saved_files: list = []
     try:
         validate_code(code)
 
@@ -175,38 +330,62 @@ def _main(payload_path: str) -> None:
                 "table": table,
             })
 
+        # save_result 훅 — 계산 결과 배열을 컨텍스트에 태우지 않고 바로 파일로 뺀다.
+        # 저장 위치는 부모가 정한 세션 폴더(run_store) 다. 부모가 안 넘겼으면(단독 실행
+        # 이나 구버전 payload) data/ 최상위로 떨어뜨려 최소한 유실은 막는다.
+        _sdir = payload.get("spectra_dir")
+        save_result = _make_save_result(
+            Path(_sdir) if _sdir else (_PROJECT_ROOT / "data"),
+            saved_files,
+            rel_prefix=payload.get("spectra_rel_prefix") or "",
+            start_index=int(payload.get("spectra_start_index") or 1),
+        )
+
         ns = {
             "__builtins__": _safe_builtins(),
             "np": np, "plt": plt, "spectra": spectra, "files": files,
             "microscope_image": microscope_image, "image_extent": image_extent,
+            "save_result": save_result,
         }
         with contextlib.redirect_stdout(buf):
             # 이 줄의 주석은 ASCII 로만 쓴다 — traceback 에 소스 줄이 그대로 실려
             # 모델에게 전달되므로, 비ASCII가 있으면 에러 메시지가 이스케이프로 더럽혀진다.
             exec(compile(code, "<analysis>", "exec"), ns)  # noqa: S102 (sandboxed)
 
-        # 생성된 모든 그림을 data/results 에 저장
+        # 생성된 모든 그림을 data/results/<date>/<세션>/ 에 저장한다.
+        # 세션 폴더 아래(측정 png/csv/json 과 같은 자리)에 두면 '이 문항이 만든 것'이
+        # 폴더 하나로 모인다. URL_PREFIX 서빙은 StaticFiles 라 하위 폴더도 그대로
+        # 나가므로 채팅 표시 계약은 그대로다.
         day = datetime.now().strftime("%Y-%m-%d")
-        out_dir = RESULTS_ROOT / day
+        sess = payload.get("session_folder") or "_unassigned"
+        out_dir = RESULTS_ROOT / day / sess
         out_dir.mkdir(parents=True, exist_ok=True)
         now = datetime.now()
         stamp = now.strftime("%H%M%S_") + f"{now.microsecond // 1000:03d}"
         images = []
         for i, num in enumerate(plt.get_fignums()):
             fig = plt.figure(num)
-            name = f"_analysis_{stamp}_{i}.png"
+            name = f"fig{stamp}_{i}.png"
             fig.savefig(out_dir / name, bbox_inches="tight")
-            images.append(f"{URL_PREFIX}/{day}/{name}")
+            images.append(f"{URL_PREFIX}/{day}/{sess}/{name}")
         plt.close("all")
 
-        result = {"ok": True, "stdout": buf.getvalue(), "images": images}
+        out, clipped = _clip_stdout(buf.getvalue())
+        result = {"ok": True, "stdout": out, "images": images,
+                  "saved_files": saved_files}
+        if clipped:
+            result["stdout_truncated"] = True
     except Exception as e:
+        out, clipped = _clip_stdout(buf.getvalue())
         result = {
             "ok": False,
-            "stdout": buf.getvalue(),
+            "stdout": out,
             "error": f"{type(e).__name__}: {e}",
             "trace": traceback.format_exc()[-1200:],
+            "saved_files": saved_files,
         }
+        if clipped:
+            result["stdout_truncated"] = True
     # ensure_ascii 는 기본값(True) 그대로 둔다 — 비ASCII를 \uXXXX 로 이스케이프해
     # 순수 ASCII 로만 내보낸다. 부모의 json.loads 가 원래 문자로 복원하므로 무손실이고,
     # cp949 파이프를 타도 절대 깨지지 않는다. 여기서 ensure_ascii=False 를 쓰면
@@ -231,7 +410,8 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
     """
     import subprocess
     import tempfile
-    from backend.spectrum_store import list_results, latest_scene
+    from backend.spectrum_store import (list_results, latest_scene,
+                                        session_folder as _session_folder)
     from backend.upload_store import load_upload
 
     items = list_results(date)
@@ -270,8 +450,17 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
         return {"ok": False, "error": f"Code policy violation: {e}",
                 "hint": "Analysis only with numpy/scipy/matplotlib. No hardware/file/network access."}
 
+    # 세션 귀속 정보를 자식에게 넘긴다 — 자식은 별도 프로세스라 run_store 의 현재
+    # 세션을 못 보므로, 저장 디렉터리·상대경로 접두사·시작 순번을 부모가 계산해 준다.
+    from backend.agents import run_store
+    _spectra_dir = run_store.session_dir() / run_store.KIND_SPECTRA
+    _rel_prefix = f"{run_store.current()['rel_dir']}/{run_store.KIND_SPECTRA}/"
     payload = {"code": code, "spectra": spectra, "scene_path": latest_scene(date),
-               "uploads": uploads}
+               "uploads": uploads,
+               "spectra_dir": str(_spectra_dir),
+               "spectra_rel_prefix": _rel_prefix,
+               "spectra_start_index": run_store.next_index(run_store.KIND_SPECTRA),
+               "session_folder": _session_folder()}
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
                                      encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False)
@@ -303,12 +492,34 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
     payload = json.loads(out.split(marker, 1)[1])
 
     if not payload.get("ok"):
-        return {"ok": False, "error": payload.get("error", "Analysis failed"),
-                "stdout": payload.get("stdout", ""), "trace": payload.get("trace", "")}
+        # 실패해도 saved_files 는 실어 보낸다 — 이미 쓴 파일을 모델이 알아야 한다.
+        err = {"ok": False, "error": payload.get("error", "Analysis failed"),
+               "stdout": payload.get("stdout", ""), "trace": payload.get("trace", "")}
+        if payload.get("saved_files"):
+            err["saved_files"] = payload["saved_files"]
+            # 코드가 죽기 전에 이미 쓴 파일도 manifest 에 남긴다 — 디스크에는 있는데
+            # 인덱스에는 없는 '유령 파일'이 생기지 않게.
+            for _sf in payload["saved_files"]:
+                run_store.record(run_store.KIND_SPECTRA, _sf.get("path", ""),
+                                 num_points=_sf.get("num_points"), partial=True)
+        if payload.get("stdout_truncated"):
+            err["stdout_truncated"] = True
+        return err
 
     images = payload.get("images", [])
     resp = {"ok": True, "stdout": payload.get("stdout", ""),
             "image_count": len(images), "images": images}
+    if payload.get("stdout_truncated"):
+        resp["stdout_truncated"] = True
+    # save_result 로 쓴 파일 목록. 여기 경로가 곧 load_spectrum 이 읽는 경로다.
+    if payload.get("saved_files"):
+        resp["saved_files"] = payload["saved_files"]
+        for _sf in payload["saved_files"]:
+            run_store.record(run_store.KIND_SPECTRA, _sf.get("path", ""),
+                             num_points=_sf.get("num_points"),
+                             has_raman_shift=_sf.get("has_raman_shift"))
+    for _img in images:
+        run_store.record(run_store.KIND_FIGURE, _img, title=title or "Analysis result")
     if images:
         resp["saved"] = {"title": title or "Analysis result", "image_url": images[0]}
     return resp

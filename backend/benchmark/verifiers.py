@@ -1,6 +1,16 @@
 """
 벤치마크 검증 로직.
-각 verifier는 (verifier_spec, tool_trace, pre_state, post_state) → VerifyResult 반환.
+각 verifier는 (verifier_spec, tool_trace, pre_state, post_state, context) → VerifyResult.
+
+[검증기의 두 계층]
+  · 과정 검증 — 어떤 툴을 어떤 인자로 불렀는가(tool_called/tool_args/...). 트레이스만 본다.
+  · 정답 검증 — 산출물이 정답과 맞는가(reference_match/answer_numeric/answer_contains).
+    이쪽은 트레이스로는 알 수 없다. 툴 결과의 큰 배열은 _slim 이 버리므로(컨텍스트
+    폭주 방지) 수치는 '에이전트가 저장한 파일' 또는 '답변 텍스트'에서만 얻을 수 있다.
+    그래서 이 검증기들은 실행 레코드 전체(context)를 받는다.
+
+context 는 run_bench 레코드다 — id/session_id/tool_calls/answer 를 쓴다. 없으면(구버전
+호출) 정답 검증기는 '검증 불가'로 실패 처리하되, 과정 검증기는 그대로 동작한다.
 """
 
 from __future__ import annotations
@@ -20,16 +30,23 @@ def run_verifiers(
     tool_trace: list[dict],
     pre_state: dict,
     post_state: dict,
+    context: dict | None = None,
 ) -> list[VerifyResult]:
     results = []
     for v in verifiers:
-        results.append(_dispatch(v, tool_trace, pre_state, post_state))
+        results.append(_dispatch(v, tool_trace, pre_state, post_state, context))
     return results
 
 
-def _dispatch(v: dict, tool_trace, pre_state, post_state) -> VerifyResult:
+def _dispatch(v: dict, tool_trace, pre_state, post_state, context=None) -> VerifyResult:
     vtype = v["type"]
     try:
+        if vtype == "reference_match":
+            return _reference_match(v, context)
+        if vtype == "answer_numeric":
+            return _answer_numeric(v, context)
+        if vtype == "answer_contains":
+            return _answer_contains(v, context)
         if vtype == "tool_called":
             return _tool_called(v, tool_trace)
         if vtype == "tool_called_any":
@@ -408,6 +425,347 @@ def _laser_state(v: dict, post_state: dict) -> VerifyResult:
                             detail=f"레이저 상태: {'ON' if actual else 'OFF'}")
     return VerifyResult(passed=False, verifier_type="laser_state",
                         detail=f"레이저 상태 불일치: actual={'ON' if actual else 'OFF'}, expected={'ON' if expected else 'OFF'}")
+
+
+# ── 정답 검증 verifier (파일 / 답변 텍스트) ───────────────────────
+#
+# 여기부터는 '과정'이 아니라 '결과가 정답인가'를 본다. 판정 기준은 문항의
+# grading_criteria 를 그대로 수치화한 것이다.
+
+def _panel():
+    """spectra_panel 을 늦게 import 한다 — CSV 읽기/산출물 탐색/오차계산을 재사용.
+    (같은 로직을 두 벌 두면 리포트 그림과 채점 숫자가 갈라진다.)"""
+    import spectra_panel
+    return spectra_panel
+
+
+def _need_context(vtype: str, context) -> VerifyResult | None:
+    if not context:
+        return VerifyResult(passed=False, verifier_type=vtype,
+                            detail="실행 레코드(context)가 없어 정답 검증 불가")
+    return None
+
+
+def _spike_context(context, sp, ref_y):
+    """스파이크 인덱스와 입력 세기를 돌려준다 — spike_aware 판정용.
+
+    스파이크 위치는 task_files.json 의 ground_truth 를 1순위로, 없으면 '입력과
+    레퍼런스의 차가 1000 을 넘는 점'으로 역산한다(스파이크 설계 진폭은 +5000).
+    """
+    import json as _json
+    tid = str(context.get("id") or "")
+    tf_path = sp._TASK_FILES
+    try:
+        tf = _json.loads(tf_path.read_text(encoding="utf-8"))
+    except Exception:
+        tf = {}
+    files = (tf.get(tid) or {}).get("files") or [f"{tid}.csv"]
+    ip = sp._find_upload(files[0])
+    if ip is None:
+        return [], None
+    ic = sp.read_curves(ip, max_groups=1)
+    if not ic or not ic[0]["y"]:
+        return [], None
+    xi, yi = ic[0]["x"], ic[0]["y"]
+    n = min(len(yi), len(ref_y))
+    pos = ((tf.get(tid) or {}).get("ground_truth") or {}).get("spike_positions_cm-1") or []
+    if pos:
+        idx = [min(range(len(xi)), key=lambda i: abs(xi[i] - float(p))) for p in pos]
+    else:
+        idx = [i for i in range(n) if abs(yi[i] - ref_y[i]) > 1000.0]
+    return [i for i in idx if i < n], yi
+
+
+def _reference_match(v: dict, context) -> VerifyResult:
+    """에이전트가 저장한 스펙트럼 CSV 를 정답 레퍼런스와 점대점 비교한다.
+
+    v = {type:"reference_match", reference:"T038_reference.csv",
+         tolerance: 1e-5,          점당 허용 절대오차
+         max_bad_points: 0,        tolerance 를 넘어도 되는 점 개수
+         spike_aware: false,       True 면 '스파이크 계열' 기준으로 판정(아래)
+         min_removal_pct: 99.0}    spike_aware 일 때 요구 제거율
+
+    [spike_aware 가 필요한 이유]
+    T039/T056/T099 의 레퍼런스는 '스파이크를 지운 결과'가 아니라 '스파이크를 넣기 전
+    원본'이다(make_task_spectra: refs={...: (AXIS, ps)}). 스파이크는 단일 점에 +5000 을
+    더한 것이라 원래 값이 소실됐고, 어떤 despike 알고리즘도 그 점을 정확히 복원할 수
+    없다. 그래서 '전 구간 일치'를 요구하면 완벽한 답도 항상 실패한다 — 실측에서 비-
+    스파이크 1796점이 max|Δ|=0.0(완전 동일)이고 스파이크를 100% 제거한 답이 전체
+    max|Δ|=0.214 때문에 불일치로 찍혔다. 올바른 조건은 두 갈래다:
+      · 스파이크가 아닌 점을 건드리지 않았는가 (tolerance 이내)
+      · 스파이크 위치에서 초과분을 얼마나 제거했는가 (min_removal_pct 이상)
+    자세한 근거는 backend/benchmark/answer_specs.py 의 SPECS 참고
+    (review.py 가 채점 콘솔의 '정답 기준' 블록에 그대로 싣는다).
+
+    에이전트가 후보를 여러 개 저장했으면(예: T038 은 3개) 그중 가장 잘 맞는 것으로
+    판정하고, 후보 개수를 detail 에 남긴다 — tolerance 가 1e-5(= CSV 왕복 오차)라
+    우연히 맞출 수는 없으므로 'best of N' 이 점수를 부풀리지 않는다. 대신 여러 개를
+    저장했다는 사실 자체는 채점자가 볼 수 있게 적어 둔다.
+    """
+    bad = _need_context("reference_match", context)
+    if bad:
+        return bad
+    sp = _panel()
+    ref_name = v["reference"]
+    ref_path = sp._TASK_REFS / ref_name
+    if not ref_path.exists():
+        return VerifyResult(passed=False, verifier_type="reference_match",
+                            detail=f"레퍼런스 파일 없음: {ref_name}")
+    rc = sp.read_curves(ref_path, max_groups=1)
+    if not rc or not rc[0]["y"]:
+        return VerifyResult(passed=False, verifier_type="reference_match",
+                            detail=f"레퍼런스를 읽을 수 없음: {ref_name}")
+    ref_y = rc[0]["y"]
+
+    tol = float(v.get("tolerance", 1e-5))
+    max_bad = int(v.get("max_bad_points", 0))
+
+    csvs, _figs = sp.find_outputs(context)
+    if not csvs:
+        return VerifyResult(passed=False, verifier_type="reference_match",
+                            detail="에이전트가 저장한 스펙트럼 파일이 없음 (비교 불가)")
+
+    spike_aware = bool(v.get("spike_aware"))
+    min_rem = float(v.get("min_removal_pct", 99.0))
+    spike_idx, input_y = ([], None)
+    if spike_aware:
+        spike_idx, input_y = _spike_context(context, sp, ref_y)
+        if not spike_idx or input_y is None:
+            return VerifyResult(passed=False, verifier_type="reference_match",
+                                detail="spike_aware 인데 스파이크 위치를 특정할 수 없음")
+
+    best = None
+    for p in csvs:
+        oc = sp.read_curves(p, max_groups=1)
+        if not oc or not oc[0]["y"]:
+            continue
+        a, b = oc[0]["y"], ref_y
+        n = min(len(a), len(b))
+        if n == 0:
+            continue
+        d = [abs(a[i] - b[i]) for i in range(n)]
+        mx = max(d)
+        rmse = (sum(t * t for t in d) / n) ** 0.5
+        if spike_aware:
+            sset = {i for i in spike_idx if i < n}
+            ns = [d[i] for i in range(n) if i not in sset]
+            ns_bad = sum(1 for t in ns if t > tol)
+            ns_max = max(ns) if ns else 0.0
+            rem = [100.0 * (1.0 - d[i] / abs(input_y[i] - b[i]))
+                   for i in sorted(sset) if abs(input_y[i] - b[i]) > 1e-9]
+            worst = min(rem) if rem else 0.0
+            cand = {"key": (ns_bad, -worst), "name": p.name, "n": n, "max_abs": mx,
+                    "rmse": rmse, "ns_bad": ns_bad, "ns_max": ns_max, "ns_n": len(ns),
+                    "worst_rem": worst, "n_spike": len(sset)}
+        else:
+            n_bad = sum(1 for t in d if t > tol)
+            cand = {"key": (n_bad, mx), "name": p.name, "n": n, "max_abs": mx,
+                    "rmse": rmse, "n_bad": n_bad, "len_mismatch": len(a) != len(b)}
+        if best is None or cand["key"] < best["key"]:
+            best = cand
+    if best is None:
+        return VerifyResult(passed=False, verifier_type="reference_match",
+                            detail=f"산출물 {len(csvs)}개를 모두 읽을 수 없음")
+
+    extra = f", 후보 {len(csvs)}개 중 최선" if len(csvs) > 1 else ""
+    if spike_aware:
+        ok = best["ns_bad"] == 0 and best["worst_rem"] >= min_rem
+        return VerifyResult(
+            passed=ok, verifier_type="reference_match",
+            detail=(f"{'일치' if ok else '불일치'}(스파이크 기준): {best['name']} — "
+                    f"비-스파이크 {best['ns_n']}점 max|Δ|={best['ns_max']:.3e} "
+                    f"(허용초과 {best['ns_bad']}점), 스파이크 {best['n_spike']}개 "
+                    f"최저제거율 {best['worst_rem']:.2f}% (요구 {min_rem:g}%), "
+                    f"참고 전체 max|Δ|={best['max_abs']:.3e}{extra}"))
+    if best.get("len_mismatch"):
+        extra += ", 길이 불일치"
+    ok = best["n_bad"] <= max_bad
+    return VerifyResult(
+        passed=ok, verifier_type="reference_match",
+        detail=(f"{'일치' if ok else '불일치'}: {best['name']} vs {ref_name} — "
+                f"max|Δ|={best['max_abs']:.3e}, RMSE={best['rmse']:.3e}, "
+                f"허용초과 {best['n_bad']}/{best['n']}점 "
+                f"(tol={tol:g}, 허용 {max_bad}점{extra})"))
+
+
+# 에이전트가 응답을 못 만들었을 때의 폴백 문구(두 에이전트 공통).
+_NO_ANSWER_MARKERS = (
+    "failed to generate a response",
+    "the agent failed to generate a response",
+)
+
+
+def _no_answer(text: str) -> bool:
+    t = str(text or "").strip().lower()
+    return any(m in t for m in _NO_ANSWER_MARKERS) and len(t) < 120
+
+
+def _extract_numbers(text: str) -> list[float]:
+    """답변 텍스트에서 숫자를 뽑는다. 마크다운 강조·LaTeX·천단위 콤마를 견딘다."""
+    import re
+    t = str(text or "")
+    t = t.replace("**", " ").replace("$", " ").replace("\\text", " ")
+    t = re.sub(r"(?<=\d),(?=\d{3}\b)", "", t)          # 1,024 -> 1024
+    out = []
+    for m in re.findall(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", t):
+        try:
+            out.append(float(m))
+        except ValueError:
+            pass
+    return out
+
+
+def _answer_numeric(v: dict, context) -> VerifyResult:
+    """답변 텍스트에 기대 수치가 (허용오차 안에) 등장하는지.
+
+    v = {type:"answer_numeric", expected: 12.0 또는 [1001,1602,1031],
+         tolerance: 3.0            절대 허용오차
+         rel_tolerance: 0.05       상대 허용오차(둘 중 하나만 주면 그것만 씀)
+         ordered: true             리스트일 때 등장 순서까지 볼지
+         note: "..."}
+
+    한계를 분명히 해 둔다: 이건 '답변에 그 숫자가 있는가'를 보는 것이고,
+    '그 숫자가 올바른 항목에 붙어 있는가'는 보지 못한다. 그래서 실패는 강한 신호이지만
+    통과는 약한 신호다 — 그래서 이 검증기가 붙은 문항은 human_only 를 함께 남긴다.
+    """
+    bad = _need_context("answer_numeric", context)
+    if bad:
+        return bad
+    text = context.get("answer") or context.get("final_report") or ""
+    if not str(text).strip():
+        return VerifyResult(passed=False, verifier_type="answer_numeric",
+                            detail="답변이 비어 있음")
+    if _no_answer(text):
+        return VerifyResult(passed=False, verifier_type="answer_numeric",
+                            detail="에이전트가 응답을 생성하지 못했다(빈 응답 폴백) - 답변 내용 없음")
+    nums = _extract_numbers(text)
+    exp = v["expected"]
+    exp_list = list(exp) if isinstance(exp, (list, tuple)) else [exp]
+    atol = v.get("tolerance")
+    rtol = v.get("rel_tolerance")
+    if atol is None and rtol is None:
+        atol = 0.0
+
+    def _tol_for(e) -> float:
+        cands = []
+        if atol is not None:
+            cands.append(float(atol))
+        if rtol is not None:
+            cands.append(abs(float(e)) * float(rtol))
+        return max(cands) if cands else 0.0
+
+    if v.get("ordered") and len(exp_list) > 1:
+        # 기대값이 답변에 '순서대로' 부분수열로 나타나는지
+        pos = 0
+        found = []
+        for e in exp_list:
+            t = _tol_for(e)
+            hit = None
+            for i in range(pos, len(nums)):
+                if abs(nums[i] - float(e)) <= t:
+                    hit = i
+                    break
+            if hit is None:
+                return VerifyResult(
+                    passed=False, verifier_type="answer_numeric",
+                    detail=f"순서 불일치: {e}±{t:g} 를 앞선 항목 뒤에서 찾지 못함 "
+                           f"(기대 순서 {exp_list}, 찾은 값 {found})")
+            found.append(nums[hit])
+            pos = hit + 1
+        return VerifyResult(passed=True, verifier_type="answer_numeric",
+                            detail=f"순서까지 일치: {found} (기대 {exp_list})")
+
+    missing = []
+    found = []
+    for e in exp_list:
+        t = _tol_for(e)
+        hit = next((x for x in nums if abs(x - float(e)) <= t), None)
+        if hit is None:
+            missing.append(f"{e}±{t:g}")
+        else:
+            found.append(hit)
+    if missing:
+        return VerifyResult(
+            passed=False, verifier_type="answer_numeric",
+            detail=f"답변에서 찾지 못한 값: {missing} (찾은 값 {found}, "
+                   f"답변 내 숫자 {len(nums)}개)")
+    return VerifyResult(passed=True, verifier_type="answer_numeric",
+                        detail=f"기대값 전부 등장: {found} (기대 {exp_list})")
+
+
+# 답을 '선언'하는 문맥. 택일 문항에서 오답 라벨이 단순 언급된 것과, 실제로 그렇게
+# 답한 것을 구별하기 위해 쓴다. 이게 없으면 "amorphous 다. 반면 crystalline 은
+# 날카로운 피크를 갖는다" 같은 정상적인 대조 설명이 '여러 답을 말했다'로 오판된다
+# (실측: T104 가 정확히 이 이유로 오탐 났다).
+_DECL_MARKERS = (
+    "classif", "classify", "conclusion", "answer is", "the answer", "determined",
+    "identified as", "identific", "is most", "most similar", "most likely",
+    "result:", "verdict", "therefore", "thus the", "final",
+    "판정", "결론", "분류", "정답",
+)
+
+
+def _declaration_zones(text: str) -> str:
+    """답을 선언하는 부분만 모아 돌려준다. 선언 표지가 있는 줄/문장 + 마지막 줄."""
+    import re
+    zones = []
+    # 줄 단위(마크다운 불릿·헤딩), 그리고 문장 단위 둘 다 본다
+    units = [u for u in re.split(r"[\n]+", text) if u.strip()]
+    for u in units:
+        low = u.lower()
+        if any(m in low for m in _DECL_MARKERS):
+            zones.append(u)
+    for s in re.split(r"(?<=[.!?])\s+", text):
+        low = s.lower()
+        if any(m in low for m in _DECL_MARKERS):
+            zones.append(s)
+    if units:
+        zones.append(units[-1])          # 마지막 줄은 결론일 가능성이 높다
+    return "\n".join(zones)
+
+
+def _answer_contains(v: dict, context) -> VerifyResult:
+    """답변 텍스트에 기대 문자열(라벨/물질명 등)이 있는지. 대소문자 무시.
+
+    v = {type:"answer_contains", expected:"polystyrene" 또는 ["a","b"],
+         mode:"all"|"any",          기본 all
+         forbidden:["crystalline"]} 택일 문항에서 '여러 답 말하기' 방지.
+                                    단순 언급이 아니라 '선언 문맥'에서만 실패로 본다.
+    """
+    bad = _need_context("answer_contains", context)
+    if bad:
+        return bad
+    text = str(context.get("answer") or context.get("final_report") or "")
+    low = text.lower()
+    if not text.strip():
+        return VerifyResult(passed=False, verifier_type="answer_contains",
+                            detail="답변이 비어 있음")
+    # 에이전트가 빈 응답을 낸 경우의 폴백 문구. '표현을 못 찾음'이 아니라 '답 자체가
+    # 없음'이라고 보고해야 채점자가 원인을 혼동하지 않는다.
+    if _no_answer(text):
+        return VerifyResult(passed=False, verifier_type="answer_contains",
+                            detail="에이전트가 응답을 생성하지 못했다(빈 응답 폴백) - 답변 내용 없음")
+    exp = v["expected"]
+    exp_list = [str(x) for x in (exp if isinstance(exp, (list, tuple)) else [exp])]
+    hits = [e for e in exp_list if e.lower() in low]
+    forb = [str(x) for x in (v.get("forbidden") or [])]
+
+    if forb:
+        decl = _declaration_zones(text).lower()
+        # 선언 문맥에 오답 라벨이 있고, 정답 라벨은 없을 때만 '여러 답'으로 본다.
+        forb_decl = [f for f in forb if f.lower() in decl]
+        exp_decl = [e for e in exp_list if e.lower() in decl]
+        if forb_decl and not exp_decl:
+            return VerifyResult(
+                passed=False, verifier_type="answer_contains",
+                detail=f"선언 문맥에서 오답 라벨을 답으로 말함: {forb_decl} (기대 {exp_list})")
+    mode = v.get("mode", "all")
+    ok = (len(hits) == len(exp_list)) if mode == "all" else bool(hits)
+    if ok:
+        return VerifyResult(passed=True, verifier_type="answer_contains",
+                            detail=f"기대 표현 등장({mode}): {hits}")
+    return VerifyResult(passed=False, verifier_type="answer_contains",
+                        detail=f"기대 표현 없음({mode}): 기대={exp_list}, 등장={hits}")
 
 
 def _spectrum_valid(v: dict, tool_trace: list[dict]) -> VerifyResult:

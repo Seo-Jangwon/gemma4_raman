@@ -131,14 +131,26 @@ class TangoController:
         print("[OK] 연결 해제 완료")
         return True
 
-    def free_session(self):
-        """세션 ID 해제"""
-        if self.dll and self.LSID.value > 0:
-            try:
-                self.dll.LSX_FreeLSID(self.LSID)
-                print("[OK] 세션 해제 완료")
-            except OSError as e:
-                print(f"[WARN] 세션 해제 중 DLL 예외 (무시): {e}")
+    def free_session(self) -> bool:
+        """세션 ID 해제. 성공/실패를 bool 로 돌려주고, 여러 번 불러도 안전하다.
+
+        [왜 반환값과 멱등성이 필요한가 — 2026-07-29]
+        재접속 경로(raman_tools._teardown_component)는 "세션이 정말 풀렸는가"를 보고
+        핸들을 버릴지 남길지 결정한다. 예전엔 이 함수가 아무것도 반환하지 않아
+        호출자가 실패를 알 수 없었고, LSID 도 그대로 남아 재시도 때 이미 해제된 ID 로
+        LSX_FreeLSID 를 또 불렀다. 해제 성공 시 LSID 를 0 으로 지워 그 두 문제를 없앤다.
+        """
+        if not self.dll or self.LSID.value <= 0:
+            return True                      # 이미 풀렸거나 애초에 없다 = 해제된 상태
+        try:
+            self.dll.LSX_FreeLSID(self.LSID)
+        except OSError as e:
+            print(f"[WARN] 세션 해제 중 DLL 예외: {e}")
+            return False
+        self.LSID.value = 0                  # 멱등성 확보(두 번째 호출은 위에서 True)
+        self.connected = False
+        print("[OK] 세션 해제 완료")
+        return True
     
     def get_position(self) -> tuple:
         """현재 위치 조회"""
