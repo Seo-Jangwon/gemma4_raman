@@ -35,7 +35,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 # ── 백엔드 모듈 ────────────────────────────────────────────────────────────────
-from backend.hardware_manager import HardwareManager
+from backend.hardware_manager import HardwareManager, get_manager
 import backend.llm_client as llm_client
 from backend.config import CAMERA_WIDTH, CAMERA_HEIGHT, LENS_WIDTH_UM, LENS_HEIGHT_UM
 from backend.hw_tools.raman_tools import init_hardware as rt_init_hardware
@@ -54,7 +54,7 @@ class CcdInitState(str, Enum):
 
 @dataclass
 class AppState:
-    hw: HardwareManager = field(default_factory=HardwareManager)
+    hw: HardwareManager = field(default_factory=get_manager)
     executor: ThreadPoolExecutor = field(
         default_factory=lambda: ThreadPoolExecutor(max_workers=4)
     )
@@ -234,18 +234,24 @@ def _agent_module(name: Optional[str]):
 async def camera_connect(body: CameraConnectRequest, request: Request):
     state = _state(request)
     hw = state.hw
-    if hw.camera is not None:
-        return {"ok": True, "message": "카메라 이미 연결됨"}
     loop = asyncio.get_event_loop()
     try:
         def _connect():
-            from backend.hw_tools.USE_camera_stream import StreamingTUCam
-            cam = StreamingTUCam(exposure_ms=body.exposure_ms)
-            cam.start_stream()
-            hw.camera = cam
-            rt_init_hardware(stage=hw.stage, laser=hw.laser, ccd=hw.ccd, camera=hw.camera)
-        await loop.run_in_executor(state.executor, _connect)
-        return {"ok": True, "message": "카메라 연결 완료"}
+            # 이 엔드포인트는 노출 시간을 인자로 받으려고 _init_camera() 를 쓰지 않고
+            # 직접 생성한다 → @_guarded 보호를 못 받으므로 락을 여기서 명시적으로 잡는다.
+            # '이미 연결됨' 판정도 락 안에서 해야 한다: 밖에서 보면 동시 요청 둘이 모두
+            # "미연결"을 보고 각자 카메라를 열어 한쪽 핸들이 고아가 된다.
+            with hw.component_lock("camera"):
+                if hw.camera is not None:
+                    return "카메라 이미 연결됨"
+                from backend.hw_tools.USE_camera_stream import StreamingTUCam
+                cam = StreamingTUCam(exposure_ms=body.exposure_ms)
+                cam.start_stream()
+                hw.camera = cam
+                rt_init_hardware(stage=hw.stage, laser=hw.laser, ccd=hw.ccd, camera=hw.camera)
+                return "카메라 연결 완료"
+        msg = await loop.run_in_executor(state.executor, _connect)
+        return {"ok": True, "message": msg}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -254,13 +260,19 @@ async def camera_connect(body: CameraConnectRequest, request: Request):
 async def stage_connect(body: StageConnectRequest, request: Request):
     state = _state(request)
     hw = state.hw
-    if hw.stage is not None:
-        return {"ok": True, "message": "스테이지 이미 연결됨"}
     loop = asyncio.get_event_loop()
     try:
-        await loop.run_in_executor(state.executor, hw._init_stage)
-        rt_init_hardware(stage=hw.stage, laser=hw.laser, ccd=hw.ccd, camera=hw.camera)
-        return {"ok": True, "message": "스테이지 연결 완료"}
+        def _connect():
+            # _init_stage() 자체는 @_guarded("stage") 로 보호되지만, '이미 연결됨' 판정과
+            # 전역 핸들 재주입까지 한 구간으로 묶어야 동시 요청에도 안전하다.
+            with hw.component_lock("stage"):
+                if hw.stage is not None:
+                    return "스테이지 이미 연결됨"
+                hw._init_stage()
+                rt_init_hardware(stage=hw.stage, laser=hw.laser, ccd=hw.ccd, camera=hw.camera)
+                return "스테이지 연결 완료"
+        msg = await loop.run_in_executor(state.executor, _connect)
+        return {"ok": True, "message": msg}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -269,19 +281,23 @@ async def stage_connect(body: StageConnectRequest, request: Request):
 async def laser_connect(body: LaserConnectRequest, request: Request):
     state = _state(request)
     hw = state.hw
-    if hw.laser is not None:
-        return {"ok": True, "message": "레이저 이미 연결됨"}
     loop = asyncio.get_event_loop()
     try:
         def _connect():
-            from backend.hw_tools.USE_laser_with_power import LaserController
-            laser = LaserController(port=body.port)
-            if not (laser.ser and laser.ser.is_open):
-                raise RuntimeError(f"레이저 포트 연결 실패 ({body.port})")
-            hw.laser = laser
-            rt_init_hardware(stage=hw.stage, laser=hw.laser, ccd=hw.ccd, camera=hw.camera)
-        await loop.run_in_executor(state.executor, _connect)
-        return {"ok": True, "message": "레이저 연결 완료"}
+            # 카메라와 같은 이유 — 포트를 인자로 받으려고 _init_laser() 를 우회하므로
+            # 락을 직접 잡는다. COM 포트는 두 번 열면 'Access is denied' 로 죽는다.
+            with hw.component_lock("laser"):
+                if hw.laser is not None:
+                    return "레이저 이미 연결됨"
+                from backend.hw_tools.USE_laser_with_power import LaserController
+                laser = LaserController(port=body.port)
+                if not (laser.ser and laser.ser.is_open):
+                    raise RuntimeError(f"레이저 포트 연결 실패 ({body.port})")
+                hw.laser = laser
+                rt_init_hardware(stage=hw.stage, laser=hw.laser, ccd=hw.ccd, camera=hw.camera)
+                return "레이저 연결 완료"
+        msg = await loop.run_in_executor(state.executor, _connect)
+        return {"ok": True, "message": msg}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -29,7 +29,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
+import functools
 import signal
 import sys
 import threading
@@ -86,6 +88,38 @@ INIT_SPEED_MM_S = 10.0
 
 DEFAULT_OUTPUT_AMP = 1
 
+
+def _guarded(component: str):
+    """_init_<component>() 에 ① 장비 락 ② 중복 초기화 방지를 함께 걸는 데코레이터.
+
+    본문을 재들여쓰기하지 않고 보호를 걸기 위해 데코레이터로 만들었다. 어느 경로로
+    초기화가 들어와도(startup / 서버 엔드포인트 / reconnect_hardware) 같은 락을 지나므로,
+    보호를 호출자마다 기억해야 하는 문제가 없다.
+
+    [왜 '이미 연결됨' 검사가 이 안에 있어야 하는가]
+    락은 두 스레드가 '동시에' 초기화하는 것만 막는다. 순차 중복은 여전히 남는다:
+    두 요청이 겹치면 두 번째는 락을 기다렸다가, 첫 번째가 이미 연결을 끝낸 장비에 대해
+    초기화를 한 번 더 수행한다(= 열려 있는 자원에 두 번째 세션을 시도). 그래서 검사가
+    필요한데, 이것을 호출자 쪽(락 밖)에 두면 TOCTOU 가 되어 무의미하다 —
+    두 스레드가 모두 "미연결"을 보고 통과한다. 검사는 반드시 락 안에서 해야 한다.
+
+    재초기화(reconnect)는 이 가드에 걸리지 않는다: raman_tools._teardown_component 가
+    '해제가 확인된 경우에만' 해당 속성을 None 으로 만든 뒤 _init_* 를 부르기 때문이다.
+    즉 이 가드는 "해제 없이 그냥 또 연결"만 막는다.
+    """
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            with self.component_lock(component):
+                if getattr(self, component) is not None:
+                    print(f"[SKIP]  {component} 는 이미 연결되어 있습니다 "
+                          f"— 초기화를 건너뜁니다(해제 없이 재연결하면 자원이 고아가 됩니다).")
+                    return
+                return fn(self, *args, **kwargs)
+        return wrapper
+    return deco
+
+
 class HardwareManager:
     """
     모든 하드웨어 연결 수명주기 관리.
@@ -102,9 +136,36 @@ class HardwareManager:
         self._shutdown_called = False
         self._lock = threading.Lock()
 
+        # ── 컴포넌트별 재진입 락 ───────────────────────────────────────────────
+        # [왜 필요한가 — 2026-07-30]
+        # 이 매니저는 서버(state.hw)와 에이전트 도구(raman_tools.reconnect_hardware)가
+        # 공유하는 '단일' 인스턴스다. 서버는 워커 4개짜리 ThreadPoolExecutor 로 돌고,
+        # CCD 냉각은 별도 스레드에서 수 분간 진행된다. 그래서 같은 장비를 두 스레드가
+        # 동시에 teardown/init 하는 경합이 실제로 가능하다. 그러면
+        #   ① 이중 해제(닫힌 핸들을 또 닫음)
+        #   ② 한쪽이 방금 만든 핸들을 다른 쪽이 None 으로 덮어써 '고아 세션'
+        #      (DLL 세션·COM 포트는 살아 있는데 그것을 해제할 참조가 사라진 상태)
+        # 이 생긴다. ②는 프로세스 재시작 외에는 회복 불가다
+        # (raman_tools._teardown_component docstring 참고).
+        #
+        # 장비별로 쪼갠 이유: stage/ccd/camera/laser 는 서로 독립된 자원인데, CCD 는
+        # 초기화가 수 분(냉각 안정화 대기) 걸린다. 하나의 전역 락으로 묶으면 그 몇 분
+        # 내내 다른 장비 작업이 전부 멈춘다.
+        #
+        # RLock(재진입)인 이유: 호출자가 락을 쥔 채 _init_<comp>() 를 부를 수 있고
+        # (_guarded 데코레이터가 그 안에서 같은 락을 다시 잡는다), 재진입이 아니면
+        # 자기 자신에게 걸려 교착한다.
+        self._comp_locks: dict[str, threading.RLock] = {
+            name: threading.RLock()
+            for name in ("stage", "ccd", "camera", "laser", "ollama")
+        }
+
         # Ctrl+C / 프로세스 종료 신호 처리
-        signal.signal(signal.SIGINT,  self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT,  self._signal_handler)
+            signal.signal(signal.SIGTERM, self._signal_handler)
+        else:
+            print("[WARN] HardwareManager를 워커 스레드에서 생성 — 종료 신호 핸들러 미등록")
 
     # ── 신호 처리 ──────────────────────────────────────────────────────────────
 
@@ -113,10 +174,46 @@ class HardwareManager:
         self.shutdown()
         sys.exit(0)
 
+    # ── 컴포넌트 락 ────────────────────────────────────────────────────────────
+
+    def component_lock(self, component: str) -> threading.RLock:
+        """해당 장비의 연결/해제를 직렬화하는 재진입 락.
+
+        teardown+init 을 하나의 원자적 구간으로 묶고 싶은 호출자가 사용한다.
+        알 수 없는 이름은 조용히 새 락을 만들어 주지 않고 예외로 알린다 — 오타 하나로
+        보호가 사라졌는데 아무 증상이 없는 상황을 만들지 않기 위해서다.
+        """
+        try:
+            return self._comp_locks[component]
+        except KeyError:
+            raise ValueError(
+                f"unknown component '{component}' "
+                f"(expected one of {sorted(self._comp_locks)})"
+            ) from None
+
+    @contextlib.contextmanager
+    def _shutdown_guard(self, component: str, timeout: float = 10.0):
+        """종료 시 장비 락을 '짧게만' 기다렸다가 그대로 진행하는 컨텍스트 매니저.
+
+        종료 경로는 영구 대기해선 안 된다 — Ctrl+C 가 먹지 않는 것처럼 보인다. 그렇다고
+        해제를 건너뛰면 장비를 잡은 채 프로세스가 죽어 다음 실행이 '이미 점유 중'으로
+        실패한다. 그래서 짧게 기다려 보고, 못 잡으면 경고만 남기고 해제를 진행한다.
+        """
+        acquired = self._comp_locks[component].acquire(timeout=timeout)
+        if not acquired:
+            print(f"[{component.upper()}] 경고: 다른 스레드가 이 장비를 점유 중 "
+                  f"({timeout}s 대기 후 포기) — 해제를 그대로 진행합니다.")
+        try:
+            yield
+        finally:
+            if acquired:
+                self._comp_locks[component].release()
+
     # ════════════════════════════════════════════════════════════════════════════
     # 개별 초기화
     # ════════════════════════════════════════════════════════════════════════════
 
+    @_guarded("stage")
     def _init_stage(self):
         """
         Tango 스테이지:
@@ -155,6 +252,7 @@ class HardwareManager:
         print("[STAGE] 초기화 완료")
         self.stage = tango
 
+    @_guarded("ccd")
     def _init_ccd(self):
         """
         Andor CCD 초기화.
@@ -252,6 +350,7 @@ class HardwareManager:
                 break
             time.sleep(3)
 
+    @_guarded("camera")
     def _init_camera(self):
         """TUCam 카메라 연결 + 스트리밍 시작."""
         from backend.hw_tools.USE_camera_stream import StreamingTUCam  # lazy: DLL 로드
@@ -261,6 +360,7 @@ class HardwareManager:
         print("[CAM]   연결 완료")
         self.camera = cam
 
+    @_guarded("laser")
     def _init_laser(self):
         """레이저 컨트롤러 연결."""
         print(f"\n[LASER] 레이저 연결 중... (포트: {LASER_PORT})")
@@ -270,6 +370,7 @@ class HardwareManager:
         print("[LASER] 연결 완료")
         self.laser = laser
 
+    @_guarded("ollama")
     def _init_ollama(self):
         """Ollama API 연결 확인."""
         import ollama
@@ -383,36 +484,44 @@ class HardwareManager:
         print("  시스템 종료 시작")
         print("=" * 60)
 
+        # 각 Step 을 장비 락으로 감싼다 — 동시에 진행 중인 재연결(_init_*, reconnect_
+        # hardware)이 방금 우리가 닫은 핸들을 되살리거나, 우리가 닫는 중인 자원에 새로
+        # 연결을 시도하는 것을 막는다. 종료가 멈춰 보이지 않도록 대기는 짧게만 한다.
+
         # ── Step 1: CCD 온도 복구 (최우선, 블로킹) ────────────────────────────
-        self._ccd_warmup_and_shutdown()
+        with self._shutdown_guard("ccd"):
+            self._ccd_warmup_and_shutdown()
 
         # ── Step 2: 레이저 ────────────────────────────────────────────────────
-        if self.laser is not None:
-            try:
-                self.laser.laser_off()
-                if self.laser.ser and self.laser.ser.is_open:
-                    self.laser.ser.close()
-                print("[LASER] 연결 해제 완료")
-            except Exception as e:
-                print(f"[LASER] 해제 중 예외: {e}")
+        with self._shutdown_guard("laser"):
+            if self.laser is not None:
+                try:
+                    self.laser.laser_off()
+                    if self.laser.ser and self.laser.ser.is_open:
+                        self.laser.ser.close()
+                    print("[LASER] 연결 해제 완료")
+                except Exception as e:
+                    print(f"[LASER] 해제 중 예외: {e}")
 
         # ── Step 3: 카메라 ────────────────────────────────────────────────────
-        if self.camera is not None:
-            try:
-                self.camera.stop_stream()
-                self.camera.close()
-                print("[CAM]   연결 해제 완료")
-            except Exception as e:
-                print(f"[CAM]   해제 중 예외: {e}")
+        with self._shutdown_guard("camera"):
+            if self.camera is not None:
+                try:
+                    self.camera.stop_stream()
+                    self.camera.close()
+                    print("[CAM]   연결 해제 완료")
+                except Exception as e:
+                    print(f"[CAM]   해제 중 예외: {e}")
 
         # ── Step 4: 스테이지 ──────────────────────────────────────────────────
-        if self.stage is not None:
-            try:
-                self.stage.disconnect()
-                self.stage.free_session()
-                print("[STAGE] 연결 해제 완료")
-            except Exception as e:
-                print(f"[STAGE] 해제 중 예외: {e}")
+        with self._shutdown_guard("stage"):
+            if self.stage is not None:
+                try:
+                    self.stage.disconnect()
+                    self.stage.free_session()
+                    print("[STAGE] 연결 해제 완료")
+                except Exception as e:
+                    print(f"[STAGE] 해제 중 예외: {e}")
 
         print("\n" + "=" * 60)
         print("  모든 하드웨어 연결 해제 완료")

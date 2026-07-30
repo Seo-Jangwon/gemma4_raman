@@ -212,52 +212,81 @@ def reconnect_hardware(component: str = "all") -> dict:
     if comp not in valid:
         return {"ok": False, "error": f"component must be one of {sorted(valid)}"}
 
-    mgr = get_manager()
+    try:
+        mgr = get_manager()
+    except Exception as e:
+        # 여기서 예외가 나면 도구가 에러 dict 가 아니라 날것의 예외를 던진다 —
+        # 에이전트는 그것을 관측으로 읽을 수 없으므로 반드시 감싼다.
+        return {"ok": False, "error": f"HardwareManager unavailable: {type(e).__name__}: {e}"}
+
     targets = ["stage", "ccd", "camera", "laser"] if comp == "all" else [comp]
     done, errors, detail = [], {}, {}
 
     for t in targets:
-        td = _teardown_component(mgr, t)
-        detail[t] = {"teardown": td}
-
-        if not td["released"]:
-            # 자원이 아직 잡혀 있다 — 이 상태로 재초기화하면 "이미 점유 중"으로 실패한다.
-            # 그걸 'reconnect 실패'로 뭉개지 말고, 원인과 다음 행동을 명시해 돌려준다.
+        # ── 장비 락을 '기다리지 않고' 잡는다 ──────────────────────────────────
+        # 이 매니저는 서버와 공유하는 단일 인스턴스다. 락이 잡혀 있다는 것은 다른
+        # 스레드(서버의 /api/*/connect 엔드포인트, 또는 수 분간 도는 CCD 냉각 스레드)가
+        # 이미 이 장비를 만지고 있다는 뜻이다. 블로킹으로 기다리면 CCD 냉각 뒤에 붙어
+        # 도구 호출이 몇 분간 멈춘 것처럼 보이므로, 기다리지 않고 '지금 진행 중'이라고
+        # 알려 에이전트가 스스로 판단하게 한다.
+        lock = mgr.component_lock(t)
+        if not lock.acquire(blocking=False):
+            detail[t] = {"skipped": "component busy (lock held by another thread)"}
             errors[t] = (
-                f"Could not release the {t} before reconnecting - the resource is still held "
-                f"by this process (teardown steps: {td['steps']}). Reconnecting was NOT attempted, "
-                f"because doing so would fail with an 'already in use' error and could orphan the "
-                f"handle. This is a process-level lock, not a cable problem: retrying this tool will "
-                f"not clear it. Continue with the remaining hardware if possible, report this in your "
-                f"final answer, and note that the server process must be restarted to free the {t}."
+                f"The {t} is being connected or released by another thread right now (the "
+                f"server's own reconnect endpoint, or the CCD cooling thread which runs for "
+                f"several minutes). Reconnecting was NOT attempted: two threads initializing the "
+                f"same device at once can orphan the handle and force a server restart. Do NOT "
+                f"retry immediately - continue with the remaining hardware, then check "
+                f"get_hardware_status() to see whether it came back on its own."
             )
             continue
 
-        # 해제와 재연결 사이에 잠깐 쉰다 — DLL 세션/COM 포트/USB 핸들은 OS 가 즉시
-        # 놓아주지 않는다. 없으면 '방금 내가 닫은 자원'에 스스로 걸려 실패한다.
-        time.sleep(_RECONNECT_SETTLE_S)
+        try:
+            td = _teardown_component(mgr, t)
+            detail[t] = {"teardown": td}
 
-        last = None
-        for attempt in range(1, _RECONNECT_ATTEMPTS + 1):
-            try:
-                getattr(mgr, f"_init_{t}")()
-                done.append(t)
-                detail[t]["init"] = f"ok (attempt {attempt})"
-                last = None
-                break
-            except Exception as e:
-                last = f"{type(e).__name__}: {e}"
-                detail[t]["init"] = f"attempt {attempt} failed: {last}"
-                if attempt < _RECONNECT_ATTEMPTS:
-                    time.sleep(_RECONNECT_SETTLE_S)
-        if last is not None:
-            errors[t] = (
-                f"Released the {t} successfully but re-initialization failed after "
-                f"{_RECONNECT_ATTEMPTS} attempts: {last}. The resource is now free, so this is a "
-                f"device-side problem (power, cable, driver, or the device is held by another "
-                f"program such as rays-on.exe) - not something you can fix by calling tools again. "
-                f"Proceed without the {t} if the task allows it and say so explicitly in your answer."
-            )
+            if not td["released"]:
+                # 자원이 아직 잡혀 있다 — 이 상태로 재초기화하면 "이미 점유 중"으로 실패한다.
+                # 그걸 'reconnect 실패'로 뭉개지 말고, 원인과 다음 행동을 명시해 돌려준다.
+                errors[t] = (
+                    f"Could not release the {t} before reconnecting - the resource is still held "
+                    f"by this process (teardown steps: {td['steps']}). Reconnecting was NOT attempted, "
+                    f"because doing so would fail with an 'already in use' error and could orphan the "
+                    f"handle. This is a process-level lock, not a cable problem: retrying this tool will "
+                    f"not clear it. Continue with the remaining hardware if possible, report this in your "
+                    f"final answer, and note that the server process must be restarted to free the {t}."
+                )
+                continue
+
+            # 해제와 재연결 사이에 잠깐 쉰다 — DLL 세션/COM 포트/USB 핸들은 OS 가 즉시
+            # 놓아주지 않는다. 없으면 '방금 내가 닫은 자원'에 스스로 걸려 실패한다.
+            time.sleep(_RECONNECT_SETTLE_S)
+
+            last = None
+            for attempt in range(1, _RECONNECT_ATTEMPTS + 1):
+                try:
+                    # _init_<t> 는 같은 락을 다시 잡는다(_guarded). RLock 이라 재진입 OK.
+                    getattr(mgr, f"_init_{t}")()
+                    done.append(t)
+                    detail[t]["init"] = f"ok (attempt {attempt})"
+                    last = None
+                    break
+                except Exception as e:
+                    last = f"{type(e).__name__}: {e}"
+                    detail[t]["init"] = f"attempt {attempt} failed: {last}"
+                    if attempt < _RECONNECT_ATTEMPTS:
+                        time.sleep(_RECONNECT_SETTLE_S)
+            if last is not None:
+                errors[t] = (
+                    f"Released the {t} successfully but re-initialization failed after "
+                    f"{_RECONNECT_ATTEMPTS} attempts: {last}. The resource is now free, so this is a "
+                    f"device-side problem (power, cable, driver, or the device is held by another "
+                    f"program such as rays-on.exe) - not something you can fix by calling tools again. "
+                    f"Proceed without the {t} if the task allows it and say so explicitly in your answer."
+                )
+        finally:
+            lock.release()
 
     # 재초기화된 객체를 raman_tools 전역에 재주입
     init_hardware(stage=mgr.stage, laser=mgr.laser, ccd=mgr.ccd, camera=mgr.camera)
