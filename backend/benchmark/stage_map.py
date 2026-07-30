@@ -178,14 +178,19 @@ def img_href(path: Path, out_dir: Path) -> str:
 
 # 색인 → 실제 URI 를 브라우저에서 채운다. <img> 는 화면에 들어올 때만 채워서
 # 수백 장을 한꺼번에 디코딩하지 않게 한다(IntersectionObserver).
+#
+# data-img 색인은 채운 뒤에도 '지우지 않는다'. 리포트를 통째로 다시 저장하는
+# 스냅샷 기능(review.exportSnapshot)이 직렬화 직전에 src/href 를 걷어내고 색인만
+# 남겨야 하기 때문이다 — 안 그러면 같은 base64 가 __IMG__ 와 태그에 두 번 들어가
+# 파일이 배로 커진다. 대신 data-hyd 로 이미 채운 걸 표시한다.
 HYDRATE_JS = """
 (function(){
   const M = window.__IMG__ || [];
   const fill = el => {
     const u = M[+el.dataset.img];
-    if (u === undefined) return;
+    if (u === undefined || el.dataset.hyd) return;
     if (el.tagName === 'IMG') el.src = u; else { el.href = u; el.target = '_blank'; }
-    el.removeAttribute('data-img');
+    el.dataset.hyd = '1';
   };
   const anchors = [], imgs = [];
   document.querySelectorAll('[data-img]').forEach(el =>
@@ -550,8 +555,8 @@ def collect_images(rec: dict) -> list[dict]:
 
 
 def build_images(rec: dict, out_dir: Path) -> str:
-    """이미지 갤러리 HTML. 리포트 용량을 위해 base64 가 아니라 상대링크를 쓴다
-    (=리포트 HTML 을 다른 데로 옮기면 그림이 깨진다. 생성 위치에서 열 것)."""
+    """이미지 갤러리 HTML. 경로는 img_src/img_href 가 처리한다 — 기본은 data: URI
+    임베드라 HTML 한 장만 옮겨도 그림이 살아 있다(--no-embed 일 때만 상대링크)."""
     imgs = collect_images(rec)
     if not imgs:
         return ""

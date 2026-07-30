@@ -24,8 +24,27 @@ T049(SNR)는 기계검증기가 `tool_called` 하나뿐이라 "run_analysis 를 
 from __future__ import annotations
 
 import csv
+import os
 import re
 from pathlib import Path
+
+# sklearn(T071 PCA · T072 KMeans)이 끌고 오는 joblib/loky 는 Windows 에서 물리 코어 수를
+# 세려고 외부 명령(wmic)을 실행하는데, 그게 없으면 매 실행마다 스택트레이스를 낀
+# UserWarning 을 뿜는다(WinError 2). 채점 결과와 무관하지만 진짜 오류로 오해하기 쉽다.
+#
+# 두 가지를 같이 해야 조용해진다.
+#  ① LOKY_MAX_CPU_COUNT 를 실제 코어 수보다 '작게' 준다. joblib 은 이 값이 os 코어 수보다
+#     작을 때만 물리 코어 조회를 건너뛴다(같은 값이면 그대로 조회하고 실패한다).
+#     여기 쓰는 PCA/KMeans 는 25×351 크기라 코어 하나 덜 쓰는 비용이 사실상 없다.
+#  ② 그래도 다른 경로로 조회가 일어날 때를 대비해 그 경고 하나만 좁게 끈다.
+#     (트레이스백은 joblib 이 traceback.print_tb 로 따로 찍어서 경고 필터로는 못 막는다 —
+#      그래서 ① 이 본체이고 ② 는 보조다.)
+os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(max(1, (os.cpu_count() or 4) - 1)))
+
+import warnings as _warnings
+_warnings.filterwarnings(
+    "ignore", message=r"(?s).*Could not find the number of physical cores.*",
+    category=UserWarning)
 
 import numpy as np
 
@@ -682,17 +701,63 @@ def d_T128(rec, task, tf):
     mats = {i: specs[i]["material"] for i in ids}
     import collections
     per_mat = collections.Counter(mats.values())
-    return [
+    # 채점기준은 '질의별 top-3 → 개별 정밀도 → 그 산술평균'을 요구한다. 평균값만 보면
+    # 질의별 계산이 틀렸는데 우연히 평균이 맞는 답도 통과한다. 그래서 답변 표에서
+    # 질의별 top-3 물질을 뽑아 기준값과 대조한다.
+    ans = rec.get("answer") or rec.get("final_report") or ""
+    _AL = {"polystyrene": "polystyrene", "ps": "polystyrene", "pet": "PET",
+           "pmma": "PMMA", "calcite": "calcite", "aragonite": "aragonite",
+           "silicon": "silicon", "si": "silicon"}
+    rep_rows = []
+    for line in ans.splitlines():
+        if line.count("|") < 3:
+            continue
+        cells = [c.strip().strip("*").strip() for c in line.strip().strip("|").split("|")]
+        mats = []
+        for c in cells:
+            for w in re.findall(r"[A-Za-z]+", c):
+                v = _AL.get(w.lower())
+                if v:
+                    mats.append(v)
+        if len(mats) >= 3:
+            rep_rows.append(mats[-3:] if len(mats) > 3 else mats)
+    gt_top3 = [[m for m in d.split("top3=[")[1].split("]")[0].replace("'", "").split(", ")]
+               for d in detail] if detail else []
+    per_ok = None
+    if len(rep_rows) >= len(gt_top3) > 0:
+        per_ok = all(sorted(a) == sorted(b) for a, b in zip(rep_rows, gt_top3))
+
+    # '1e-6 이내'는 채점기준 원문이다. 0.6667 은 그 기준을 넘는다(오차 3.3e-5).
+    # 표시 반올림으로 볼 수 있지만, 그 판단을 주석에 묻지 않고 별도 행으로 드러낸다.
+    reported = cmp["value"]
+    strict = (reported is not None and abs(float(reported) - mean) <= 1e-6)
+
+    out = [
         row("라이브러리", "참조 스펙트럼 수와 물질별 개수", f"{len(ids)}개 · " +
-            ", ".join(f"{k} {v}개" for k, v in sorted(per_mat.items())),
+            ", ".join(f"{k} {v}개" for k, v in sorted(per_mat.items())), "—",
             note=("물질당 참조가 2개뿐이므로 <b>top-3 의 최대 정밀도는 2/3 = 0.6667</b> 이다 — "
                   "1.0 을 보고했다면 오히려 계산이 틀린 것이다.")),
-        row("질의별 top-3", "같은 물질 개수 ÷ 3 = 개별 정밀도", "<br>".join(detail)),
-        row("개별 정밀도", "5개 값", [round(v, 4) for v in precisions]),
-        row("평균 정밀도 (기준값)", "5개의 산술평균, 상대오차 1e-6 이내", f"{mean:.6f}",
-            cmp["value"], cmp["verdict"],
+        row("질의별 top-3 (기준 조항)", "질의마다 같은 물질 개수 ÷ 3 = 개별 정밀도",
+            "<br>".join(detail),
+            ("<br>".join(", ".join(r) for r in rep_rows[:len(gt_top3)])
+             if rep_rows else "답변 표에서 못 읽음"),
+            (PASS if per_ok else FAIL) if per_ok is not None else INFO,
+            note="" if per_ok is not False else "질의별 top-3 가 기준값과 다르다"),
+        row("개별 정밀도", "5개 값", str([round(v, 4) for v in precisions]), "—"),
+        row("평균 정밀도", "5개의 산술평균", f"{mean:.6f}", reported, cmp["verdict"],
             note=cmp["note"] or "유사도 정의(코사인/상관)에 따라 top-3 이 바뀔 수 있다"),
+        row("기준의 1e-6 조항", "채점기준 원문: 레퍼런스와 <b>1e-6 이내</b>",
+            f"{mean:.6f}",
+            (f"{reported} → 오차 {abs(float(reported) - mean):.2g}"
+             if reported is not None else "값 없음"),
+            PASS if strict else INFO,
+            note="" if strict else
+                 "<b>기준을 문자 그대로 적용하면 미달이다.</b> 다만 답변이 2/3 를 소수 "
+                 "4자리로 표기한 것이라면 계산이 아니라 표시의 문제다 — 위 '질의별 top-3' "
+                 "행이 통과면 표시 반올림으로 보고 정답 처리하는 것이 타당하다. "
+                 "그 판단은 채점자가 명시적으로 내려야 한다."),
     ]
+    return out
 
 
 def d_T092(rec, task, tf):
@@ -740,6 +805,17 @@ CHECKS = {
     "T052": d_T052, "T053": d_T053, "T071": d_T071, "T072": d_T072, "T074": d_T074,
     "T092": d_T092, "T093": d_T093, "T104": d_T104, "T128": d_T128,
 }
+
+# 파일처리 문항 중 여기 없던 29개(T038/039/040/041/046/054/055/056/083/096/099/110 +
+# 매칭 블록 T111~T127)의 진단은 filegrade 패키지가 들고 있다. 그쪽은 정답 기준을
+# 부류 A(GT 확정) / 부류 B(모양새)로 나눠 판정한다 — filegrade/task_class.py 참조.
+# 임포트가 실패해도 기존 19문항 진단은 그대로 나와야 하므로 조용히 넘어간다.
+try:
+    from filegrade.checks import EXTRA_CHECKS as _EXTRA
+    CHECKS.update(_EXTRA)
+except Exception as _e:                                    # noqa: BLE001
+    import warnings
+    warnings.warn(f"filegrade 진단을 불러오지 못했다: {type(_e).__name__}: {_e}")
 
 
 # ── 산출물 ↔ 입력 일반 대조 (문항별 진단이 없어도 항상 낸다) ──────────────────

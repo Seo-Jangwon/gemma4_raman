@@ -26,6 +26,14 @@
 키가 같아서 판정이 유지된다(파일명·시각을 키에 넣지 않는 이유다). 상단 '내보내기' 로
 JSON/CSV 를 받는다.
 
+다만 저장소는 그 브라우저 안에만 있다. 그림은 data: URI 로 HTML 에 박혀 있어 파일만
+옮겨도 보이지만 판정은 안 따라가고, file:// 에서는 브라우저가 저장소를 통째로 막는
+경우도 있다. 그래서 '채점 포함 저장'(exportSnapshot) 이 현재 판정·메모를 HTML 안에
+`window.__GRADES__` 로 구워 새 파일로 내려받는다 — 그 한 장이면 어느 PC 에서든 그림과
+채점이 함께 열린다. 직렬화 직전에 하이드레이트된 data: URI 를 걷어내 같은 base64 가
+두 번 들어가지 않게 한다(stage_map.HYDRATE_JS 가 data-img 색인을 남겨 두는 이유).
+열 때는 빈 셀만 채우고(그 PC 의 판정이 우선), 배너의 '전부 덮어쓰기' 로만 대체한다.
+
 [채점 경로는 이것 하나다]
 raw_runs.jsonl(run_bench 가 append) → review.py → HTML. 중간 파일(runs_*.json,
 graded_*.json)을 만드는 별도 단계는 없앴다. 중복 실행 제거와 채점설정 갱신을 이 안에서
@@ -60,6 +68,17 @@ try:
 except Exception as _e:                   # noqa: BLE001
     diagnostics = None
     print(f"      [주의] diagnostics 임포트 실패 -> 자동 진단 생략 ({_e})")
+
+# 파일처리(CSV) 문항의 정답 기준. 부류 A(명세가 답을 유일하게 결정) / 부류 B(방법군을
+# 부름 → 모양새로 판정)를 나눠 들고 있고, 절차/결과 판정을 나누는 규칙도 여기 있다.
+# 없어도 콘솔은 그대로 뜬다 — 그 경우 파일처리 문항이 기존처럼 수동 판정으로 남을 뿐이다.
+try:
+    from filegrade import task_class as fg_class          # noqa: E402
+    from filegrade.grade_files import split_verdicts as fg_split   # noqa: E402
+except Exception as _e:                   # noqa: BLE001
+    fg_class = None
+    fg_split = None
+    print(f"      [주의] filegrade 임포트 실패 -> CSV 문항 정답기준 블록 생략 ({_e})")
 
 AGENT_ORDER = ("AILA", "CoALA")
 STORE_PREFIX = "rev1."                   # localStorage 키 접두어(형식 바뀌면 rev2 로)
@@ -345,6 +364,99 @@ def _diag_chip(v: str | None) -> str:
     return ""
 
 
+# ── CSV(파일처리) 문항 : 정답 ↔ 대답 대조 ────────────────────────────────────
+
+def render_gt_block(tid: str) -> str:
+    """이 문항의 정답을 무엇으로 정의했고 왜 그렇게 정의했는지.
+
+    파일처리 문항은 '레퍼런스 CSV 와 비트 단위로 같은가'로 채점하면 안 되는 것들이
+    섞여 있다("5차 다항 baseline" 같은 지시는 정당한 구현이 여럿이고 그 편차가
+    tolerance 의 6.7e6 배다). 그래서 문항마다 부류를 먼저 밝히고 시작한다.
+    """
+    if fg_class is None:
+        return ""
+    e = fg_class.get(tid)
+    if not e:
+        return ""
+    is_b = e["class"] == fg_class.CLASS_B
+    if is_b:
+        th = fg_class.shape_thresholds(tid)
+        how = (f'<div class="gt-how"><b>판정 방법 — 모양새 일치</b> '
+               f'<span class="hint">(값 일치를 요구하지 않는다)</span><br>'
+               f'피크 recall ≥ {th["min_recall"]:.2f} · precision ≥ {th["min_precision"]:.2f} '
+               f'(±{th["peak_tol_cm"]:g} cm⁻¹) · 상대세기 Δ ≤ {th["max_d_rel_intensity"]:.2f} · '
+               f'pearson ≥ {th["min_pearson"]:.2f} · 0~1 재정규화 후 max|Δ| ≤ {th["max_abs_01"]:.2f}'
+               f'<br><span class="hint">연속 임계값은 정당한 구현 앙상블 편차의 2배로 '
+               f'유도했다 — 임의로 고른 값이 아니다.</span></div>')
+    else:
+        how = ('<div class="gt-how"><b>판정 방법 — GT 엄격 비교</b> '
+               '<span class="hint">(자유 파라미터가 없어 답이 유일하다)</span></div>')
+    free = (f'<div class="gt-free"><b>자유 파라미터</b> · {esc(", ".join(e["free_params"]))}</div>'
+            if e.get("free_params") else "")
+    return (f'<div class="gtdef cls{e["class"]}">'
+            f'<div class="gt-head"><span class="gtbadge b{e["class"]}">부류 {e["class"]}</span>'
+            f'{"방법군을 부르는 과제" if is_b else "명세가 답을 유일하게 결정"}</div>'
+            f'<div class="gt-rule"><b>정답</b> · {esc(e["gt_rule"])}</div>'
+            f'{free}{how}'
+            f'<div class="gt-why"><b>이 부류인 이유</b> · {esc(e["why"])}</div></div>')
+
+
+_VLABEL = {"pass": ("정답", "ok"), "fail": ("오답", "bad")}
+
+
+def render_compare(drows: list[dict], tid: str) -> str:
+    """한눈 대조표 — 판정을 가른 항목만 '기준 / 정답 / 에이전트 답 / 판정' 네 칸으로.
+
+    아래 '자동 진단' 표는 참고행까지 전부 담아 길다. 사람이 먼저 보고 싶은 것은
+    "무엇을 봤고, 정답이 뭐였고, 얘는 뭐라 했고, 그래서 맞았나" 네 가지뿐이라
+    그것만 위로 끌어올린다.
+    """
+    if fg_split is None or not drows:
+        return ""
+    sv = fg_split(drows)
+    dec = [r for r in sv["decisive"] if r.get("verdict") in ("pass", "fail")]
+    if not dec:
+        return ""
+
+    trs = []
+    for r in dec:
+        v = r.get("verdict")
+        lbl, cls = _VLABEL.get(v, ("참고", "info"))
+        note = f'<div class="dnote">{r["note"]}</div>' if r.get("note") else ""
+        rep = r.get("reported")
+        # 진단 행에는 두 관례가 섞여 있다.
+        #   ① filegrade 가 만든 행 : measured = 정답(재계산), reported = 에이전트 답
+        #   ② 기존 diagnostics 행  : reported 가 비어 있고 measured 자체가
+        #                            '에이전트 산출물을 재어 본 값'이다(기대값은 기준 문장에).
+        # 대조표는 ②를 왼쪽(정답) 칸에 두면 안 된다 — 에이전트 답을 정답인 양 보여 주게 된다.
+        if rep in ("", "-", "—", None):
+            gt_cell = '<span class="empty">← 기준 참조</span>'
+            got_cell = r["measured"]
+        else:
+            gt_cell = r["measured"]
+            got_cell = rep
+        trs.append(f'<tr class="d-{esc(v)}"><td class="l">{r["name"]}</td>'
+                   f'<td class="l crit">{r["criterion"]}</td>'
+                   f'<td class="l mono gtv">{gt_cell}</td>'
+                   f'<td class="l mono rep">{got_cell}{note}</td>'
+                   f'<td><span class="dv {cls}">{lbl}</span></td></tr>')
+
+    def chip(label, v):
+        l, c = _VLABEL.get(v, ("해당없음", "info"))
+        return f'<span class="pochip {c}">{label} {l}</span>'
+
+    ov = sv["verdict"]
+    lbl, cls = _VLABEL.get(ov, ("판정보류", "info"))
+    return (f'<div class="cmp {cls}">'
+            f'<div class="cmp-head"><span class="cmp-v {cls}">{lbl}</span>'
+            f'{chip("절차", sv["process_verdict"])}{chip("결과", sv["outcome_verdict"])}'
+            f'<span class="cmp-why">{esc(sv["why"])}</span></div>'
+            f'<table class="cmptbl"><thead><tr><th class="l">무엇을 봤나</th>'
+            f'<th class="l">통과 조건</th><th class="l">정답 (재계산)</th>'
+            f'<th class="l">에이전트 답</th><th>판정</th></tr></thead>'
+            f'<tbody>{"".join(trs)}</tbody></table></div>')
+
+
 def render_planning(rec: dict) -> str:
     pl = rec.get("planning") or []
     if not pl:
@@ -383,8 +495,15 @@ def render_verifier_results(rec: dict) -> str:
 
 def render_criteria(meta: dict, spec: dict | None, spec_verify: str = "") -> str:
     """이 문항을 무엇으로 판정하는지 전부. 사람이 여기만 읽고 판정할 수 있어야 한다."""
-    parts = [f'<div class="crit-prose"><b>문항의 채점기준</b><br>'
-             f'{esc(meta.get("grading_criteria"))}</div>']
+    parts = []
+    # CSV 문항이면 '정답을 어떻게 정의했나'를 맨 위에 둔다. 그게 없으면 아래 채점기준의
+    # 허용오차(1e-6, 1e-8 …)를 곧이곧대로 읽게 되는데, 그 값들은 방법군 문항에서는
+    # correctness 가 아니라 구현 동일성을 재는 값이다.
+    gt = render_gt_block(str(meta.get("id") or ""))
+    if gt:
+        parts.append(gt)
+    parts.append(f'<div class="crit-prose"><b>문항의 채점기준</b><br>'
+                 f'{esc(meta.get("grading_criteria"))}</div>')
     if meta.get("manual_note"):
         parts.append(f'<div class="crit-note"><b>수동채점 노트</b><br>'
                      f'{esc(meta.get("manual_note"))}</div>')
@@ -478,6 +597,20 @@ def render_cell(rec: dict | None, run_id: str, agent: str, out_dir: Path,
     diag = safe(lambda: render_diagnostics(drows), "자동 진단")
     dverdict = diagnostics.overall(drows) if (diagnostics and drows) else None
 
+    # 파일처리(CSV) 문항은 정답 기준이 부류 A/B 로 재정의돼 있다. 그 판정을 셀의
+    # 자동판정으로 쓴다 — 기계검증기(tool_called 등)는 "run_analysis 를 불렀다"만
+    # 확인하므로 CSV 문항에서는 판정 근거가 되기에 약하다.
+    cmp_html, fg_v = "", None
+    tid = str((meta_task or rec).get("id") or "")
+    if fg_split is not None and fg_class is not None and fg_class.get(tid) and drows:
+        cmp_html = safe(lambda: render_compare(drows, tid), "정답 대조표")
+        try:
+            fg_v = fg_split(drows)["verdict"]
+        except Exception:                        # noqa: BLE001
+            fg_v = None
+    if fg_v and not noans:
+        auto = fg_v
+
     meta = (f'{rec.get("elapsed_sec", "?")}s · dose {rec.get("dose_mj", "?")}mJ · '
             f'툴 {len(rec.get("tool_calls") or [])}회 · {esc(rec.get("session_id") or "")}')
     ans_cls = "answer noans" if noans else "answer"
@@ -486,6 +619,7 @@ def render_cell(rec: dict | None, run_id: str, agent: str, out_dir: Path,
          data-noans="{int(noans)}" data-agent="{esc(agent)}" data-diag="{esc(dverdict or "")}">
       <div class="chead"><b class="aname">{esc(agent)}</b> {_chips(rec, noans)}
         {_diag_chip(dverdict)}<span class="cmeta">{meta}</span></div>
+      {cmp_html}
       <details class="{ans_cls}" open><summary>최종 답변</summary>
         <pre>{esc(answer) or "<span class='empty'>(빈 답변)</span>"}</pre></details>
       {diag}
@@ -519,6 +653,12 @@ def render_card(run_id: str, meta: dict, cells: dict, spec: dict | None,
     badges = [f'<span class="badge cat">{esc(meta.get("category"))}</span>',
               f'<span class="badge">{esc(meta.get("capability"))}</span>',
               f'<span class="badge kind">{esc(meta.get("task_kind"))}</span>']
+    if fg_class is not None:
+        _e = fg_class.get(str(meta.get("id") or ""))
+        if _e:
+            badges.append(
+                f'<span class="badge fgc b{_e["class"]}">부류 {_e["class"]} · '
+                f'{"모양새 채점" if _e["class"] == fg_class.CLASS_B else "GT 엄격"}</span>')
     if meta.get("is_safety_ambiguous"):
         badges.append('<span class="badge amb">안전-애매</span>')
     if meta.get("variant") and meta.get("variant") != "none":
@@ -559,6 +699,10 @@ header .sub { color:#9ca3af; font-size:11.5px; }
 .bar button:hover { background:#4b5563; }
 .bar button.on { background:#2563eb; border-color:#60a5fa; }
 .bar button.act { background:#059669; border-color:#10b981; }
+.bar button.snap { background:#7c3aed; border-color:#a78bfa; }
+.bar button:disabled { opacity:.55; cursor:progress; }
+.baked { color:#fde68a; margin-right:8px; }
+.baked button { background:#b45309 !important; border-color:#f59e0b !important; }
 .bar .sp { flex:1; }
 .bar .tally { font-size:11.5px; color:#e5e7eb; font-family:ui-monospace,monospace; }
 .bar .tally b.p { color:#34d399; } .bar .tally b.q { color:#fbbf24; } .bar .tally b.f { color:#f87171; }
@@ -643,6 +787,40 @@ details > summary:hover { color:#111827; }
 .dv.ok { background:#d1fae5; color:#065f46; } .dv.bad { background:#fee2e2; color:#991b1b; }
 .dv.info { background:#eceff3; color:#6b7280; }
 .warnbox { font-size:11px; color:#92400e; background:#fffbeb; border:1px solid #fcd34d; border-radius:4px; padding:4px 7px; margin-top:5px; }
+
+/* ── CSV 문항: 정답 ↔ 대답 한눈 대조 ───────────────────────────────────── */
+.cmp { border:2px solid #d7dbe0; border-radius:6px; padding:7px 9px; margin:7px 0 9px; background:#fcfcfd; }
+.cmp.ok { border-color:#86efac; background:#f4fdf8; }
+.cmp.bad { border-color:#fca5a5; background:#fff7f7; }
+.cmp.info { border-color:#e5e7eb; }
+.cmp-head { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:5px; }
+.cmp-v { font-size:13px; font-weight:800; padding:2px 10px; border-radius:5px; letter-spacing:.02em; }
+.cmp-v.ok { background:#059669; color:#fff; } .cmp-v.bad { background:#dc2626; color:#fff; }
+.cmp-v.info { background:#9ca3af; color:#fff; }
+.pochip { font-size:10px; padding:1px 7px; border-radius:8px; border:1px solid currentColor; white-space:nowrap; }
+.pochip.ok { color:#047857; } .pochip.bad { color:#b91c1c; } .pochip.info { color:#9ca3af; }
+.cmp-why { font-size:11px; color:#4b5563; flex:1 1 100%; }
+.cmptbl { border-collapse:collapse; width:100%; font-size:11.5px; }
+.cmptbl th, .cmptbl td { border:1px solid #e5e7eb; padding:4px 6px; vertical-align:top; text-align:center; }
+.cmptbl th { background:#eef1f5; font-weight:700; font-size:10.5px; }
+.cmptbl td.l, .cmptbl th.l { text-align:left; }
+.cmptbl td.mono { font-family:ui-monospace,monospace; }
+.cmptbl td.gtv { background:#f8fafc; color:#0f172a; }
+.cmptbl td.rep { font-weight:600; background:#fffdf5; }
+.cmptbl tr.d-fail td.rep { color:#991b1b; } .cmptbl tr.d-pass td.rep { color:#065f46; }
+.cmptbl .crit { color:#4b5563; } .cmptbl .dnote { color:#7c3aed; font-size:10.5px; margin-top:2px; }
+
+/* ── 정답 정의(부류 A/B) 블록 ──────────────────────────────────────────── */
+.gtdef { border-left:4px solid #94a3b8; background:#f8fafc; border-radius:0 5px 5px 0;
+         padding:7px 10px; margin:0 0 9px; font-size:11.5px; line-height:1.55; }
+.gtdef.clsA { border-left-color:#2563eb; background:#f5f9ff; }
+.gtdef.clsB { border-left-color:#c2761a; background:#fffaf3; }
+.gt-head { display:flex; align-items:center; gap:7px; font-weight:700; color:#1f2a37; margin-bottom:3px; }
+.gtbadge { font-size:10px; font-weight:800; padding:1px 7px; border-radius:4px; color:#fff; }
+.gtbadge.bA { background:#2563eb; } .gtbadge.bB { background:#c2761a; }
+.gt-rule { color:#111827; } .gt-free { color:#92400e; } .gt-how { color:#374151; margin-top:3px; }
+.gt-why { color:#6b7280; margin-top:3px; }
+.badge.fgc.bA { background:#dbeafe; color:#1e40af; } .badge.fgc.bB { background:#fde9d0; color:#92400e; }
 .judge { margin-top:8px; padding-top:7px; border-top:1px dashed #dfe3e9; display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
 .jb { border:1px solid #d1d5db; background:#fff; border-radius:6px; padding:4px 13px; cursor:pointer; font-size:12.5px; font-weight:600; color:#4b5563; }
 .jb:hover { border-color:#9ca3af; }
@@ -835,6 +1013,111 @@ function download(name, text, mime){
   a.download = name; a.click();
 }
 function exportJSON(){ download('review_grades.json', JSON.stringify(rows(), null, 2), 'application/json'); }
+
+/* ── 판정 싣기 ──
+   판정은 localStorage 에만 있어서 파일을 다른 PC 로 옮기면 전부 '미채점' 으로 보인다.
+   게다가 file:// 에서는 브라우저가 localStorage 를 아예 막기도 해서(위 STORE 폴백)
+   그 PC 에서는 저장 자체가 안 된다. 그래서 판정을 HTML 안에 __GRADES__ 로 구워
+   넣을 수 있게 한다 — 그 파일은 저장소가 없어도 열자마자 채점이 다 보인다. */
+function loadGrades(list, force){
+  if(!Array.isArray(list)) return 0;
+  const by = new Map(list.map(r => [(r.run_id || '') + '|' + (r.agent || ''), r]));
+  let n = 0;
+  cells().forEach(c => {
+    const r = by.get(c.dataset.gid);
+    if(!r || (!r.verdict && !r.note)) return;
+    const cur = get(c.dataset.gid);
+    if(!force && cur && cur.verdict) return;      // 이 PC 에서 이미 찍은 판정이 우선
+    put(c.dataset.gid, { verdict: r.verdict || null, note: r.note || '',
+                         auto: !!r.auto_accepted, at: r.judged_at || null });
+    n++;
+  });
+  cells().forEach(paint); tally();
+  return n;
+}
+
+/* 파일에 구워져 온 판정을 열 때 자동으로 싣는다(빈 셀만). 전부 덮어쓰려면 배너의 버튼. */
+function applyBaked(){
+  const g = window.__GRADES__;
+  if(!Array.isArray(g)) return;
+  const have = g.filter(r => r.verdict).length;
+  if(!have) return;
+  const n = loadGrades(g, false);
+  const b = document.querySelector('.bar');
+  if(b) b.insertAdjacentHTML('afterbegin',
+    '<span class="baked">이 파일에 채점 ' + have + '건이 저장돼 있다 — ' + n + '건을 불러왔다. ' +
+    '<button onclick="alert(loadGrades(window.__GRADES__, true) + \'건을 파일 내용으로 덮어썼다.\')">' +
+    '전부 덮어쓰기</button></span>');
+}
+
+function importGrades(ev){
+  const f = ev.target.files && ev.target.files[0];
+  if(!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    let list;
+    try { list = JSON.parse(rd.result); } catch(e){ alert('JSON 을 읽지 못했다: ' + e.message); return; }
+    if(!Array.isArray(list)){ alert('내보내기 JSON(배열) 이 아니다.'); return; }
+    const force = confirm('이 PC 의 기존 판정까지 파일 내용으로 덮어쓸까?\n' +
+                          '취소를 누르면 미채점 셀만 채운다.');
+    alert(loadGrades(list, force) + '건을 불러왔다.');
+  };
+  rd.readAsText(f);
+  ev.target.value = '';
+}
+
+/* 현재 화면을 판정까지 포함해 HTML 한 장으로 다시 저장한다. */
+function exportSnapshot(){
+  const btn = document.getElementById('snapbtn');
+  if(btn){ btn.disabled = true; btn.textContent = '저장 중…'; }
+  setTimeout(() => {
+    const undo = [];
+    const strip = (sel, attr) => document.querySelectorAll(sel).forEach(el => {
+      const v = el.getAttribute(attr);
+      if(v !== null){ undo.push([el, attr, v]); el.removeAttribute(attr); }
+    });
+    // 화면에 들어와 이미 채워진 그림의 data: URI 를 걷어낸다. 안 걷으면 같은 base64 가
+    // __IMG__ 배열과 태그 양쪽에 직렬화돼 파일이 두 배가 된다(실측 13MB → 20MB+).
+    strip('img[data-img]', 'src');
+    strip('a[data-img]', 'href');
+    strip('a[data-img]', 'target');
+    strip('[data-img]', 'data-hyd');
+    // 필터·포커스는 보는 사람의 상태지 채점 결과가 아니다 — 전부 푼 상태로 저장한다.
+    const hid = Array.from(document.querySelectorAll('.hidden'));
+    hid.forEach(e => e.classList.remove('hidden'));
+    const act = document.querySelector('.cell.active');
+    if(act) act.classList.remove('active');
+    // 메모는 textarea 의 value 라서 outerHTML 에 안 실린다 — 판정과 함께 __GRADES__ 로
+    // 나가고 열 때 paint() 가 되돌려 준다.
+    const old = document.getElementById('baked-grades');
+    if(old) old.remove();
+    const s = document.createElement('script');
+    s.id = 'baked-grades';
+    // 메모에 닫는 script 태그 문자열이 들어가면 문서가 거기서 끊긴다.
+    s.textContent = 'window.__GRADES__ = ' +
+                    JSON.stringify(rows()).replace(/<\//g, '<\\/') + ';';
+    document.body.appendChild(s);
+
+    let html = '';
+    try { html = '<!doctype html>\n' + document.documentElement.outerHTML; }
+    finally {
+      s.remove();
+      undo.forEach(([el, a, v]) => el.setAttribute(a, v));
+      hid.forEach(e => e.classList.add('hidden'));
+      if(act) act.classList.add('active');
+      if(btn){ btn.disabled = false; btn.textContent = '채점 포함 저장'; }
+    }
+    const d = new Date(), p = n => String(n).padStart(2, '0');
+    const name = `review_graded_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}`
+               + `-${p(d.getHours())}${p(d.getMinutes())}.html`;
+    download(name, html, 'text/html;charset=utf-8');
+    const t = { pass:0, partial:0, fail:0 };
+    rows().forEach(r => { if(r.verdict) t[r.verdict]++; });
+    alert(`${name}\n${(html.length/1048576).toFixed(1)} MB · 판정 `
+        + `${t.pass + t.partial + t.fail}건(정답 ${t.pass} · 부분 ${t.partial} · 오답 ${t.fail})을 `
+        + `HTML 안에 담았다.\n이 파일만 옮기면 그림과 채점이 그대로 열린다.`);
+  }, 30);
+}
 function exportCSV(){
   const r = rows();
   const cols = ['run_id','agent','verdict','auto_verdict','auto_accepted','no_answer','category','note'];
@@ -858,7 +1141,9 @@ document.addEventListener('input', e => {
   paint(cell); tally();
 });
 window.addEventListener('DOMContentLoaded', () => {
-  seedNoAnswer(); cells().forEach(paint); tally(); applyFilters();
+  // 순서 주의: 파일에 구워진 판정을 먼저 싣고 나서 무응답 자동오답을 채운다.
+  // 반대로 하면 저장해 둔 사람 판정이 '무응답 → 오답' 에 덮인다.
+  applyBaked(); seedNoAnswer(); cells().forEach(paint); tally(); applyFilters();
 });
 """
 
@@ -912,6 +1197,17 @@ def build_html(graded: list[dict], summary: dict, agents: list[str], specs: dict
         그 뒤 <b>이견</b>(자동실패·무응답·에이전트 불일치) 필터만 돌며 손으로 고치는 게 가장 빠르다.
         기계검증기가 없는 셀은 채택 대상이 아니라 반드시 사람이 본다.</li>
     <li><b>무응답</b>(“Failed to generate a response.”)은 열 때 자동으로 오답이 찍힌다.</li>
+    <li><b>CSV(파일처리) 문항</b>은 셀 맨 위에 <b>정답 ↔ 대답 대조표</b>가 뜬다 —
+        <i>무엇을 봤나 · 통과 조건 · 정답(재계산) · 에이전트 답 · 판정</i> 다섯 칸이고,
+        판정을 가른 항목만 추렸다. 그 위의 큰 배지가 이 셀의 자동판정이며
+        <b>절차</b>(지정 차수·순서를 지켰나)와 <b>결과</b>(값·모양이 맞나)를 따로 표시한다.
+        절차 ✓ / 결과 ✗ 는 “방법은 옳았고 계산만 어긋났다”는 뜻이다.</li>
+    <li>문항 제목 옆 <b>부류 A / 부류 B</b> 배지와 정답 기준 블록을 먼저 읽을 것.
+        <b>부류 A</b> 는 명세가 답을 유일하게 결정해 GT 와 엄격 비교한다.
+        <b>부류 B</b> 는 “5차 다항 baseline” 처럼 정당한 구현이 여럿인 과제라
+        <b>값 일치를 요구하지 않고 모양새로 채점</b>한다 — 실측으로 정당한 구현 4개의
+        편차가 tolerance 의 6.7×10⁶ 배였고, 그중 레퍼런스가 오히려 가장 나빴다.
+        그래서 <code>reference_match</code> 는 부류 B 에서 참고값으로 내려가 있다.</li>
     <li><b>자동 진단</b> 표는 채점기준의 계산을 입력 파일로 다시 해서
         <i>기준 · 실측(기준값) · 에이전트 보고값 · 판정</i>을 나란히 놓은 것이다.
         “참고”로 표시된 행은 자동 판정이 불가능한 항목(그림의 시각적 정확성 등)이니
@@ -920,8 +1216,16 @@ def build_html(graded: list[dict], summary: dict, agents: list[str], specs: dict
         수치가 미묘하게 다를 때 원인은 거기 있다(예: <code>np.std</code> 의 ddof).</li>
     <li>판정은 <code>{esc(STORE_PREFIX)}&lt;문항ID&gt;|&lt;에이전트&gt;</code> 키로 저장되므로
         이 HTML 을 다시 생성해도 유지된다. 다 끝나면 <b>JSON/CSV 내보내기</b>.</li>
-    <li>그림·스냅샷은 HTML 안에 내장돼 있다 — <b>이 파일 하나만</b> 복사해도 다른 PC 에서
-        그대로 보인다(생성 시 <code>--no-embed</code> 를 준 경우는 상대링크라 예외).</li>
+    <li><b>다른 컴퓨터로 넘길 때는 <span style="color:#7c3aed">채점 포함 저장</span></b> 을 쓴다.
+        그림은 원래 내장돼 있지만 <b>판정은 이 브라우저에만</b> 남아서, 파일만 복사하면
+        받는 쪽에는 전부 미채점으로 보인다(<code>file://</code> 에서는 브라우저가
+        저장소를 아예 막기도 한다). 이 버튼은 지금까지의 판정·메모를 HTML 안에
+        <code>__GRADES__</code> 로 구워 새 파일로 내려받는다 — <b>그 파일 하나만</b> 있으면
+        어느 PC 에서든 그림과 채점이 그대로 열린다.</li>
+    <li>받은 쪽이 이어서 채점하면 그 브라우저에 저장되고, 다시 <b>채점 포함 저장</b> 으로
+        되돌려 보낼 수 있다. 열 때 파일에 든 판정은 <b>비어 있는 셀만</b> 채우고,
+        상단 배너의 <b>전부 덮어쓰기</b> 를 눌러야 이 PC 판정까지 파일 것으로 바꾼다.
+        <b>채점 불러오기</b> 는 내보낸 <code>review_grades.json</code> 을 같은 방식으로 싣는다.</li>
   </ul>
 </div>'''
 
@@ -955,6 +1259,10 @@ def build_html(graded: list[dict], summary: dict, agents: list[str], specs: dict
     <button onclick="openAll(false)">접기</button>
     <button class="act" onclick="exportJSON()">JSON</button>
     <button class="act" onclick="exportCSV()">CSV</button>
+    <button class="act snap" id="snapbtn" onclick="exportSnapshot()">채점 포함 저장</button>
+    <button onclick="document.getElementById('impfile').click()">채점 불러오기</button>
+    <input type="file" id="impfile" accept=".json,application/json"
+           style="display:none" onchange="importGrades(event)">
   </div>
   <div class="bar"><span class="tally" id="tally"></span></div>
 </header>

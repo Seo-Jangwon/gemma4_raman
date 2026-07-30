@@ -69,14 +69,79 @@ SPECS: dict[str, dict] = {
             "적합 변수는 <b>라만 시프트 축(200~2000 cm⁻¹)</b>이며 인덱스가 아니다."),
         "recipe_fn": lambda x, y: poly_bl(x, y),
         "pass_if": [
-            "<b>지정 방법을 요구한다면</b>: 전 구간 max|Δ| ≤ 1e-5. 즉 통상 최소제곱 5차 적합이어야 한다.",
-            "<b>임의의 타당한 5차 베이스라인을 허용한다면</b>: 피크 위치·상대 세기가 보존되면 정답. "
-            "아래 '선형관계' 기울기가 1.000 이면 피크 형상은 보존된 것이고, 차이는 베이스라인 추정값뿐이다.",
+            "<b>값 일치(max|Δ| ≤ 1e-5)를 요구하지 않는다.</b> 그 기준은 correctness 가 아니라 "
+            "'우리 레퍼런스 구현과 같은가'를 재기 때문이다 — 아래 실측 참조.",
+            "<b>정답 조건은 모양새 일치</b>다: 피크 recall·precision = 1.00 (±3 cm⁻¹) · "
+            "피크 상대세기 Δ ≤ 0.10 · pearson ≥ 0.95 · 0~1 재정규화 후 max|Δ| ≤ 0.10. "
+            "정당한 구현 4개는 전부 통과하고, 무보정·1차·9차 과적합·과평활·피크반전은 전부 탈락한다.",
+            "<b>단, '5차'는 명시된 지시</b>다. 2차 베이스라인은 모양새 지표를 전부 통과하므로 "
+            "(pearson 0.997) 지시 위반은 모양새로 잡히지 않는다 — 차수는 코드에서 따로 확인한다.",
         ],
         "why_ambiguous": (
             "프롬프트는 “5차 다항식 베이스라인 보정”만 말하고 '피크를 제외하지 말 것'이나 "
             "'반복하지 말 것'을 말하지 않는다. 실제 라만 분석에서는 피크를 마스킹하고 반복 적합하는 "
-            "쪽이 더 표준적이라, 에이전트가 그쪽을 고르면 레퍼런스와 어긋난다."),
+            "쪽이 더 표준적이라, 에이전트가 그쪽을 고르면 레퍼런스와 어긋난다.<br><br>"
+            "<b>실측</b> — 같은 입력에 정당한 구현 4개를 돌린 결과:<br>"
+            "<code>plain polyfit(=레퍼런스) max|Δ| 9.9e-07 · 평탄화 97.3% · 최소 −60.81</code><br>"
+            "<code>표준화 축 polyfit       max|Δ| 9.9e-07 · 평탄화 97.3% · 최소 −60.81</code><br>"
+            "<code>iterative LMJ          max|Δ| 64.66   · 평탄화 99.4% · 최소  −0.04</code><br>"
+            "<code>ALS                    max|Δ| 67.48   · 평탄화 99.8% · 최소  −5.58</code><br>"
+            "앙상블 편차 <b>S = 67.5</b> = tolerance(1e-5)의 6.7×10⁶배. 네 방법 모두 피크 7개를 "
+            "같은 위치에서 복원한다. 그리고 <b>레퍼런스가 넷 중 과학적으로 가장 나쁘다</b> — "
+            "평탄화 최하위에 스펙트럼을 −60.8 까지 끌어내린다. 비트 일치를 요구하면 "
+            "더 잘 푼 답이 탈락한다."),
+    },
+    "T040": {
+        "kind": "shape",
+        "ref": "T040_reference.csv",
+        "recipe": "reference = savgol_filter(input, window_length=11, polyorder=3, mode='interp')",
+        "recipe_note": (
+            "window 와 polyorder 는 프롬프트가 못박았지만 <b>양끝 처리 모드는 지정하지 않았다</b>. "
+            "scipy 의 mode 별 레퍼런스 대비 max|Δ| 실측:<br>"
+            "<code>interp 7.8e-07 · nearest 8.19 · mirror 13.57 · constant 27.88</code><br>"
+            "앙상블 편차 <b>S = 27.9</b> = tolerance(1e-5)의 2.8×10⁶배. 차이는 양끝 몇 점에만 "
+            "생기고 스펙트럼 본체는 동일하다."),
+        "recipe_fn": lambda x, y: sgolay(y),
+        "pass_if": [
+            "<b>window=11, polyorder=3 을 실제로 썼는가</b> — 코드에서 확인한다(명시된 지시).",
+            "<b>모양새 일치</b>: 피크 recall·precision = 1.00 · pearson ≥ 0.95 · "
+            "0~1 max|Δ| ≤ 0.10.",
+            "edge mode 가 달라 양끝이 어긋난 것은 오답이 아니다.",
+        ],
+        "why_ambiguous": "scipy savgol_filter 의 mode 를 프롬프트가 지정하지 않는다.",
+    },
+    "T054": {
+        "kind": "exact",
+        "ref": "T054_reference.csv",
+        "recipe": "reference = np.gradient(intensity, raman_shift)",
+        "recipe_note": (
+            "차분 스킴을 프롬프트가 못박지 않았지만 <b>두 대안이 점 수로 구분된다</b>:<br>"
+            "<code>np.gradient(비균일 중심차분 + 양끝 1차) → 1801점, 레퍼런스와 max|Δ| = 1.0e-06</code><br>"
+            "<code>np.diff(y)/np.diff(x)  (전진차분)      → 1800점</code><br>"
+            "레퍼런스가 np.gradient 와 반올림 오차 수준으로 일치하므로 GT 를 그것으로 고정한다. "
+            "이 문항은 자유 파라미터가 없어 <b>부류 A(엄격 채점)</b>로 둔다."),
+        "recipe_fn": lambda x, y: __import__("numpy").gradient(y, x),
+        "pass_if": [
+            "산출이 <b>1801점</b>인가 (1800점이면 전진차분을 쓴 것이다).",
+            "<b>max|Δ| ≤ 1e-5</b> 로 np.gradient 결과와 일치하는가.",
+        ],
+        "why_ambiguous": "스킴 미지정. 다만 점 수로 판별되므로 GT 확정이 가능하다.",
+    },
+    "T110": {
+        "kind": "shape",
+        "ref": "T110_reference.csv",
+        "recipe": "reference = input - polyval(polyfit(raman_shift, input, 5), raman_shift)",
+        "recipe_note": (
+            "채점기준이 이미 불변량으로 적혀 있다 — “재검출 피크의 recall 과 precision 이 "
+            "90% 이상”. 그런데 verifier 는 reference_match tolerance 1e-5 를 요구해 "
+            "<b>자동 채점기와 사람 채점 기준이 서로 어긋나 있었다</b>. 채점기준 쪽을 따른다."),
+        "recipe_fn": lambda x, y: poly_bl(x, y),
+        "pass_if": [
+            "원인을 <b>강한 배경</b>으로 지목했는가.",
+            "<b>피크 recall ≥ 90%, precision ≥ 90%</b> (채점기준 원문).",
+            "스펙트럼은 T038 과 같은 모양새 기준을 적용한다 — 값 일치는 요구하지 않는다.",
+        ],
+        "why_ambiguous": "T038 과 동일한 baseline 방법군 문제.",
     },
     "T096": {
         "kind": "baseline",
@@ -153,10 +218,12 @@ SPECS: dict[str, dict] = {
             "④ normalize: (x−min)/(max−min) → 0~1"),
         "recipe_fn": lambda x, y: minmax(sgolay(poly_bl(x, despike(y)))),
         "pass_if": [
-            "네 단계를 <b>지정 순서대로</b> 적용했는가(순서가 바뀌면 결과가 달라진다).",
-            "<b>0~1 정규화 스케일에서 max|Δ| ≤ 0.01(=1%)</b> 이면 형상은 정답으로 볼 수 있다. "
-            "① 의 스파이크 대체값이 조금 달라도 ②③④ 를 타고 전 구간에 작은 차이로 퍼진다.",
-            "완전 일치(≤1e-5)를 요구하려면 ① 의 임계값·커널까지 같아야 하는데 프롬프트가 그걸 지정하지 않는다.",
+            "<b>절차</b> — 네 단계를 지정 순서대로 적용했는가(순서가 바뀌면 결과가 달라진다). "
+            "코드에서 각 단계의 등장 순서를 확인한다.",
+            "<b>결과</b> — 모양새 일치: 피크 recall·precision = 1.00 (±3 cm⁻¹) · "
+            "pearson ≥ 0.95 · 0~1 재정규화 후 max|Δ| ≤ 0.10.",
+            "완전 일치(≤1e-5)를 요구하려면 ① 의 임계값·커널, ③ 의 edge mode 까지 같아야 하는데 "
+            "프롬프트가 그걸 지정하지 않는다. 네 단계 각각의 자유 파라미터가 곱해져 오차가 누적된다.",
         ],
         "why_ambiguous": (
             "프롬프트는 “spike removal”만 말하고 검출 임계값·커널 크기·대체값 규칙을 지정하지 않는다. "

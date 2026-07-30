@@ -38,11 +38,41 @@ def run_verifiers(
     return results
 
 
+def _demote_if_method_family(res: VerifyResult, context) -> VerifyResult:
+    """'방법군' 문항(부류 B)에서는 reference_match 를 pass/fail 에서 빼고 참고값으로 내린다.
+
+    [왜]
+    reference_match 는 산출 CSV 를 레퍼런스와 점대점으로 비교한다. 그런데 "5차 다항
+    baseline 보정" 같은 지시는 구현 선택지가 여럿이고, 정당한 구현들끼리도 max|Δ| 가
+    67.5 까지 벌어진다(tolerance 1e-5 의 6.7e6 배). 그 상태에서 pass/fail 을 가르면
+    correctness 가 아니라 '우리 레퍼런스 구현과 같은가'를 재게 된다 — 실제로 iterative
+    LMJ 와 ALS 는 레퍼런스보다 배경을 더 잘 평탄화하는데도 탈락한다.
+
+    그래서 부류 B 에서는 is_human_only=True 로 돌려, grade_one 의 기계판정 집계에서
+    빠지고 화면에는 참고값으로만 남게 한다. 정답 판정은 filegrade 의 모양새 진단이 맡는다.
+    부류 A(정규화·도함수 등 답이 유일한 문항)는 그대로 pass/fail 로 둔다.
+    """
+    tid = str((context or {}).get("id") or "")
+    if not tid:
+        return res
+    try:
+        from filegrade.task_class import is_class_b
+    except Exception:                                       # noqa: BLE001
+        return res
+    if not is_class_b(tid):
+        return res
+    return VerifyResult(
+        passed=res.passed, verifier_type=res.verifier_type,
+        detail=(res.detail + "  ⟨참고값 — 이 문항은 '방법군' 문항이라 값 일치로 "
+                             "정답을 가르지 않는다. 정답 판정은 모양새 진단을 볼 것⟩"),
+        is_human_only=True)
+
+
 def _dispatch(v: dict, tool_trace, pre_state, post_state, context=None) -> VerifyResult:
     vtype = v["type"]
     try:
         if vtype == "reference_match":
-            return _reference_match(v, context)
+            return _demote_if_method_family(_reference_match(v, context), context)
         if vtype == "answer_numeric":
             return _answer_numeric(v, context)
         if vtype == "answer_contains":

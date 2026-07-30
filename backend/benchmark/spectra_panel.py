@@ -195,6 +195,39 @@ def _fmt(v: float) -> str:
     return f"{v:.4f}"
 
 
+def _nice_ticks(lo: float, hi: float, target: int = 9) -> list[float]:
+    """[lo, hi] 를 덮는 '읽기 좋은' 눈금값. 200~2000 이면 200,400,…,2000 이 나온다.
+
+    라만 스펙트럼은 피크 위치(cm⁻¹)가 곧 판독 정보라, 눈금 없이 최소·최대만 찍으면
+    그림에서 "이 피크가 1001 인가 1031 인가"를 읽을 수 없다.
+    """
+    import math
+    if not (hi > lo):
+        return [lo]
+    raw = (hi - lo) / max(1, target)
+    mag = 10.0 ** math.floor(math.log10(raw))
+    step = next((m * mag for m in (1, 2, 2.5, 5, 10) if raw <= m * mag), 10 * mag)
+    first = math.ceil(lo / step) * step
+    out, v = [], first
+    while v <= hi + step * 1e-9:
+        out.append(round(v, 10))
+        v += step
+    return out
+
+
+def _tick_label(v: float) -> str:
+    return f"{v:.0f}" if abs(v) >= 1 or v == 0 else f"{v:g}"
+
+
+# x축 이름을 사람이 읽는 말로. CSV 헤더 그대로 두면 'raman_shift_cm-1' 이 찍힌다.
+_XLABELS = {
+    "raman_shift_cm-1": "라만 시프트 (cm⁻¹)",
+    "wavenumber": "파수 (cm⁻¹)",
+    "wavelength_nm": "파장 (nm)",
+    "index": "인덱스",
+}
+
+
 class _Panel:
     """왼쪽에 y축 라벨 여백을 둔 단순 선형 플롯 박스."""
 
@@ -239,6 +272,103 @@ def _vlines(p: _Panel, xs: list) -> str:
             out.append(f'<line x1="{p.sx(v):.1f}" y1="{p.PAD_T}" x2="{p.sx(v):.1f}" '
                        f'y2="{p.H - p.PAD_B}" class="mark"/>')
     return "".join(out)
+
+
+def _gridlines(p: _Panel, ticks: list) -> str:
+    """눈금 위치의 옅은 세로선. 여러 패널에 같은 위치로 그어야 위아래를 눈으로 잇는다."""
+    out = []
+    for v in ticks:
+        if p.x0 <= v <= p.x1:
+            out.append(f'<line x1="{p.sx(v):.1f}" y1="{p.PAD_T}" x2="{p.sx(v):.1f}" '
+                       f'y2="{p.H - p.PAD_B}" class="grid"/>')
+    return "".join(out)
+
+
+def _zeroline(p: _Panel) -> str:
+    """y=0 선. 베이스라인 보정 결과가 0 근처에 놓였는지 한눈에 보게 해 준다."""
+    if not (p.y0 < 0 < p.y1):
+        return ""
+    return (f'<line x1="{p.PAD_L}" y1="{p.sy(0):.1f}" x2="{p.W - p.PAD_R}" '
+            f'y2="{p.sy(0):.1f}" class="zero"/>')
+
+
+def _gt_lines(p: _Panel, gts: list[tuple[float, str]], label: bool = True) -> str:
+    """정답 피크 위치를 값과 함께 세로선으로. '정답이 무엇이었나'를 그림에서 바로 읽게 한다.
+
+    T042 처럼 레퍼런스 곡선이 없는 문항(정답이 곡선이 아니라 '피크 목록')은 이게 없으면
+    그림만 봐서는 정답을 알 수 없다.
+    """
+    out = []
+    for i, (v, txt) in enumerate(gts):
+        if not (p.x0 <= v <= p.x1):
+            continue
+        x = p.sx(v)
+        out.append(f'<line x1="{x:.1f}" y1="{p.PAD_T}" x2="{x:.1f}" '
+                   f'y2="{p.H - p.PAD_B}" class="gtline"/>')
+        if label:
+            # 라벨이 겹치지 않게 두 줄로 번갈아 띄운다.
+            y = p.PAD_T + 9 + (i % 2) * 9
+            out.append(f'<text x="{x + 2:.1f}" y="{y}" class="gtlab">{esc(txt)}</text>')
+    return "".join(out)
+
+
+def _gt_band(p: _Panel, lo: float, hi: float, txt: str = "") -> str:
+    """정답 구간(적분 범위·추출 범위)을 띠로."""
+    a, b = p.sx(max(lo, p.x0)), p.sx(min(hi, p.x1))
+    if b <= a:
+        return ""
+    s = (f'<rect x="{a:.1f}" y="{p.PAD_T}" width="{b - a:.1f}" '
+         f'height="{p.H - p.PAD_T - p.PAD_B}" class="gtband"/>')
+    if txt:
+        s += f'<text x="{(a + b) / 2:.1f}" y="{p.PAD_T + 9}" class="gtlab" text-anchor="middle">{esc(txt)}</text>'
+    return s
+
+
+def collect_gt_marks(tf: dict) -> tuple[list[tuple[float, str]], list[tuple[float, float, str]], str]:
+    """task_files.json 의 ground_truth 에서 그림에 그릴 정답을 뽑는다.
+
+    돌려주는 것: (세로선 [(위치, 라벨)], 띠 [(시작, 끝, 라벨)], 범례 문장)
+    """
+    gt = (tf or {}).get("ground_truth") or {}
+    lines: list[tuple[float, str]] = []
+    bands: list[tuple[float, float, str]] = []
+    legend = []
+
+    for key, tag in (("peaks_major", "정답 피크"),
+                     ("reference_peaks_cm-1", "레퍼런스 피크"),
+                     ("top3_by_intensity_cm-1", "정답 top-3")):
+        vals = gt.get(key)
+        if vals:
+            lines += [(float(v), f"{float(v):g}") for v in vals]
+            legend.append(f"{tag} {len(vals)}개")
+            break                                    # 하나만 그린다(겹치면 못 읽는다)
+
+    for pair in (gt.get("shifted_pairs_cm-1") or []):
+        try:
+            a, b = float(pair[0]), float(pair[1])
+        except Exception:                            # noqa: BLE001
+            continue
+        lines += [(a, f"{a:g}"), (b, f"{b:g}→")]
+    if gt.get("shifted_pairs_cm-1"):
+        legend.append(f"이동 피크쌍 {len(gt['shifted_pairs_cm-1'])}쌍")
+
+    for key, tag in (("integration_range", "적분 구간"), ("range", "추출 구간"),
+                     ("requested", "요청 구간")):
+        r = gt.get(key)
+        if isinstance(r, (list, tuple)) and len(r) == 2:
+            bands.append((float(r[0]), float(r[1]), f"{tag} {float(r[0]):g}~{float(r[1]):g}"))
+            legend.append(tag)
+
+    ch = gt.get("channel_cm-1")
+    if ch is not None:
+        lines.append((float(ch), f"{float(ch):g}"))
+        legend.append("대상 채널")
+    pk = gt.get("peak")
+    if pk is not None:
+        lines.append((float(pk), f"{float(pk):g}"))
+        legend.append("판별 피크")
+
+    return lines, bands, (" · ".join(legend) if legend else "")
 
 
 # ── 산출물 탐색 ──────────────────────────────────────────────────────────────
@@ -395,6 +525,9 @@ def build_spectra_panel(rec: dict, out_dir: Path) -> str:
     # 정답 스파이크 위치(cm-1). 아래에서 축을 인덱스로 바꾸면 같이 변환해야 한다.
     marks = [float(v) for v in (tf.get("ground_truth") or {}).get("spike_positions_cm-1", [])
              if _to_float(v) is not None]
+    # 그 밖의 정답(피크 목록·구간)도 그림에 직접 그린다. 레퍼런스 곡선이 없는 문항은
+    # 이게 없으면 그림만 보고는 정답을 알 수 없다(T042 처럼 정답이 '피크 목록'인 경우).
+    gt_lines, gt_bands, gt_legend = collect_gt_marks(tf)
     _in_axis = list(in_curves[0]["x"]) if in_curves else []
 
     # x축 통일. 에이전트가 raman_shift 없이 intensity 만 저장하면(save_result 기본형)
@@ -411,9 +544,14 @@ def build_spectra_panel(rec: dict, out_dir: Path) -> str:
                 c["xlabel"] = "index"
             # cm-1 마커를 입력 축에서의 최근접 인덱스로 옮긴다(안 옮기면 엉뚱한 데 그려진다)
             if _in_axis:
-                marks = [min(range(len(_in_axis)), key=lambda i: abs(_in_axis[i] - m)) for m in marks]
+                def _to_idx(v):
+                    return min(range(len(_in_axis)), key=lambda i: abs(_in_axis[i] - v))
+                marks = [_to_idx(m) for m in marks]
+                # 정답 표시도 같이 옮긴다. 라벨은 원래 cm-1 값을 유지해야 읽을 수 있다.
+                gt_lines = [(float(_to_idx(v)), t) for v, t in gt_lines]
+                gt_bands = [(float(_to_idx(a)), float(_to_idx(b)), t) for a, b, t in gt_bands]
             else:
-                marks = []
+                marks, gt_lines, gt_bands = [], [], []
             axis_note = ("x축 종류가 섞여 있어(" + ", ".join(sorted(labels)) +
                          ") 점 개수가 같은 것을 확인하고 인덱스로 정렬했다.")
         else:
@@ -441,6 +579,7 @@ def build_spectra_panel(rec: dict, out_dir: Path) -> str:
         return (lo - pad, hi + pad)
 
     H1, H2, GAP = 132, 150, 10
+    ticks = _nice_ticks(xr[0], xr[1])
     svg_parts = []
     y_off = 0
 
@@ -449,7 +588,11 @@ def build_spectra_panel(rec: dict, out_dir: Path) -> str:
     if in_curves:
         p1 = _Panel(H1, xr, yrange(in_curves))
         body = [p1.frame(f"입력 원본 — {', '.join(sorted({p.name for p, _ in inputs}))}")]
+        body.append(_gridlines(p1, ticks))
+        body += [_gt_band(p1, a, b, t) for a, b, t in gt_bands]
+        body.append(_zeroline(p1))
         body.append(_vlines(p1, marks))
+        body.append(_gt_lines(p1, gt_lines))
         for c in in_curves:
             x, y = decimate(c["x"], c["y"])
             body.append(f'<polyline points="{p1.path(x, y)}" fill="none" '
@@ -463,12 +606,19 @@ def build_spectra_panel(rec: dict, out_dir: Path) -> str:
     elif ref_curves:
         p2_title = "정답 레퍼런스 (에이전트 산출물 없음)"
     elif in_curves:
-        p2_title = "에이전트 산출물 (비교할 레퍼런스 없음)"
+        # 레퍼런스 곡선이 없어도 정답이 없는 건 아니다 — 피크 목록·구간이 정답인 문항이
+        # 많다. 그건 위아래 패널에 세로선·띠로 그려져 있으므로 그렇게 안내한다.
+        p2_title = ("에이전트 산출물 — 정답은 초록 세로선/띠로 표시" if (gt_lines or gt_bands)
+                    else "에이전트 산출물 (비교할 레퍼런스 없음)")
     else:
         p2_title = "에이전트가 측정·저장한 스펙트럼"
     p2 = _Panel(H2, xr, yrange(out_curves + ref_curves))
     body = [p2.frame(p2_title)]
+    body.append(_gridlines(p2, ticks))
+    body += [_gt_band(p2, a, b, "") for a, b, _ in gt_bands]
+    body.append(_zeroline(p2))
     body.append(_vlines(p2, marks))
+    body.append(_gt_lines(p2, gt_lines, label=not out_curves))
     for c in ref_curves:
         x, y = decimate(c["x"], c["y"])
         body.append(f'<polyline points="{p2.path(x, y)}" fill="none" stroke="{_REF_COLOR}" '
@@ -482,12 +632,22 @@ def build_spectra_panel(rec: dict, out_dir: Path) -> str:
                     f'에이전트가 저장한 스펙트럼 없음 (파일 미저장)</text>')
     svg_parts.append(f'<g transform="translate(0,{y_off})">{"".join(body)}</g>')
 
-    total_h = y_off + H2 + 14
-    svg_parts.append(
-        f'<text x="{_Panel.PAD_L}" y="{total_h - 2}" class="ax">{esc(_fmt(xr[0]))}</text>'
-        f'<text x="{_Panel.W - _Panel.PAD_R}" y="{total_h - 2}" class="ax" text-anchor="end">{esc(_fmt(xr[1]))}</text>'
-        f'<text x="{(_Panel.W)/2}" y="{total_h - 2}" class="ax" text-anchor="middle">{esc(xlabel)}</text>'
-    )
+    # ── x축 자 — 눈금선 + 값 + 단위. 라만 스펙트럼은 피크 '위치'가 판독 정보라
+    #    최소·최대만 찍어 두면 그림에서 1001 과 1031 을 구분할 수 없다.
+    axis_y = y_off + H2
+    p_ax = _Panel(H2, xr, (0.0, 1.0))
+    ruler = [f'<line x1="{_Panel.PAD_L}" y1="{axis_y}" x2="{_Panel.W - _Panel.PAD_R}" '
+             f'y2="{axis_y}" class="axline"/>']
+    for v in ticks:
+        x = p_ax.sx(v)
+        ruler.append(f'<line x1="{x:.1f}" y1="{axis_y}" x2="{x:.1f}" y2="{axis_y + 4}" '
+                     f'class="axline"/>')
+        ruler.append(f'<text x="{x:.1f}" y="{axis_y + 13}" class="axtick" '
+                     f'text-anchor="middle">{esc(_tick_label(v))}</text>')
+    total_h = y_off + H2 + 30
+    ruler.append(f'<text x="{(_Panel.W) / 2}" y="{total_h - 4}" class="ax" '
+                 f'text-anchor="middle">{esc(_XLABELS.get(xlabel, xlabel))}</text>')
+    svg_parts.append("".join(ruler))
     svg = (f'<svg class="specsvg" viewBox="0 0 {_Panel.W} {total_h}" '
            f'preserveAspectRatio="xMidYMid meet">{"".join(svg_parts)}</svg>')
 
@@ -533,6 +693,10 @@ def build_spectra_panel(rec: dict, out_dir: Path) -> str:
     if marks:
         notes.append(f'주황 점선 = 정답 스파이크 위치 {len(marks)}개 '
                      f'(위 패널에 있고 아래 패널에 없어야 정상).')
+    if gt_legend:
+        notes.append(f'초록 점선/띠 = {gt_legend} — 정답 위치다.')
+    if ref_curves:
+        notes.append('굵은 점선 곡선 = 정답 레퍼런스.')
     if axis_note:
         notes.append(axis_note)
     note = f'<div class="specnote">{" ".join(esc(n) for n in notes)}</div>' if notes else ""
@@ -549,6 +713,13 @@ CSS = """
 .specsvg .ax { font:8px ui-monospace, monospace; fill:#9ca3af; }
 .specsvg .none { font:11px system-ui, sans-serif; fill:#c0c4cc; }
 .specsvg .mark { stroke:#f59e0b; stroke-width:1; stroke-dasharray:2 3; opacity:.75; }
+.specsvg .grid { stroke:#eef0f3; stroke-width:1; }
+.specsvg .zero { stroke:#cbd5e1; stroke-width:1; stroke-dasharray:4 3; }
+.specsvg .axline { stroke:#9ca3af; stroke-width:1; }
+.specsvg .axtick { font:8.5px ui-monospace, monospace; fill:#6b7280; }
+.specsvg .gtline { stroke:#10b981; stroke-width:1; stroke-dasharray:3 2; opacity:.8; }
+.specsvg .gtlab { font:8px ui-monospace, monospace; fill:#047857; }
+.specsvg .gtband { fill:#10b981; opacity:.07; }
 .spectbls { display:flex; gap:10px; flex-wrap:wrap; }
 .spectbl { border-collapse:collapse; font-size:11px; }
 .spectbl th, .spectbl td { border:1px solid #e5e7eb; padding:1px 6px; text-align:right; }
