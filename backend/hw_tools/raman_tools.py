@@ -355,6 +355,32 @@ def _laser_off_quiet() -> None:
         pass
 
 
+def _restore_guide_beam_quiet() -> None:
+    """광학계를 가이드빔(=카메라 관찰) 위치로 되돌린다. 실패해도 조용히 넘어간다.
+
+    [왜 도구 계층에 있는가 — 2026-07-31 회귀 수정]
+    축04(BEAM_SPLITTER)에는 두 위치가 있다: 측정 위치(-0303764, 빛이 분광기로 간다)와
+    대기 위치(-0612828, 빛이 카메라로 간다). laser_on() 은 파워가 무장된 상태면 축04 를
+    측정 위치로 옮긴다 — 그 순간부터 카메라 화면은 아무것도 못 본다.
+
+    예전에는 드라이버의 laser_off() 가 내부에서 set_guide_beam() 을 불러 자동 복귀했지만,
+    그건 '끄고 다시 켜면 측정빔이 아니라 가이드빔이 나가는' 함정을 만들어 2026-07-30 에
+    제거됐다(USE_laser_with_power.laser_off docstring 참고). 그때 "가이드빔이 필요한 쪽이
+    명시적으로 부른다"고 정했는데, 정작 acquire_spectrum 이 그 호출을 갖지 않아
+    **측정 후 카메라 화면이 돌아오지 않는** 회귀가 생겼다. 그 명시적 호출이 여기다.
+
+    드라이버가 아니라 여기에 두는 이유: acquire_spectrum 은 시작할 때 _apply_laser_power 로
+    항상 파워를 다시 걸므로(power=None 이어도 마지막 값을 재적용한다), set_guide_beam 이
+    내리는 _power_set=False 때문에 다음 측정이 막히지 않는다. 반면 laser_off() 도구는
+    '껐다가 같은 파워로 다시 켠다'는 용도라 그대로 둬야 한다 — 함정이 되살아난다.
+    """
+    try:
+        if _laser is not None:
+            _laser.set_guide_beam()
+    except Exception:
+        pass
+
+
 def _check_stage_target(x=None, y=None, z=None) -> dict | None:
     """스테이지 목표 좌표가 허용 범위 안인지 검사. 통과면 None, 실패면 error dict.
 
@@ -1228,6 +1254,7 @@ def acquire_spectrum(
     single_track_width: int = None,
     trigger_mode: str = None,
     shutter: str = None,
+    restore_guide_beam: bool = True,
 ) -> dict:
     """
     라만 스펙트럼 수집 (Single / Accumulate / Kinetic 모드 지원).
@@ -1242,10 +1269,11 @@ def acquire_spectrum(
 
     원자적 실행 흐름:
       1. 레이저 출력 설정 (ND filter motor 이동, 블로킹)
-      2. 레이저 ON + 안정화 대기
+      2. 레이저 ON + 안정화 대기 (축04 빔스플리터 → 측정 위치)
       3. CCD 취득 모드 설정 (set_aq_* → set_ro_* 순서 필수)
       4. CCD 촬영 (StartAcquisition → 폴링 → GetAcquiredData)
       5. 레이저 OFF (성공/실패 무관하게 반드시 실행)
+      6. 광학계를 가이드빔 위치로 복귀 (축04 → 대기 위치 = 카메라가 다시 보인다)
 
     Parameters
     ----------
@@ -1453,6 +1481,14 @@ def acquire_spectrum(
         # 5. 레이저 OFF (성공/실패 무관 — 안전 보장). 위의 이른 return 들도 이 블록을
         #    거치므로, 검증 실패로 빠져나가도 레이저가 켜진 채 남지 않는다.
         _laser_off_quiet()
+        # 6. 광학계를 카메라(가이드빔) 위치로 복귀. laser_on() 이 축04 를 측정 위치로
+        #    옮겨 놓았으므로, 이걸 하지 않으면 측정이 끝나도 카메라 화면이 캄캄한 채로
+        #    남는다(2026-07-31 회귀). 실패해도 조용히 넘어간다 — 여기서 예외를 던지면
+        #    이미 취득한 스펙트럼까지 잃는다.
+        #    격자 스캔처럼 연속 측정하는 호출자는 restore_guide_beam=False 로 끄고,
+        #    루프가 끝난 뒤 한 번만 복귀시킨다(점마다 ND 모터를 왕복시키지 않기 위해).
+        if restore_guide_beam:
+            _restore_guide_beam_quiet()
 
     if raw is None:
         return {"ok": False, "error": "CCD data acquisition failed"}
@@ -3027,6 +3063,11 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
             f"Safety block: estimated cumulative dose {dose_total:.1f} mJ exceeds the grid limit "
             f"({_GRID_MAX_DOSE_MJ} mJ). Reduce point count, power, or exposure.")}
 
+    # 점마다 광학계를 왕복시키면 ND/빔스플리터 모터 이동만 2n 번 늘어난다. 스캔 도중에는
+    # 카메라를 볼 사람도 없으므로, 복귀는 아래 finally 에서 '실제로 쏜 경우 한 번만' 한다.
+    # try 밖에서 정의한다 — 사전검증 도중 예외가 나도 finally 가 이 이름을 읽는다.
+    fired = False
+
     try:
         pos = _stage.get_position()
         if pos is None:
@@ -3097,7 +3138,9 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
                         }
                         break
 
-            res = _cache_and_return(acquire_spectrum(exposure=exposure, power=power))
+            fired = True
+            res = _cache_and_return(acquire_spectrum(exposure=exposure, power=power,
+                                                     restore_guide_beam=False))
             if res.get("ok"):
                 n_ok += 1
                 files = (res.get("saved") or {}).get("files") or {}
@@ -3160,6 +3203,14 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
         return out
     except Exception as e:
         return {"ok": False, "error": str(e)}
+    finally:
+        # 스캔이 어떻게 끝나든(완주 / 중단 / 예외) 광학계를 카메라 위치로 되돌린다 —
+        # 마지막 점의 acquire_spectrum 이 restore_guide_beam=False 로 돌았기 때문에
+        # 여기서 안 되돌리면 스캔 후 카메라 화면이 캄캄한 채로 남는다.
+        # 한 점도 쏘지 않았으면(사전검증 실패 등) 모터를 건드리지 않는다 — 미리 걸어 둔
+        # 파워를 이유 없이 해제하지 않기 위해서다.
+        if fired:
+            _restore_guide_beam_quiet()
 
 
 # ─────────────────────────────────────────

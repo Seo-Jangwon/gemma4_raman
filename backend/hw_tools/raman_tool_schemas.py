@@ -102,10 +102,11 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "laser_off",
-            "description": ("Stop the laser from firing. The ND filter position (i.e. the power "
-                            "setting) is kept, so turning it on again emits the same measurement "
-                            "beam. You do not need to call this after acquire_spectrum - that tool "
-                            "always turns the laser off, even when it fails."),
+            "description": ("Stop the laser from firing. The ND filter and the beam splitter stay "
+                            "where they are, so turning it on again emits the same measurement beam - "
+                            "but the camera also stays blind until you call set_guide_beam_mode. "
+                            "You do not need to call this after acquire_spectrum - that tool always "
+                            "turns the laser off (even when it fails) and restores the camera view."),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -178,6 +179,9 @@ RAMAN_TOOLS = [
                 "code and are equivalent; do not do both 'just in case'. "
                 "This is also the ONLY way to fire the measurement beam: it applies the power, turns "
                 "the laser on, acquires, and turns it off again even if the acquisition fails. "
+                "It also puts the optics back into the guide-beam/camera position afterwards, so the "
+                "microscope camera can see the sample again - you do NOT need to call "
+                "set_guide_beam_mode after measuring. "
                 "The returned exposure_time / laser_power_pct / num_accumulations are read back from "
                 "the hardware, so they tell you what was ACTUALLY used. "
                 "When a calibrator is connected, the raman_shift_cm-1, wavelength_nm, laser_nm fields are included. "

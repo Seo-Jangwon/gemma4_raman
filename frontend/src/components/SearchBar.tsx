@@ -190,11 +190,11 @@ export default function SearchBar({ onSubmit, isLoading = false }: SearchBarProp
                 handleSubmit(e as unknown as React.FormEvent)
               }
             }}
-            onInput={(e) => {
-              const target = e.target as HTMLTextAreaElement
-              target.style.height = 'auto'
-              target.style.height = target.scrollHeight + 'px'
-            }}
+            // onInput={(e) => {
+            //   const target = e.target as HTMLTextAreaElement
+            //   target.style.height = 'auto'
+            //   target.style.height = target.scrollHeight + 'px'
+            // }}
           />
 
           <div className="flex items-center gap-2 flex-shrink-0">
