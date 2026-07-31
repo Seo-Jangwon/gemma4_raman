@@ -21,7 +21,8 @@
 [구조]
     data/runs/<session_label>/
         manifest.json          세션 메타 + 모든 산출물 인덱스(다른 곳에 있는 것까지)
-        spectra/NN_<name>.csv  처리된 스펙트럼 (save_result / save_spectrum)
+        spectra/NN_<name>.csv  처리된 스펙트럼 (run_analysis 의 save_result)
+        points/NN_<point>.json 측정점 기록 (save_measurement_point)
 
 session_label 은 session_id 를 파일명 안전화한 것이다. 벤치마크는
 `bench_<run_id>_<agent>_<stamp>`(예: bench_T046_AILA_20260729_131500)를 넘기므로
@@ -53,18 +54,47 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = _PROJECT_ROOT / "data"
 RUNS_ROOT = DATA_ROOT / "runs"
 
-# 산출물 종류. 디렉터리를 갖는 것은 spectra 뿐이고 나머지는 '제자리 + 인덱싱'이다.
+# 산출물 종류. 디렉터리를 갖는 것은 spectra/points 이고 나머지는 '제자리 + 인덱싱'이다.
 KIND_SPECTRA = "spectra"
 KIND_FIGURE = "figure"
 KIND_MEASUREMENT = "measurement"
-_DIR_KINDS = {KIND_SPECTRA}
+# 측정점 기록(save_measurement_point). 한 지점에서 얻은 스펙트럼·현미경 이미지·좌표를
+# 하나로 묶은 JSON 이다. 실제 스펙트럼/이미지 파일은 각자의 자리에 그대로 두고
+# 여기서는 그 '포인터'만 모은다 — 이 모듈의 기본 방침(제자리 + 인덱싱)과 같다.
+# 값이 그대로 하위 디렉터리 이름이 된다 — KIND_SPECTRA("spectra")와 같이 복수형으로 둔다.
+KIND_POINT = "points"
+_DIR_KINDS = {KIND_SPECTRA, KIND_POINT}
 
 _LOCK = threading.Lock()
 
-# 현재 턴의 세션. 서버가 세션을 병렬 처리할 수 있으나 이 프로젝트는 단일 사용자
-# 로컬 도구이고 벤치마크도 문항을 순차 실행한다(run_bench.py) — 전역 1개로 충분하다.
-# 병렬 실행을 하게 되면 이걸 contextvars.ContextVar 로 바꿔야 한다.
-_current: dict = {"session_id": "", "agent": "", "label": ""}
+# 현재 턴의 세션. **스레드로컬**이다 — 2026-07-31.
+#
+# [왜 전역 dict 에서 바꿨는가]
+# 예전 주석은 "단일 사용자 로컬 도구라 전역 1개로 충분하다"였는데, 서버가
+# ThreadPoolExecutor(max_workers=4) 로 돌기 때문에 그 전제가 성립하지 않았다.
+# 채팅 탭을 두 개 열면 /api/experiment/stream 이 워커 두 개에서 동시에 돌고,
+# 뒤에 시작한 세션의 begin_session 이 이 dict 를 덮어쓴다. 그러면 먼저 돌던 세션의
+# 이후 산출물이 **남의 세션 폴더로 저장된다**(spectrum_store 의 저장 경로와
+# analysis_sandbox 의 save_result 경로가 모두 이 label 을 읽는다). 에러가 나지 않고
+# 파일 위치만 조용히 틀리는 종류라 발견이 늦다.
+#
+# 스레드로컬이면 되는 이유: 에이전트 실행 1회 = 워커 스레드 1개이고, begin_session 은
+# 매 턴 그 스레드 안에서 가장 먼저 호출된다(stream_experiment / run_experiment 머리).
+# 따라서 같은 세션이 다음 턴에 다른 워커로 배정돼도 그 스레드에서 다시 설정된다.
+# (contextvars 가 아니라 threading.local 인 이유: ThreadPoolExecutor 는 제출 시점의
+#  컨텍스트를 워커로 자동 전파하지 않으므로 ContextVar 로는 이 구조가 안 잡힌다.)
+#
+# 주의: begin_session 을 부른 적 없는 스레드(예: 서버의 상태 폴링 엔드포인트)에서
+# current() 를 읽으면 빈 label 이 나온다 — 이는 예전 전역 방식에서도 '세션 시작 전'과
+# 같은 상태이고, 호출부는 이미 그 경우를 다룬다(session_dir 의 '_unassigned' 폴백).
+class _Current(threading.local):
+    def __init__(self):
+        self.session_id = ""
+        self.agent = ""
+        self.label = ""
+
+
+_current = _Current()
 
 
 def _sanitize(text: str) -> str:
@@ -91,15 +121,17 @@ def begin_session(session_id: str, agent: str = "") -> dict:
     """턴 시작 시 에이전트 루프가 호출한다. 같은 session_id 로 다시 불러도
     같은 디렉터리를 계속 쓴다(멀티턴 세션의 산출물이 한곳에 모여야 하므로)."""
     label = _sanitize(session_id)
-    _current.update({"session_id": str(session_id or ""), "agent": str(agent or ""), "label": label})
+    _current.session_id = str(session_id or "")
+    _current.agent = str(agent or "")
+    _current.label = label
     try:
         d = RUNS_ROOT / label
         d.mkdir(parents=True, exist_ok=True)
         mpath = d / "manifest.json"
         if not mpath.exists():
             _write_manifest({
-                "session_id": _current["session_id"],
-                "agent": _current["agent"],
+                "session_id": _current.session_id,
+                "agent": _current.agent,
                 "label": label,
                 "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "artifacts": [],
@@ -111,10 +143,10 @@ def begin_session(session_id: str, agent: str = "") -> dict:
 
 def current() -> dict:
     """현재 세션 정보. label 이 빈 문자열이면 아직 세션이 열리지 않은 상태."""
-    label = _current["label"]
+    label = _current.label
     return {
-        "session_id": _current["session_id"],
-        "agent": _current["agent"],
+        "session_id": _current.session_id,
+        "agent": _current.agent,
         "label": label,
         "dir": str(RUNS_ROOT / label) if label else "",
         "rel_dir": f"runs/{label}" if label else "",
@@ -124,7 +156,7 @@ def current() -> dict:
 def session_dir() -> Path:
     """현재 세션 디렉터리. 세션이 없으면 '_unassigned' 로 떨어뜨린다 —
     산출물을 버리는 것보다 한곳에 모아두는 편이 낫다(원인 추적 가능)."""
-    label = _current["label"] or "_unassigned"
+    label = _current.label or "_unassigned"
     d = RUNS_ROOT / label
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -147,7 +179,7 @@ def manifest() -> dict:
             return json.loads(p.read_text(encoding="utf-8"))
     except Exception as e:
         print(f"[warn] run_store.manifest: {type(e).__name__}: {e}", file=sys.stderr)
-    return {"session_id": _current["session_id"], "label": _current["label"], "artifacts": []}
+    return {"session_id": _current.session_id, "label": _current.label, "artifacts": []}
 
 
 def record(kind: str, rel_path: str, **meta) -> dict:
@@ -164,8 +196,8 @@ def record(kind: str, rel_path: str, **meta) -> dict:
             arts = [a for a in doc.get("artifacts", []) if a.get("path") != rel_path]
             arts.append(entry)
             doc["artifacts"] = arts
-            doc.setdefault("session_id", _current["session_id"])
-            doc.setdefault("label", _current["label"])
+            doc.setdefault("session_id", _current.session_id)
+            doc.setdefault("label", _current.label)
             doc["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             _write_manifest(doc)
     except Exception as e:
@@ -180,23 +212,35 @@ def next_index(kind: str) -> int:
 
 
 # ── 산출물 경로 발급 ──────────────────────────────────────────────────────────
-def new_spectrum_path(name, ext: str = ".csv") -> tuple[Path, str]:
-    """처리된 스펙트럼 저장 경로를 발급한다.
+def new_artifact_path(kind: str, name, ext: str = ".csv") -> tuple[Path, str]:
+    """kind 별 세션 하위 디렉터리에 순번이 붙은 저장 경로를 발급한다.
 
     Returns (절대경로, data/ 기준 상대경로).
-    상대경로는 load_spectrum(그 문자열) 로 바로 다시 읽을 수 있는 형태다.
+    상대경로는 그 문자열 그대로 다시 읽을 수 있는 형태다(스펙트럼이면 load_spectrum).
     """
-    d = session_dir() / KIND_SPECTRA
+    if kind not in _DIR_KINDS:
+        raise ValueError(f"kind must be one of {sorted(_DIR_KINDS)} (got {kind!r})")
+    d = session_dir() / kind
     d.mkdir(parents=True, exist_ok=True)
-    stem = f"{next_index(KIND_SPECTRA):02d}_{_safe_name(name)}"
+    stem = f"{next_index(kind):02d}_{_safe_name(name)}"
     p = d / f"{stem}{ext}"
     # 같은 순번+이름이 이미 있으면(같은 턴 내 중복) 뒤에 -2, -3 을 붙인다.
     n = 2
     while p.exists():
         p = d / f"{stem}-{n}{ext}"
         n += 1
-    label = _current["label"] or "_unassigned"
-    return p, f"runs/{label}/{KIND_SPECTRA}/{p.name}"
+    label = _current.label or "_unassigned"
+    return p, f"runs/{label}/{kind}/{p.name}"
+
+
+def new_spectrum_path(name, ext: str = ".csv") -> tuple[Path, str]:
+    """처리된 스펙트럼(run_analysis 의 save_result) 저장 경로를 발급한다."""
+    return new_artifact_path(KIND_SPECTRA, name, ext)
+
+
+def new_point_path(name, ext: str = ".json") -> tuple[Path, str]:
+    """측정점 기록(save_measurement_point) 저장 경로를 발급한다."""
+    return new_artifact_path(KIND_POINT, name, ext)
 
 
 # ── 에이전트용 조회 ───────────────────────────────────────────────────────────

@@ -1,19 +1,48 @@
 """
 LLM에게 전달할 tool 스키마 정의 (Ollama tool calling 포맷)
+
+[겹치는 도구를 어떻게 구분해 적었는가 — 2026-07-30]
+이 툴셋에는 '같은 일을 하는 길이 둘'인 자리가 여럿 있다(측정 조건을 미리 걸기 vs
+acquire_spectrum 인자로 넘기기, 화면을 찍는 세 도구, 저장물을 나열하는 네 도구 등).
+구현은 공용 경로로 합쳤지만, 모델은 코드를 못 보고 이 설명만 읽는다. 그래서 겹치는
+도구마다 description 에 다음 세 가지를 반드시 적는다:
+  1) 이 도구가 하는 일         2) 겹치는 다른 도구의 이름
+  3) 어느 쪽을 언제 쓰는가(+ 둘 다 부르지 말라는 지시)
+설명을 줄일 때 3)을 먼저 지우지 말 것 — 도구를 중복 호출하거나 엉뚱한 쪽을 골라
+실패하는 경우의 대부분이 3)의 부재에서 온다.
+
+[스키마에 적는 수치는 config 에서 가져온다]
+스테이지 가동범위 같은 값을 문자열에 직접 적어 두면 Config.ini 가 바뀌어도 설명만
+옛 값으로 남는다(실제로 그랬다: 스키마 0-75.3 vs 실제 75.7431). 아래 _X/_Y/_Z 참고.
 """
+from backend.config import (
+    STAGE_MAX_X as _MAX_X, STAGE_MAX_Y as _MAX_Y,
+    STAGE_MIN_Z as _MIN_Z, STAGE_MAX_Z as _MAX_Z,
+    CAMERA_WIDTH as _CAM_W, CAMERA_HEIGHT as _CAM_H,
+)
 
 RAMAN_TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "move_stage",
-            "description": "Move the stage to an absolute position (mm).",
+            "description": (
+                "Move the stage to an absolute position (mm). Out-of-range targets are REJECTED "
+                "with an error rather than clipped, so the reported position is always where the "
+                "stage actually is. Related: move_stage_relative (same limits, but you give a "
+                "displacement), move_to_pixel (you give a point on the camera image)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "x": {"type": "number", "description": "X-axis position (mm, 0-75.3)"},
-                    "y": {"type": "number", "description": "Y-axis position (mm, 0-50.2)"},
-                    "z": {"type": "number", "description": "Z-axis position (mm, -1.0-1.0). Optional"},
+                    "x": {"type": "number", "description": f"X-axis position (mm, 0-{_MAX_X})",
+                          "minimum": 0, "maximum": _MAX_X},
+                    "y": {"type": "number", "description": f"Y-axis position (mm, 0-{_MAX_Y})",
+                          "minimum": 0, "maximum": _MAX_Y},
+                    "z": {"type": "number",
+                          "description": (f"Z-axis position (mm, {_MIN_Z}-{_MAX_Z}). "
+                                          "Optional - omit to keep the current Z."),
+                          "minimum": _MIN_Z, "maximum": _MAX_Z},
                 },
                 "required": ["x", "y"],
             },
@@ -23,7 +52,12 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_stage_position",
-            "description": "Read the current stage X, Y, Z position (mm).",
+            "description": (
+                "Read the current stage X, Y, Z position (mm). You do NOT need this right after a "
+                "move - move_stage / move_stage_relative / move_to_pixel already return the "
+                "resulting position. get_hardware_status also reports it while diagnosing "
+                "connection problems."
+            ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -31,7 +65,12 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "move_stage_relative",
-            "description": "Move the stage relative to its current position.",
+            "description": (
+                "Move the stage by a displacement from its current position (mm). The resulting "
+                "target is range-checked exactly like move_stage, so a displacement that would "
+                "leave the travel range is rejected (the error tells you the computed target). "
+                "Use move_stage when you know the absolute coordinate."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -47,7 +86,15 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "laser_on",
-            "description": "Turn the laser on.",
+            "description": ("Turn the laser on. Which beam actually comes out depends on whether the "
+                            "power is currently applied to the optics: if it is, the MEASUREMENT beam "
+                            "fires; otherwise only the GUIDE beam does (the ND filter is still "
+                            "blocking). The response tells you which one via the 'beam' field - check "
+                            "it, because a guide-beam 'ON' produces no Raman signal. "
+                            "This tool CANNOT arm the measurement beam - use set_laser_power(percent) to "
+                            "arm it without firing, or acquire_spectrum(power=...) which arms it and "
+                            "handles on -> acquire -> off atomically. Use "
+                            "laser_on by itself only for alignment with the guide beam."),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -55,24 +102,44 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "laser_off",
-            "description": "Turn the laser off.",
+            "description": ("Stop the laser from firing. The ND filter position (i.e. the power "
+                            "setting) is kept, so turning it on again emits the same measurement "
+                            "beam. You do not need to call this after acquire_spectrum - that tool "
+                            "always turns the laser off, even when it fails."),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
+    # [복원 — set_laser_power, 2026-07-31]
+    # 한동안 스키마·디스패치 양쪽에서 내렸다가 되살렸다. 내렸을 때의 문제:
+    #   · "레이저 파워를 13%로 맞춰 줘"처럼 측정을 요구하지 않는 요청에 답할 수단이
+    #     사라졌다. 유일한 대안인 acquire_spectrum(power=) 은 레이저를 실제로 쏘므로,
+    #     사용자가 요청하지도 않은 조사를 시료에 넣게 된다.
+    #   · laser_on / get_laser_status 의 안내 문구가 이 도구를 부르라고 지시하고 있어서
+    #     모델이 "Unknown tool" 을 받는 경로가 남아 있었다.
+    # 되살리는 쪽이 맞다. 다만 스키마와 TOOL_DISPATCH 는 **항상 함께** 바꿔야 한다 —
+    # 한쪽만 건드리면 모델에게는 보이는데 호출은 실패하는(또는 그 반대) 불일치가 된다.
     {
         "type": "function",
         "function": {
             "name": "set_laser_power",
-            "description": "Set the laser power (ND filter transmittance). Any real value in the range 0.004-100 %.",
+            "description": (
+                "Set the laser power (ND filter transmission, 0.004-100 %) WITHOUT firing the laser. "
+                "This only moves the ND filter to arm the measurement beam - it does not turn the laser on. "
+                "Use it when the user asks you to set or change the power by itself, or to arm the beam "
+                "before alignment. "
+                "For an actual measurement prefer acquire_spectrum(power=...), which applies the power, "
+                "fires, measures and turns the laser off atomically - chaining "
+                "set_laser_power + laser_on + laser_off leaves the beam on the sample during your own "
+                "reasoning time, which can photobleach or damage a biological sample. "
+                "Out-of-range values are REJECTED, not silently clamped."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "percent": {
                         "type": "number",
-                        "description": "Power percent (transmittance %). A real value in 0.004-100. e.g. 1, 2.5, 40, 100.",
-                        "minimum": 0.004,
-                        "maximum": 100,
-                    }
+                        "description": "Laser power as ND filter transmission in percent (0.004-100).",
+                    },
                 },
                 "required": ["percent"],
             },
@@ -82,7 +149,15 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_laser_status",
-            "description": "Query the current laser state: whether it is firing (is_on) and the last set power (power_percent, %).",
+            "description": ("Query the current laser state: whether it is firing (is_on), the applied "
+                            "power (power_percent, %), and power_armed - whether that power is actually "
+                            "applied to the optics right now. If power_armed is false the ND filter is "
+                            "at the blocking position, so laser_on() would emit only the guide beam; "
+                            "arm it with set_laser_power(percent), or measure with "
+                            "acquire_spectrum(power=...), which applies the power itself. "
+                            "Always read power_armed, not just power_percent - power_percent is the "
+                            "last value that was requested and survives a switch to guide-beam mode, "
+                            "so on its own it will make you think the beam is ready when it is not."),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -94,6 +169,17 @@ RAMAN_TOOLS = [
                 "Acquire a Raman spectrum at the current position. "
                 "Supports three acquisition modes: Single (one shot) / Accumulate (averaged, high SNR) / Kinetic (continuous time series). "
                 "Automatically handles the laser ON -> power stabilization -> CCD acquisition -> laser OFF flow. "
+                "IMPORTANT: every parameter is optional and OMITTING one means 'keep whatever the "
+                "instrument is already set to' (shutter works the same way, except that it opens to "
+                "'auto' when nobody has ever set it - the CCD boots with the shutter closed). "
+                "So set_ccd_exposure / set_ccd_acquisition_mode / set_ccd_read_mode / "
+                "set_ccd_trigger_mode are respected - you may either configure first and then call "
+                "this with no arguments, or pass the values directly here. Both go through the same "
+                "code and are equivalent; do not do both 'just in case'. "
+                "This is also the ONLY way to fire the measurement beam: it applies the power, turns "
+                "the laser on, acquires, and turns it off again even if the acquisition fails. "
+                "The returned exposure_time / laser_power_pct / num_accumulations are read back from "
+                "the hardware, so they tell you what was ACTUALLY used. "
                 "When a calibrator is connected, the raman_shift_cm-1, wavelength_nm, laser_nm fields are included. "
                 "Kinetic mode returns per-frame data in a frames array."
             ),
@@ -102,11 +188,13 @@ RAMAN_TOOLS = [
                 "properties": {
                     "exposure": {
                         "type": "number",
-                        "description": "CCD exposure time (seconds). Default 0.2",
+                        "description": ("CCD exposure time (seconds). Omit to keep the CCD's current "
+                                        "exposure (e.g. one set earlier by set_ccd_exposure)."),
                     },
                     "power": {
                         "type": "number",
-                        "description": "Laser power (transmittance %). A real value in 0.004-100. Default 40.",
+                        "description": ("Laser power (transmittance %). A real value in 0.004-100. "
+                                        "Omit to reuse the last power that was set (40 if never set)."),
                         "minimum": 0.004,
                         "maximum": 100,
                     },
@@ -118,20 +206,22 @@ RAMAN_TOOLS = [
                         "type": "string",
                         "enum": ["single", "accumulate", "kinetic"],
                         "description": (
-                            "CCD acquisition mode. "
-                            "'single': single shot (default). "
+                            "CCD acquisition mode. Omit to keep the CCD's current mode. "
+                            "'single': single shot. "
                             "'accumulate': sum num_accumulations shots -> high-SNR spectrum. "
                             "'kinetic': acquire kinetic_count frames continuously -> time-series analysis."
                         ),
                     },
                     "num_accumulations": {
                         "type": "integer",
-                        "description": "Accumulations per frame in accumulate/kinetic mode. Default 1.",
+                        "description": ("Accumulations per frame in accumulate/kinetic mode. "
+                                        "Omit to keep the current value."),
                         "minimum": 1,
                     },
                     "kinetic_count": {
                         "type": "integer",
-                        "description": "Total number of frames to acquire in kinetic mode. Default 1.",
+                        "description": ("Total number of frames to acquire in kinetic mode. "
+                                        "Omit to keep the current value."),
                         "minimum": 1,
                     },
                     "kinetic_cycle_time": {
@@ -142,29 +232,43 @@ RAMAN_TOOLS = [
                         "type": "string",
                         "enum": ["fvb", "single_track"],
                         "description": (
-                            "CCD readout mode. "
-                            "'fvb': Full Vertical Binning - sum all rows, 1D spectrum (default). "
+                            "CCD readout mode. Omit to keep the CCD's current read mode. "
+                            "'fvb': Full Vertical Binning - sum all rows, 1D spectrum. "
                             "'single_track': read only a specific track - single_track_center required."
                         ),
                     },
                     "hbin": {
                         "type": "integer",
-                        "description": "Horizontal binning pixel count. Default 1.",
+                        "description": "Horizontal binning pixel count. Omit to keep the current value.",
                         "minimum": 1,
                     },
                     "single_track_center": {
                         "type": "integer",
-                        "description": "Center pixel row number when read_mode='single_track'.",
+                        "description": ("Center pixel row number when read_mode='single_track'. "
+                                        "Omit to reuse the currently configured track."),
                     },
                     "single_track_width": {
                         "type": "integer",
-                        "description": "Track width (pixels) when read_mode='single_track'. Default 1.",
+                        "description": ("Track width (pixels) when read_mode='single_track'. "
+                                        "Omit to keep the current value."),
                         "minimum": 1,
                     },
                     "trigger_mode": {
                         "type": "string",
                         "enum": ["internal", "external", "external_start", "external_exposure", "external_fvb_em", "software"],
-                        "description": "CCD trigger mode. Default 'internal'.",
+                        "description": "CCD trigger mode. Omit to keep the CCD's current trigger mode.",
+                    },
+                    "shutter": {
+                        "type": "string",
+                        "enum": ["auto", "open", "close"],
+                        "description": (
+                            "Shutter mode for this acquisition. Omit to KEEP the current setting - "
+                            "including one you set earlier with set_ccd_shutter. If nobody has ever set "
+                            "it, it opens to 'auto' (the CCD boots closed, so keeping that would "
+                            "silently hand you a dark frame). "
+                            "Use 'close' to acquire a DARK / background frame with no light reaching "
+                            "the detector - that is the supported way to measure a dark reference."
+                        ),
                     },
                 },
                 "required": [],
@@ -175,7 +279,13 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "start_camera_stream",
-            "description": "Start real-time camera streaming (preview). Use it to check the sample position or to focus.",
+            "description": (
+                "Start real-time camera streaming. Streaming must be ON before "
+                "analyze_microscope_image, capture_scene, preview_grid_scan or run_autofocus can "
+                "get a frame. The response field already_streaming tells you whether it was ALREADY "
+                "running before your call - if it was true, someone else (the user's live view) owns "
+                "the stream, so do not stop it afterwards."
+            ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -183,7 +293,12 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "stop_camera_stream",
-            "description": "Stop real-time camera streaming.",
+            "description": (
+                "Stop real-time camera streaming. Only call this if YOU started the stream - i.e. "
+                "start_camera_stream returned already_streaming=false. Stopping a stream the user "
+                "was watching blanks their live view, and every image tool stops working until it is "
+                "restarted. When in doubt, leave it running."
+            ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -204,7 +319,13 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_ccd_exposure",
-            "description": "Set the CCD exposure time (seconds). Larger values give stronger signal but longer measurement time.",
+            "description": ("Set the CCD exposure time (seconds). Larger values give stronger signal "
+                            "but longer measurement time. The value persists - a later "
+                            "acquire_spectrum keeps it unless you pass exposure there. "
+                            "OVERLAP: acquire_spectrum(exposure=...) sets exactly the same thing "
+                            "through the same code. Use this tool when you set the exposure once and "
+                            "then measure several times; pass it to acquire_spectrum when it is a "
+                            "one-off. Never do both for the same measurement."),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -226,7 +347,14 @@ RAMAN_TOOLS = [
                 "'single': single shot. "
                 "'accumulate': sum after num_accumulations shots. "
                 "'kinetic': acquire num_kinetics frames continuously. "
-                "'run_till_abort': acquire continuously until an abort command."
+                "'run_till_abort': acquire continuously until an abort command (acquire_spectrum "
+                "cannot use this one - set single/accumulate/kinetic before measuring). "
+                "The mode and counts persist - acquire_spectrum keeps them unless you pass "
+                "acq_mode / num_accumulations there. "
+                "OVERLAP: acquire_spectrum(acq_mode=, num_accumulations=, kinetic_count=) sets the "
+                "same thing through the same code; use one or the other, not both. This tool is the "
+                "only way to select 'run_till_abort'. The response reports the counts actually in "
+                "effect on the hardware, not what you asked for."
             ),
             "parameters": {
                 "type": "object",
@@ -259,7 +387,11 @@ RAMAN_TOOLS = [
                 "'external': start acquisition on an external TTL signal. "
                 "'external_start': start on external trigger then internal timing. "
                 "'external_exposure': expose while the external TTL is HIGH. "
-                "'software': use SendSoftwareTrigger."
+                "'external_fvb_em': external trigger in FVB/EM readout. "
+                "'software': use SendSoftwareTrigger. "
+                "The mode persists - acquire_spectrum keeps it unless you pass trigger_mode there. "
+                "OVERLAP: acquire_spectrum(trigger_mode=...) accepts exactly the same values through "
+                "the same code. Use one or the other, not both."
             ),
             "parameters": {
                 "type": "object",
@@ -267,7 +399,8 @@ RAMAN_TOOLS = [
                     "mode": {
                         "type": "string",
                         "description": "Trigger mode",
-                        "enum": ["internal", "external", "external_start", "external_exposure", "software"],
+                        "enum": ["internal", "external", "external_start", "external_exposure",
+                                 "external_fvb_em", "software"],
                     }
                 },
                 "required": ["mode"],
@@ -280,9 +413,15 @@ RAMAN_TOOLS = [
             "name": "set_ccd_read_mode",
             "description": (
                 "Set the CCD readout mode. "
-                "'fvb': Full Vertical Binning - sum all rows -> 1D spectrum (default, used for Raman). "
-                "'single_track': read only a specific vertical row. The center parameter is required. "
-                "'image': full 2D image or ROI."
+                "'fvb': Full Vertical Binning - sum all rows -> 1D spectrum (used for Raman). "
+                "'single_track': read only a specific vertical row. single_track_center is required. "
+                "'image': full 2D image or ROI (acquire_spectrum cannot build a 1D spectrum from this - "
+                "switch back to 'fvb' before measuring). "
+                "The mode persists - acquire_spectrum keeps it unless you pass read_mode there. "
+                "OVERLAP: acquire_spectrum(read_mode=, hbin=, single_track_center=, "
+                "single_track_width=) sets the same thing through the same code, using the same "
+                "parameter names. Use one or the other, not both. This tool is the only way to select "
+                "'image' mode."
             ),
             "parameters": {
                 "type": "object",
@@ -294,50 +433,25 @@ RAMAN_TOOLS = [
                     },
                     "hbin": {
                         "type": "integer",
-                        "description": "Horizontal binning factor (default 1 = no binning)",
+                        "description": "Horizontal binning factor. Omit to keep the current value.",
                     },
-                    "center": {
+                    "single_track_center": {
                         "type": "integer",
-                        "description": "Center row number to read in single_track mode (1-based). Must be specified when using single_track mode. e.g. 256",
+                        "description": "Center row number to read in single_track mode (1-based), e.g. 256. Required the first time you use single_track; omit to reuse the configured track.",
                     },
-                    "width": {
+                    "single_track_width": {
                         "type": "integer",
-                        "description": "Number of rows to read in single_track mode (default 1)",
+                        "description": "Number of rows to read in single_track mode. Omit to keep the current value.",
                     },
                 },
                 "required": ["mode"],
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "set_mcp_gain",
-            "description": "Set the MCP (Micro-Channel Plate) gain of the iStar ICCD camera. Check the allowed range with get_mcp_gain_range().",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "gain": {
-                        "type": "integer",
-                        "description": "MCP gain value to set"
-                    }
-                },
-                "required": ["gain"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_mcp_gain_range",
-            "description": "Return the allowed MCP gain range (min, max) of the iStar ICCD camera.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        }
-    },
+    # [제거됨 — set_mcp_gain / get_mcp_gain_range, 2026-07-30]
+    # 이 카메라는 MCP 이득을 지원하지 않는다(SDK 가 DRV_NOT_SUPPORTED 20991 반환).
+    # 노출해 두면 "게인을 낮춰 포화를 해결" 류 과제에서 반드시 실패하는 경로로 유인된다.
+    # 대체 수단: set_ccd_preamp_gain + get_ccd_info().preamp_gains_available
     {
         "type": "function",
         "function": {
@@ -474,7 +588,12 @@ RAMAN_TOOLS = [
                 "Set the CCD shutter mode. "
                 "'auto'  - open and close automatically during acquisition (normal measurement). "
                 "'open'  - force open. "
-                "'close' - force closed (for dark-frame / background measurement)."
+                "'close' - force closed. "
+                "Like the other CCD settings this one PERSISTS: a later acquire_spectrum keeps it "
+                "unless you pass its own shutter argument. So for several dark / background frames "
+                "set 'close' once here and measure repeatedly; for a single dark frame "
+                "acquire_spectrum(shutter='close') is enough. Set it back to 'auto' before normal "
+                "measurements."
             ),
             "parameters": {
                 "type": "object",
@@ -493,7 +612,12 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_ccd_image_flip",
-            "description": "Set horizontal/vertical flip of the acquired image.",
+            "description": ("Set horizontal/vertical flip of the acquired 2D image. Only valid when "
+                            "the CCD read mode is 'image' - in the 1D spectrum modes (fvb / "
+                            "single_track) flipping would misalign the intensity array against the "
+                            "calibrated wavelength axis, and the correct orientation is already set "
+                            "at startup, so the call is rejected there. You almost never need this "
+                            "for Raman measurements."),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -523,7 +647,10 @@ RAMAN_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_stage_speed",
-            "description": "Set the stage movement speed. X/Y max 5.0 mm/s, Z max 0.1 mm/s. If a specific axis speed is omitted, its current speed is maintained.",
+            "description": ("Set the stage movement speed. X/Y max 5.0 mm/s, Z max 0.1 mm/s. If a "
+                            "specific axis speed is omitted, its current speed is maintained. Values "
+                            "above the limit are clipped to it; the response reports the speeds that "
+                            "will ACTUALLY be used and lists any clipped axes under 'clipped'."),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -544,11 +671,14 @@ RAMAN_TOOLS = [
         "function": {
             "name": "get_hardware_status",
             "description": (
-                "Report which hardware components (stage, laser, ccd, camera) are currently connected, "
+                "Report which hardware components (stage, laser, ccd, camera) are currently CONNECTED, "
                 "and for the connected ones whether they actually respond. Read `summary` first. "
                 "Call this FIRST whenever a hardware tool fails, before trying to fix anything - it tells "
                 "you whether one device is down or several, which decides what is even worth attempting. "
-                "It touches nothing and fires no laser, so it is always safe to call."
+                "It touches nothing and fires no laser, so it is always safe to call. "
+                "SCOPE: this answers 'is it there and alive'. For the SETTINGS of a working device use the "
+                "per-device tools instead - get_ccd_info (exposure, mode, temperature), get_laser_status "
+                "(power and whether it is armed), get_stage_position, get_stage_speed."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -626,28 +756,30 @@ RAMAN_TOOLS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "capture_camera_frame",
-            "description": (
-                "Capture the latest single frame from the camera and return its shape, intensity statistics, "
-                "and sharpness score (sharpness_score, Laplacian variance). "
-                "Streaming must be active. "
-                "Useful for comparing sharpness across Z positions during autofocus."
-            ),
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
+    # [제거됨 — capture_camera_frame, 2026-07-30] analyze_microscope_image 와 같은 일을 하면서
+    # uint16 프레임을 정규화하지 않아 통계 스케일이 어긋났고, sharpness_score 를 오토포커스
+    # 지표로 안내했지만 run_autofocus 는 '스팟 면적'을 써서 서로 무관했다.
+    # 통계·선명도는 analyze_microscope_image 반환에 병합했다.
     {
         "type": "function",
         "function": {
             "name": "analyze_microscope_image",
             "description": (
-                "Capture the current view of the TuCam optical microscope camera and pass it as an image. "
-                "Use it when visual judgment is needed, e.g. checking sample position, identifying a target, or detecting debris. "
-                "Streaming must be active. "
-                "The return also includes pixel coordinates; these are not stage coordinates, so if you need to move to that location, convert and move with the move_to_pixel tool."
+                "Capture the current view of the TuCam optical microscope camera and pass it to YOU as an image "
+                "to look at. Use it when visual judgment is needed, e.g. checking sample position, identifying "
+                "a target, or detecting debris. Streaming must be active. "
+                "The return also includes pixel coordinates; these are not stage coordinates, so if you need to move to that location, convert and move with the move_to_pixel tool. "
+                "It also returns brightness statistics (min/max/mean_intensity) and a relative "
+                "sharpness_score for the same image - use those to check exposure or compare frames. "
+                "Do NOT use sharpness_score to focus manually: run_autofocus optimises a different "
+                "metric (guide-beam spot area) and would settle at a different Z. "
+                "OVERLAP - three tools capture the camera, pick by PURPOSE: "
+                "analyze_microscope_image = you look at it now (returns the image to you, saves nothing); "
+                "capture_scene = save the view as a file so run_analysis can draw a peak map on top of it "
+                "(returns no image for you to inspect); "
+                "preview_grid_scan = show where a planned grid would land. "
+                "All three return the same pixel coordinate system, so a coordinate read from any of them "
+                "can be passed to move_to_pixel."
             ),
             "parameters": {
                 "type": "object",
@@ -675,11 +807,11 @@ RAMAN_TOOLS = [
                 "properties": {
                     "pixel_x": {
                         "type": "integer",
-                        "description": "Image X pixel coordinate (0 - 1060)",
+                        "description": f"Image X pixel coordinate (0 - {_CAM_W})",
                     },
                     "pixel_y": {
                         "type": "integer",
-                        "description": "Image Y pixel coordinate (0 - 800)",
+                        "description": f"Image Y pixel coordinate (0 - {_CAM_H})",
                     },
                 },
                 "required": ["pixel_x", "pixel_y"],
@@ -695,7 +827,12 @@ RAMAN_TOOLS = [
                 "Hill-climbing autofocus based on minimizing the guide-beam laser spot area. "
                 "Computes the spot pixel count (area) via Otsu thresholding on the laser OFF/ON difference image, "
                 "and moves the stage to the Z position with minimum area (where the laser spot is sharpest). "
-                "Adaptive hill-climbing auto-adjusts the step size and finally returns to the historical minimum position."
+                "Adaptive hill-climbing auto-adjusts the step size and finally returns to the historical minimum position. "
+                "It moves Z only, uses the GUIDE beam (not the measurement beam), and leaves the laser off. "
+                "The search is clipped to the Z travel range; if the response contains z_limit_hits the focus "
+                "may be physically out of reach, and repeating the call will NOT help - report that instead. "
+                "This is the only focusing tool: do not try to focus by comparing sharpness_score from "
+                "analyze_microscope_image, which is a different metric and converges elsewhere."
             ),
             "parameters": {
                 "type": "object",
@@ -804,126 +941,60 @@ RAMAN_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "save_spectrum",
-            "description": (
-                "Save a spectrum intensity array you already hold to a CSV file, into this session's "
-                "own folder. If raman_shift is also passed, calibration information is included. "
-                "Returns `path`, a data/-relative path you can read back later with load_spectrum. "
-                "Prefer save_result inside run_analysis when the array was COMPUTED there - passing a "
-                "long array through this tool's arguments wastes the context window and loses precision. "
-                "Use this tool for arrays you already have in hand (e.g. straight from acquire_spectrum)."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Intensity array",
-                    },
-                    "filename": {
-                        "type": "string",
-                        "description": (
-                            "Short descriptive label for this result, NOT a path - e.g. 'polystyrene_01' or "
-                            "'despiked'. The session folder and an ordering number are added automatically, "
-                            "so do not put directories or the task id in it."
-                        ),
-                    },
-                    "raman_shift": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Raman shift axis [cm-1]. Optional",
-                    },
-                    "wavelength_nm": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Wavelength axis [nm]. Optional",
-                    },
-                    "metadata": {
-                        "type": "object",
-                        "description": "Additional metadata (exposure time, power, etc.). Saved as a .json with the same name",
-                    },
-                },
-                "required": ["data", "filename"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "load_spectrum",
             "description": (
-                "Load a saved spectrum CSV file. "
-                "Both a path relative to the data/ directory and an absolute path are allowed."
+                "Load ONE spectrum CSV that this system produced - an auto-saved measurement, a "
+                "processed spectrum you wrote with save_result inside run_analysis, or a "
+                "background-subtracted result. Accepts a path relative to data/ or an absolute path; "
+                "the data/-relative path returned by list_session_artifacts or by save_result can be "
+                "passed here verbatim. Returns the intensity array plus any axis columns "
+                "(raman_shift_cm-1 / wavelength_nm / background_intensity) and the saved metadata. "
+                "PICK THE RIGHT TOOL: for a file the USER attached to the chat use inspect_file "
+                "(different store, different format); to compute over MANY saved measurements at once "
+                "use run_analysis, which receives them all as `spectra` without any loading; to re-read "
+                "a background-subtraction result you made this session use get_bg_version, which needs "
+                "no path."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "filename": {
                         "type": "string",
-                        "description": "File name or path. e.g. 'polystyrene_01' or 'polystyrene_01.csv'",
+                        "description": "File name or path. e.g. 'polystyrene_01' or 'runs/<session>/spectra/01_corrected.csv'",
                     }
                 },
                 "required": ["filename"],
             },
         },
     },
-    # ── 세션 관리 ──────────────────────────────────────────────────────────────
+    # ── 측정점 기록 ────────────────────────────────────────────────────────────
     {
         "type": "function",
         "function": {
-            "name": "create_session",
+            "name": "save_measurement_point",
             "description": (
-                "Create a new experiment session directory and initialize its metadata. "
-                "Afterwards you can save per-point spectrum/position data with save_point_data()."
+                "Group what you just measured at this position into ONE measurement-point record: "
+                "the most recent acquire_spectrum result, the most recent capture_scene microscope "
+                "image, and the current stage coordinates. "
+                "You do NOT pass any arrays - the spectrum and image files are already saved "
+                "automatically, and this tool only links them together under a point id. "
+                "Call it AFTER acquiring the spectrum and capturing the view at that position. "
+                "The response lists anything that was missing (e.g. no image captured yet). "
+                "Use one call per position to build a multi-point dataset."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "session_id": {
-                        "type": "string",
-                        "description": "Session identifier. e.g. 'EXP_001'",
-                    }
-                },
-                "required": ["session_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "save_point_data",
-            "description": (
-                "Save spectrum/position data at a specific measurement point of an experiment session. "
-                "You must first create a session with create_session()."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "session_id": {
-                        "type": "string",
-                        "description": "Session ID. e.g. 'EXP_001'",
-                    },
                     "point_id": {
                         "type": "string",
-                        "description": "Point identifier. e.g. 'P001'",
+                        "description": "Short identifier for this point, e.g. 'P001'. Used in the filename.",
                     },
-                    "spectrum_data": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Intensity array. Optional",
-                    },
-                    "raman_shift": {
-                        "type": "array",
-                        "items": {"type": "number"},
-                        "description": "Raman shift axis [cm-1]. Optional",
-                    },
-                    "position": {
-                        "type": "object",
-                        "description": "Stage position {'x': ..., 'y': ..., 'z': ...}. Optional",
+                    "note": {
+                        "type": "string",
+                        "description": "Optional note about this point (sample region, what you observed).",
                     },
                 },
-                "required": ["session_id", "point_id"],
+                "required": ["point_id"],
             },
         },
     },
@@ -937,7 +1008,11 @@ RAMAN_TOOLS = [
                 "Uses the most recently acquired spectrum (source='last') or a saved file path as the source. "
                 "The result is saved under version_label, and you can compare multiple versions with list_bg_versions(). "
                 "Increasing poly_order removes more complex backgrounds but risks overfitting. "
-                "If the user does not specify a polynomial order, use the default value 5."
+                "If the user does not specify a polynomial order, use the default value 5. "
+                "OVERLAP with run_analysis: you could also write your own baseline code there, but "
+                "PREFER THIS TOOL for ordinary background removal - it is the agreed method, keeps "
+                "parameters comparable across versions, and writes the standard CSV format. Use "
+                "run_analysis only when the task explicitly calls for a different algorithm, and say so."
             ),
             "parameters": {
                 "type": "object",
@@ -977,7 +1052,12 @@ RAMAN_TOOLS = [
                     },
                     "save_result": {
                         "type": "boolean",
-                        "description": "If True, save the corrected spectrum as a CSV in the data/ directory. Default false.",
+                        "description": ("If True, also write the corrected spectrum to this session's "
+                                        "folder as a CSV (standard format: pixel_index, "
+                                        "raman_shift_cm-1, intensity, background_intensity) and return "
+                                        "its data/-relative path in saved_path, which load_spectrum "
+                                        "accepts. Default false - without it the result exists only in "
+                                        "memory for this conversation."),
                     },
                 },
                 "required": [],
@@ -1025,11 +1105,18 @@ RAMAN_TOOLS = [
         "function": {
             "name": "list_results",
             "description": (
-                "Query the list of measurement results auto-saved by acquire_spectrum. "
+                "Query the list of MEASUREMENTS auto-saved by acquire_spectrum. "
                 "Returns each item's base (file identifier), session, title, timestamp, and meta (coordinates, etc.). "
                 "Get the base to pass to combine_spectra / aggregate_spectra_csv / bundle_results here. "
                 "By default this lists only the measurements from YOUR current session - your own work, "
-                "not other sessions'. Files live in data/results/<date>/<your session>/."
+                "not other sessions'. Files live in data/results/<date>/<your session>/. "
+                "THERE ARE THREE 'list' TOOLS, one per store - choose by what you are looking for: "
+                "list_results = raw measurements you acquired (this one); "
+                "list_session_artifacts = files YOU produced (processed spectra from save_result, "
+                "measurement-point records, figures), each with a path you can load_spectrum; "
+                "list_uploaded_files = data files the USER attached to the chat. "
+                "(Background-subtraction versions from this conversation are not files - use "
+                "list_bg_versions.)"
             ),
             "parameters": {
                 "type": "object",
@@ -1059,7 +1146,10 @@ RAMAN_TOOLS = [
             "description": (
                 "Combine several saved measurement spectra into a single grid image and render it. "
                 "Each cell title uses the title auto-generated at save time (scan coordinates, power, exposure) as is. "
-                "e.g. for a 10x10 scan, arranged by coordinate. If names is omitted, combine everything from that date."
+                "e.g. for a 10x10 scan, arranged by coordinate. If names is omitted, combine everything from that date. "
+                "This is the ready-made one-call version - it needs no code. run_analysis can also plot "
+                "the same measurements, but only use it when you need a layout or computation this tool "
+                "does not give you (overlaid curves, peak maps, custom axes)."
             ),
             "parameters": {
                 "type": "object",
@@ -1090,7 +1180,9 @@ RAMAN_TOOLS = [
             "name": "aggregate_spectra_csv",
             "description": (
                 "Build a CSV summarizing several saved measurements, one row per experiment (date, time, title, coordinates, power, exposure, "
-                "max intensity, total intensity, peak position). Use it to organize multiple experiments into one table."
+                "max intensity, total intensity, peak position). Use it to organize multiple experiments into one table. "
+                "One call, no code. It summarizes ONE ROW PER MEASUREMENT - if you need per-point values "
+                "computed some other way, or a table of derived quantities, use run_analysis instead."
             ),
             "parameters": {
                 "type": "object",
@@ -1119,10 +1211,13 @@ RAMAN_TOOLS = [
         "function": {
             "name": "capture_scene",
             "description": (
-                "Save the current microscope (camera) view. It also computes and saves the stage-coordinate "
-                "extent of the image from the stage position and lens FOV, so later in run_analysis you can load it via microscope_image / "
-                "image_extent and overlay a peak map on top of the microscope image. "
-                "It is good to call this once before a scan measurement (camera streaming required)."
+                "SAVE the current microscope (camera) view as a file, for later use as a background "
+                "image. It also computes the stage-coordinate extent of that image (position + "
+                "calibrated field of view), so in a later run_analysis you get microscope_image / "
+                "image_extent injected and can overlay a peak map on the microscope photo. "
+                "Call it once before a scan measurement (camera streaming required). "
+                "It does NOT return the image for you to look at - use analyze_microscope_image for "
+                "that. It is also what save_measurement_point references as 'the image at this point'."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -1176,15 +1271,20 @@ RAMAN_TOOLS = [
                 "which also comes back in the tool result as saved_files. "
                 "This is the correct way to persist a processed spectrum (baseline-corrected, "
                 "spike-removed, normalized, smoothed): do it in the same run_analysis call that computes it. "
-                "Do NOT print an array and then pass it to save_spectrum - printing thousands of numbers "
-                "overflows the context window and loses precision; use save_result and print only a short "
+                "save_result is the ONLY way to write an array - there is no tool that takes an intensity "
+                "array as an argument. Do NOT print an array in order to re-type it elsewhere: printing "
+                "thousands of numbers overflows the context window and loses precision. Print only a short "
                 "summary (how many points, how many spikes removed, where the peaks are). "
                 "stdout is truncated past 4000 characters. "
                 "Constraints (safety): no hardware (laser/stage/CCD) control, no network access, "
                 "no file access other than save_result and plt figures, "
                 "imports limited to computation libraries such as numpy/scipy/matplotlib/math. "
                 "A 'measurement' like a 3x3 scan is done first with move_stage + acquire_spectrum, not this tool, "
-                "and the saved result is analyzed/visualized here. On failure, read error/trace, fix the code, and call again."
+                "and the saved result is analyzed/visualized here. On failure, read error/trace, fix the code, and call again. "
+                "WHEN NOT TO USE THIS: a ready-made tool already covers some jobs and needs no code - "
+                "combine_spectra (grid of spectra images), aggregate_spectra_csv (one summary row per "
+                "measurement), bundle_results (zip for download), apply_background_subtraction (IPBSA "
+                "baseline removal). Reach for run_analysis when no such tool fits, not by default."
             ),
             "parameters": {
                 "type": "object",

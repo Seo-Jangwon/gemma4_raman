@@ -9,7 +9,6 @@ import sys
 import os
 import cv2
 import time
-import numpy as np
 from pathlib import Path
 
 _BACKEND = Path(__file__).resolve().parent.parent
@@ -22,6 +21,10 @@ from USE_laser_with_power import LaserController
 from USE_camera_stream import StreamingTUCam
 from USE_stage_test import TangoController
 from config import CAMERA_WIDTH as STREAM_WIDTH, CAMERA_HEIGHT as STREAM_HEIGHT  # noqa: E402
+# 스팟 면적(오토포커스 목적함수)과 프레임 전처리는 공용 모듈을 쓴다(2026-07-30).
+# 예전에는 이 파일과 raman_tools.run_autofocus 가 같은 알고리즘을 각자 구현했고,
+# 목적함수가 갈라지면 같은 시료에서 서로 다른 Z 에 수렴한다.
+import vision  # noqa: E402
 
 COARSE_STEP  = 0.010   # mm (10µm)
 COARSE_RANGE = 0.050   # mm (±50µm, 총 11포인트)
@@ -53,56 +56,19 @@ class AutoFocusLocal:
     # ------------------------------------------------------------------
     # 차분 이미지 생성 헬퍼
     # ------------------------------------------------------------------
-    def _flush_frames(self, n: int = 3):
-        """레이저 상태 변경 후 카메라 버퍼에 남은 이전 프레임 버리기"""
-        for _ in range(n):
-            self.camera.get_latest_frame()
-
-    def _to_uint8(self, frame):
-        """프레임을 uint8 grayscale로 정규화"""
-        img = frame.copy()
-        if img.dtype == np.uint16:
-            img = (img / 256).astype(np.uint8)
-        if len(img.shape) == 3:
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        return img
-
     def _capture_diff(self):
         """
-        레이저 OFF → 레퍼런스 취득 → 레이저 ON → 레이저 프레임 취득
-        반환: (ref, laser_frame, diff_absdiff, diff_clip)
+        레이저 OFF → 레퍼런스 취득 → 레이저 ON → 레이저 프레임 취득.
+        구현은 vision.capture_laser_diff 단일 출처 — raman_tools.run_autofocus 가
+        쓰는 것과 **같은 함수**라 두 오토포커스가 같은 Z 로 수렴한다.
+
+        반환: (ref, laser_frame, diff_absdiff, diff_clip, spot_area)
           - diff_absdiff : cv2.absdiff 버전 (양방향 차이, 조명 변화에도 반응)
           - diff_clip    : clip(laser - ref, 0) 버전 (레이저보다 밝아진 영역만)
         """
-        # 1. 레이저 OFF → ref 취득
-        self.laser.laser_off()
-        self._flush_frames(3)
-        ref_frames = [self._to_uint8(self.camera.get_latest_frame()) for _ in range(3)
-                      if self.camera.get_latest_frame() is not None]
-        ref = np.mean(ref_frames, axis=0).astype(np.uint8) if ref_frames else None
-
-        # 2. 레이저 ON → laser 프레임 취득
-        self.laser.laser_on()
-        self._flush_frames(3)
-        laser_frames = [self._to_uint8(self.camera.get_latest_frame()) for _ in range(3)
-                        if self.camera.get_latest_frame() is not None]
-        laser_frame = np.mean(laser_frames, axis=0).astype(np.uint8) if laser_frames else None
-
-        if ref is None or laser_frame is None:
-            return None, None, None, None, 0
-
-        # 3-A. absdiff 버전: 양방향 절댓값 차이
-        diff_absdiff = cv2.absdiff(laser_frame, ref)
-
-        # 3-B. clip 버전: 레이저로 인해 밝아진 영역만 (음수 = 0)
-        diff_clip = np.clip(laser_frame.astype(np.int16) - ref.astype(np.int16), 0, 255).astype(np.uint8)
-
-        # 4. 면적 계산: Otsu threshold로 노이즈/배경 제거 후 레이저 스팟 픽셀 수
-        blurred = cv2.GaussianBlur(diff_clip, (5, 5), 0)
-        _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        spot_area = int(np.count_nonzero(binary))
-
-        return ref, laser_frame, diff_absdiff, diff_clip, spot_area
+        d = vision.capture_laser_diff(self.camera, self.laser, n_avg=3)
+        return (d["ref"], d["laser_frame"], d["diff_absdiff"],
+                d["diff_clip"], d["area_px"])
 
     # ------------------------------------------------------------------
     # 가이드빔 제어
@@ -168,12 +134,7 @@ class AutoFocusLocal:
                 # ── 1. 화면 업데이트 (항상 실행) ──
                 frame = self.camera.get_latest_frame()
                 if frame is not None:
-                    disp = frame.copy()
-                    if disp.dtype == np.uint16:
-                        disp = (disp / 256).astype(np.uint8)
-                    if len(disp.shape) == 2:
-                        disp = cv2.cvtColor(disp, cv2.COLOR_GRAY2BGR)
-                    disp = cv2.resize(disp, (STREAM_WIDTH, STREAM_HEIGHT))
+                    disp = vision.to_view_bgr(frame, STREAM_WIDTH, STREAM_HEIGHT)
 
                     phase_label = f"[AF/{sweep_state}]" if phase == 'sweep' else "[Stream]"
                     pos_disp = self.stage.get_position()

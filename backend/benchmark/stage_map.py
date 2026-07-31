@@ -47,7 +47,7 @@ _XY_RE = re.compile(r"_x(-?\d+(?:\.\d+)?)_y(-?\d+(?:\.\d+)?)")
 _KIND_STYLE = {
     "measure": ("#dc2626", "측정(스펙트럼 취득)"),
     "grid":    ("#2563eb", "그리드 스캔 점"),
-    "point":   ("#7c3aed", "저장한 점(save_point_data)"),
+    "point":   ("#7c3aed", "저장한 점(save_measurement_point)"),
     "move":    ("#6b7280", "스테이지 이동"),
     "pixel":   ("#0891b2", "화면 클릭 이동(move_to_pixel)"),
     "preview": ("#f59e0b", "그리드 프리뷰(측정 안 함)"),
@@ -296,8 +296,10 @@ def extract_positions(rec: dict) -> list[dict]:
                             cx + (i - (cols - 1) / 2) * sp,
                             cy + (j - (rows - 1) / 2) * sp,
                             label=f"prev {j},{i}")
-        elif name == "save_point_data":
-            p = args.get("position") if isinstance(args.get("position"), dict) else {}
+        elif name == "save_measurement_point":
+            # 좌표는 인자가 아니라 결과에서 읽는다 — 이 툴은 위치를 인자로 받지 않고
+            # 호출 시점의 스테이지 좌표를 스스로 읽어 기록하고 result.position 으로 돌려준다.
+            p = res.get("position") if isinstance(res.get("position"), dict) else {}
             add(step, name, "point", _num(p.get("x")), _num(p.get("y")), _num(p.get("z")),
                 label=str(args.get("point_id") or ""))
     return out
@@ -484,13 +486,12 @@ def build_stage_map(rec: dict) -> str:
 
 _IMG_LABEL = {
     "capture_scene": "현미경 스냅샷",
-    "capture_camera_frame": "카메라 프레임",
     "analyze_microscope_image": "현미경 분석 화면",
     "preview_grid_scan": "그리드 프리뷰",
     "run_grid_scan": "그리드 스캔",
     "acquire_spectrum": "측정 스펙트럼 PNG",
     "run_analysis": "분석 그림",
-    "save_spectrum": "저장 스펙트럼",
+    "save_measurement_point": "저장 측정점",
 }
 _IMG_EXT = (".png", ".jpg", ".jpeg", ".webp")
 

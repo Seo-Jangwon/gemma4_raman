@@ -580,11 +580,27 @@ class LaserController:
         self.is_on = True
 
     def laser_off(self):
+        """
+        레이저 정지 (SSPW 0). 광학계(축02 ND / 축04 빔스플리터)는 건드리지 않는다.
+
+        [왜 가이드빔 위치로 돌아가지 않는가 — 2026-07-30]
+        예전에는 여기서 _power_set=False 로 내리고 set_guide_beam() 을 호출해 ND 필터를
+        차단 위치로 옮겼다. 그 결과 '끄고 다시 켜면 측정빔이 아니라 가이드빔이 나가는'
+        함정이 있었다:
+
+            set_power(15) → laser_on() → laser_off() → laser_on()
+            → _power_set 이 False 라 laser_on() 이 축04 를 측정 위치로 옮기지 않고
+              ND 도 차단 위치에 남는다
+            → SSPW 1 은 나가지만 측정빔은 막혀 있다(신호 0). 호출자는 "Laser ON" 만 보고
+              왜 스펙트럼이 비는지 알 수 없었다.
+
+        SSPW 0 이면 발진 자체가 멈추므로 빔을 막으려고 ND 를 원위치할 이유가 없다. 파워
+        설정(ND 위치)은 유지하고, 가이드빔이 필요한 쪽이 set_guide_beam() 을 명시적으로
+        부른다(오토포커스가 그렇게 한다).
+        """
         print("🛑 레이저 정지 (OFF)")
         self._send_command("00", "SSPW", "0", timeout=3.0)
         self.is_on = False
-        self._power_set = False
-        self.set_guide_beam()
 
     # ==============================================================
     # ND 필터 투과율 ↔ 펄스 위치 변환 (config [ND_FILTER] Mode=1 보간)

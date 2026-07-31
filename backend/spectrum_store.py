@@ -165,31 +165,103 @@ def render_png(result: dict, path: Path, title: str) -> None:
     plt.close(fig)
 
 
-def _write_csv(result: dict, path: Path) -> None:
-    """스펙트럼을 CSV 로 저장(보정 시 4열, 미보정 시 2열). 메타는 주석행으로."""
-    with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        for k in ("laser_power_pct", "exposure_time", "laser_nm", "mode"):
-            if result.get(k) is not None:
-                f.write(f"# {k},{result[k]}\n")
+# ── 스펙트럼 CSV 저장 (프로젝트 전체의 단일 포맷) ─────────────────────────────
+#
+# [왜 한 곳으로 모았는가 — 2026-07-30]
+# 스펙트럼 CSV 를 쓰는 코드가 네 벌 있었고, 헤더가 서로 달랐다:
+#   spectrum_store._write_csv                pixel, raman_shift_cm-1, wavelength_nm, intensity
+#   analysis_sandbox.save_result             pixel_index, raman_shift_cm-1, wavelength_nm, intensity
+#   raman_tools.apply_background_subtraction pixel_index, raman_shift_cm-1,
+#                                            corrected_intensity, background_intensity
+#   save_csv.save_spectrum_csv               pixel, ...  (테스트 스크립트 전용)
+# 그 결과 load_spectrum 이 세기 열 이름을 추측해야 했고('intensity' 인지
+# 'corrected_intensity' 인지), 벤치마크 채점기도 x축 후보 이름을 나열해 두어야 했다.
+# 이제 아래 한 함수만이 스펙트럼 CSV 를 쓴다.
+#
+# 포맷: pixel_index, [raman_shift_cm-1,] [wavelength_nm,] intensity, [background_intensity]
+#   · 첫 열 이름은 'pixel_index' 로 통일한다(분석 산출물·채점기가 이미 쓰던 이름).
+#   · 배경 제거 결과의 세기 열도 'intensity' 다 — '보정된 세기'라는 사실은 파일명과
+#     background_intensity 열의 존재로 드러난다. 열 이름을 바꾸면 같은 데이터를 읽는
+#     코드가 두 갈래로 갈린다(그래서 갈렸었다).
+#   · 메타는 '# key,value' 주석행. load_spectrum 이 이 행들을 건너뛰고 metadata 로 준다.
+
+_CSV_META_KEYS = ("laser_power_pct", "exposure_time", "laser_nm", "mode")
+
+
+def write_spectrum_csv(path, intensity, raman_shift=None, wavelength_nm=None,
+                       background=None, meta: dict | None = None,
+                       encoding: str = "utf-8-sig") -> None:
+    """스펙트럼 1개를 표준 포맷 CSV 로 쓴다. 프로젝트의 유일한 스펙트럼 CSV writer.
+
+    Parameters
+    ----------
+    path        : 저장 경로
+    intensity   : 세기 배열(필수)
+    raman_shift : 라만 shift 배열(cm-1). None 이면 열 자체를 만들지 않는다.
+    wavelength_nm : 파장 배열(nm). 없으면 열 생략.
+    background  : 배경 배열. 배경 제거 결과일 때만 준다(열이 하나 늘어난다).
+    meta        : 헤더 앞에 '# key,value' 주석행으로 남길 측정 조건.
+    encoding    : 기본 utf-8-sig(엑셀 호환). load_spectrum 이 utf-8-sig 로 읽는다.
+    """
+    ints = [float(v) for v in intensity]
+    cols = ["pixel_index"]
+    extra = []
+    if raman_shift is not None:
+        cols.append("raman_shift_cm-1")
+        extra.append(("raman_shift_cm-1", [float(v) for v in raman_shift], "{:.3f}"))
+    if wavelength_nm is not None:
+        cols.append("wavelength_nm")
+        extra.append(("wavelength_nm", [float(v) for v in wavelength_nm], "{:.4f}"))
+    cols.append("intensity")
+    bg = [float(v) for v in background] if background is not None else None
+    if bg is not None:
+        cols.append("background_intensity")
+
+    for name, seq, _fmt in extra:
+        if len(seq) != len(ints):
+            raise ValueError(f"{name} has {len(seq)} points but intensity has {len(ints)}.")
+    if bg is not None and len(bg) != len(ints):
+        raise ValueError(f"background has {len(bg)} points but intensity has {len(ints)}.")
+
+    with open(path, "w", newline="", encoding=encoding) as f:
+        for k, v in (meta or {}).items():
+            if v is not None:
+                f.write(f"# {k},{v}\n")
         w = csv.writer(f)
-        if result.get("mode") == "kinetic" and result.get("frames"):
-            w.writerow(["frame_index", "pixel", "intensity"])
+        w.writerow(cols)
+        for i in range(len(ints)):
+            row = [i]
+            for _name, seq, fmt in extra:
+                row.append(fmt.format(seq[i]))
+            row.append(ints[i])
+            if bg is not None:
+                row.append(bg[i])
+            w.writerow(row)
+
+
+def _write_csv(result: dict, path: Path) -> None:
+    """측정 결과(acquire_spectrum 반환)를 CSV 로 저장. kinetic 만 프레임 나열 포맷."""
+    meta = {k: result.get(k) for k in _CSV_META_KEYS}
+    if result.get("mode") == "kinetic" and result.get("frames"):
+        # 프레임이 여러 벌이라 위의 단일 스펙트럼 포맷에 담기지 않는다.
+        with open(path, "w", newline="", encoding="utf-8-sig") as f:
+            for k, v in meta.items():
+                if v is not None:
+                    f.write(f"# {k},{v}\n")
+            w = csv.writer(f)
+            w.writerow(["frame_index", "pixel_index", "intensity"])
             for fr in result["frames"]:
                 for px, val in enumerate(fr.get("intensity") or []):
                     w.writerow([fr.get("frame_index", ""), px, val])
-            return
-        intensity = _intensity_of(result)
-        if result.get("calibrated") and result.get("raman_shift_cm-1"):
-            w.writerow(["pixel", "raman_shift_cm-1", "wavelength_nm", "intensity"])
-            shift = result["raman_shift_cm-1"]
-            wl = result.get("wavelength_nm") or [""] * len(intensity)
-            for i in range(len(intensity)):
-                w.writerow([i, f"{shift[i]:.3f}", f"{wl[i]:.4f}" if wl[i] != "" else "",
-                            intensity[i]])
-        else:
-            w.writerow(["pixel", "intensity"])
-            for px, val in enumerate(intensity):
-                w.writerow([px, val])
+        return
+    calibrated = bool(result.get("calibrated") and result.get("raman_shift_cm-1"))
+    write_spectrum_csv(
+        path,
+        intensity=_intensity_of(result),
+        raman_shift=result["raman_shift_cm-1"] if calibrated else None,
+        wavelength_nm=result.get("wavelength_nm") if calibrated else None,
+        meta=meta,
+    )
 
 
 def spectrum_event(tool_result: dict | None) -> dict | None:

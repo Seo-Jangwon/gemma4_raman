@@ -171,7 +171,7 @@ def describe_verifier(v: dict) -> str:
 # ── 좌표/그리드 문항의 판정 기준 ─────────────────────────────────────────────
 
 _POS_TOOLS = {"run_grid_scan", "preview_grid_scan", "move_stage", "move_stage_relative",
-              "move_to_pixel", "acquire_spectrum", "save_point_data", "run_autofocus"}
+              "move_to_pixel", "acquire_spectrum", "save_measurement_point", "run_autofocus"}
 _GRID_RE = re.compile(r"(\d+)\s*[x×]\s*(\d+)")
 _SPACING_RE = re.compile(
     r"(?:spacing|step|pitch|interval|apart|간격)[^0-9]{0,14}(\d+(?:\.\d+)?)\s*(mm|µm|um)"

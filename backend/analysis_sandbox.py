@@ -27,7 +27,8 @@
   [save_result 가 왜 있는가 — 컨텍스트 왕복 제거]
   이 샌드박스는 파일을 못 쓰므로, 원래는 계산 결과를 밖으로 빼는 통로가 print() 뿐이었다.
   그래서 "보정해서 저장하라"류 과제에서 모델은 ① 배열 전체를 print 하고 ② 그걸 읽어서
-  ③ save_spectrum(data=[...]) 인자로 통째로 다시 뱉어야 했다. 1801점짜리 스펙트럼 하나가
+  ③ 저장 툴 인자로 통째로 다시 뱉어야 했다(당시의 save_spectrum 툴 — 2026-07-30 제거).
+  1801점짜리 스펙트럼 하나가
   컨텍스트를 2만 토큰씩 왕복하는 셈이라, 프롬프트(30k)만으로 창(32k)이 차고 생성이
   중간에 잘려 빈 응답이 나왔다("Failed to generate a response."의 실제 원인).
   save_result 는 그 왕복을 없앤다 — 숫자는 샌드박스 밖으로 나가지 않고, 모델은 저장된
@@ -174,9 +175,11 @@ def _make_save_result(data_dir, saved: list, rel_prefix: str = "", start_index: 
     exec 되는 생성 코드의 텍스트에만 적용된다. 생성 코드가 통제하는 것은 인자뿐이고,
     파일명은 _sanitize_filename 이, 경로는 data_dir 고정이 막는다.
 
-    CSV 포맷은 raman_tools.save_spectrum 과 정확히 동일하게 맞춘다 — 같은 과제를 어느
-    경로로 풀든 산출물이 같아야 채점(참조 스펙트럼과의 수치 비교)이 성립하고,
-    load_spectrum 으로 그대로 다시 읽힌다.
+    CSV 포맷(pixel_index, [raman_shift_cm-1,] [wavelength_nm,] intensity)은 고정이다 —
+    같은 과제를 어느 경로로 풀든 산출물이 같아야 채점(참조 스펙트럼과의 수치 비교)이
+    성립하고, load_spectrum 으로 그대로 다시 읽힌다. 실제 쓰기는
+    spectrum_store.write_spectrum_csv 가 담당한다(2026-07-30: 측정 저장·배경 제거·이
+    훅이 각자 헤더를 쓰던 것을 한 함수로 모았다).
 
     [rel_prefix / start_index — 세션 귀속]
     샌드박스는 별도 서브프로세스라 run_store 의 '현재 세션'을 공유하지 못한다. 그래서
@@ -184,7 +187,7 @@ def _make_save_result(data_dir, saved: list, rel_prefix: str = "", start_index: 
     이 세션에서 이미 쓴 개수(start_index)를 payload 로 넘겨준다. 파일명 앞에 순번을
     붙이는 이유는 목록만 보고 '어느 것이 최종 산출물인가'를 알 수 있게 하려는 것.
     """
-    import csv as _csv
+    from backend.spectrum_store import write_spectrum_csv as _write_spectrum_csv
 
     def save_result(filename, intensity, raman_shift=None, wavelength_nm=None,
                     metadata=None) -> str:
@@ -201,6 +204,8 @@ def _make_save_result(data_dir, saved: list, rel_prefix: str = "", start_index: 
         safe = f"{start_index + len(saved):02d}_{stem}.csv"
 
         def _col(v, label):
+            """(아래 검증은 write_spectrum_csv 에도 있지만, 여기서 먼저 걸러야 생성
+            코드에 '어느 인자가 문제인지' 알려 줄 수 있다.)"""
             if v is None:
                 return None
             seq = [float(x) for x in v]
@@ -221,20 +226,15 @@ def _make_save_result(data_dir, saved: list, rel_prefix: str = "", start_index: 
 
         data_dir.mkdir(parents=True, exist_ok=True)
         path = data_dir / safe
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            w = _csv.writer(f)
-            if shift is not None and wl is not None:
-                w.writerow(["pixel_index", "raman_shift_cm-1", "wavelength_nm", "intensity"])
-                for i, (a, b, c) in enumerate(zip(shift, wl, ints)):
-                    w.writerow([i, a, b, c])
-            elif shift is not None:
-                w.writerow(["pixel_index", "raman_shift_cm-1", "intensity"])
-                for i, (a, c) in enumerate(zip(shift, ints)):
-                    w.writerow([i, a, c])
-            else:
-                w.writerow(["pixel_index", "intensity"])
-                for i, c in enumerate(ints):
-                    w.writerow([i, c])
+        # 같은 세션 폴더에 apply_background_subtraction 도 파일을 쓴다. 두 쪽이 순번을
+        # 따로 세므로(이쪽은 start_index+len(saved), 저쪽은 manifest 개수) 이름이
+        # 겹칠 수 있다 — 덮어쓰지 않고 접미사를 붙인다.
+        n = 2
+        while path.exists():
+            path = data_dir / f"{safe[:-4]}-{n}.csv"
+            n += 1
+        safe = path.name
+        _write_spectrum_csv(path, intensity=ints, raman_shift=shift, wavelength_nm=wl)
 
         if metadata:
             # dict 가 아닌 게 와도 죽지 않게 — 저장 자체가 실패하면 안 된다.
@@ -403,6 +403,12 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
     측정 데이터(spectra)와 첨부 파일(files)은 동시에 쓸 수 있다 — 예를 들어 사용자가
     올린 참조 스펙트럼과 방금 측정한 스펙트럼을 한 그림에 겹쳐 그리는 식.
 
+    [인자 정규화를 여기서 하는 이유 — 2026-07-30]
+    이 함수로 오는 길이 둘이다: file_tools.FILE_DISPATCH(에이전트가 실제로 타는 길)와
+    raman_tools.TOOL_DISPATCH. 예전에는 file_tools 쪽만 '모델이 리스트 대신 문자열
+    하나를 준 경우'를 흡수해서, 같은 인자가 어느 길로 오느냐에 따라 통하기도 하고
+    TypeError 로 죽기도 했다. 정규화를 함수 안으로 들여 두 경로를 같게 만든다.
+
     Returns
     -------
     dict — {ok, stdout, image_count, saved?{title,image_url}, images?, error?}
@@ -413,6 +419,23 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
     from backend.spectrum_store import (list_results, latest_scene,
                                         session_folder as _session_folder)
     from backend.upload_store import load_upload
+
+    # ── 인자 정규화(두 호출 경로 공통) ──
+    # 모델은 리스트 자리에 문자열 하나를 주거나, 빈 문자열로 '없음'을 표현하기도 한다.
+    # 빈 값을 걸러내지 않으면 ''를 파일 id 로 알고 조회하다 실패한다.
+    def _as_list(v):
+        if v is None:
+            return []
+        if isinstance(v, str):
+            v = [v]
+        return [str(x).strip() for x in v if str(x).strip()]
+
+    if not isinstance(code, str) or not code.strip():
+        return {"ok": False, "error": "code is empty. Provide the Python analysis code to run."}
+    date = (date.strip() or None) if isinstance(date, str) else date
+    title = (title.strip() or None) if isinstance(title, str) else title
+    names = _as_list(names) or None
+    file_ids = _as_list(file_ids)
 
     items = list_results(date)
     if names:
@@ -435,7 +458,7 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
     # 첨부 파일을 '여기서(신뢰된 부모)' 읽어 둔다 — 샌드박스 코드는 파일을 열 수 없으므로
     # 이 단계에서 파싱된 값만이 생성 코드가 볼 수 있는 전부다.
     uploads = []
-    for fid in (file_ids or []):
+    for fid in file_ids:
         try:
             uploads.append(load_upload(str(fid)))
         except Exception as e:

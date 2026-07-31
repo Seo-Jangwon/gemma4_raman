@@ -107,7 +107,8 @@ _LIST_SESSION_ARTIFACTS_SCHEMA = {
         "name": "list_session_artifacts",
         "description": (
             "List the files YOU have produced in this session (processed spectra you saved with "
-            "save_result or save_spectrum, and figures from run_analysis), in the order you saved them. "
+            "save_result inside run_analysis, measurement-point records, and figures), in the order "
+            "you saved them. "
             "Each entry has a data/-relative `path` you can read back with load_spectrum('<path>'). "
             "Use it when a task builds on something you saved earlier in this conversation, when you "
             "need to confirm a save actually happened, or when you must report where your output went. "
@@ -184,27 +185,19 @@ def _t_run_analysis(args: dict) -> dict:
 
     지연 import 인 이유: analysis_sandbox 는 spectrum_store 를 통해 matplotlib 을 끌어오는데,
     이 모듈은 에이전트 import 시점에 항상 로드되므로 서버 기동을 무겁게 만들 이유가 없다.
+
+    인자 정규화(문자열→리스트, 빈 문자열→None, code 검증)는 run_analysis 안에서 한다 —
+    raman_tools.TOOL_DISPATCH 경로로 들어와도 동작이 같아야 하므로(2026-07-30).
     """
     from backend.analysis_sandbox import run_analysis
 
-    code = args.get("code")
-    if not isinstance(code, str) or not code.strip():
-        return {"ok": False, "error": "code is empty. Provide the Python analysis code to run."}
-
-    file_ids = args.get("file_ids") or []
-    if isinstance(file_ids, str):        # 모델이 리스트 대신 문자열 하나를 주는 경우 흡수
-        file_ids = [file_ids]
-    names = args.get("names") or None
-    if isinstance(names, str):
-        names = [names]
-
     try:
         return run_analysis(
-            code=code,
-            date=(args.get("date") or "").strip() or None,
-            names=names,
-            title=(args.get("title") or "").strip() or None,
-            file_ids=[str(f) for f in file_ids],
+            code=args.get("code"),
+            date=args.get("date"),
+            names=args.get("names"),
+            title=args.get("title"),
+            file_ids=args.get("file_ids"),
         )
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}

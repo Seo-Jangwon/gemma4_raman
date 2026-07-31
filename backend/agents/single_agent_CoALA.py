@@ -107,7 +107,10 @@ _NUM_CTX = 100000
 
 # 조사량 하드 상한 (대화 한 턴 기준). AILA와 동일한 물리적 회로차단기 —
 # "판단"이 아니라 폭주 방지용 최후 안전장치.
-_MAX_DOSE_MJ_PER_TURN = 1000.0
+# 상한값·계산식은 backend.safety_limits 단일 출처(2026-07-30). AILA 를 import 하는 것이
+# 아니라 두 에이전트의 공통 상위 의존이므로, '두 에이전트를 결합하지 않는다'는 이 파일의
+# 원칙은 그대로다. safety_limits 는 Config.ini 에 의존하지 않아 항상 import 된다.
+from backend.safety_limits import MAX_DOSE_MJ_PER_TURN as _MAX_DOSE_MJ_PER_TURN, estimate_dose_mj
 
 # LLM HTTP 호출 상한(초) — AILA 와 동일 정책(single_agent_AILA.py 의 _LLM_TIMEOUT_S 주석 참고).
 # ChatOllama 1.1.0 은 timeout 파라미터가 없고 밑단 httpx 기본값도 무제한이라, 응답이
@@ -780,8 +783,9 @@ Your actions are of two kinds, and their nature is completely different.
    peak detection, baseline correction, normalization, plotting, or comparison against spectra you
    measured. Inside the code the file is available as files[i]["table"]["<column name>"].
    If the task asks you to save a processed spectrum, save it inside that same run_analysis call with
-   save_result(filename, intensity, raman_shift=...) - never print the array and feed it to
-   save_spectrum, which overflows the context and loses precision. print() only short summaries.
+   save_result(filename, intensity, raman_shift=...) - that is the ONLY way to write an array, and it
+   keeps the numbers out of the context entirely. Never print an array in order to re-type it
+   somewhere else: it overflows the context and loses precision. print() only short summaries.
 4. Report both kinds of content separately: the spectral information you extracted (peak positions and
    assignments, SNR, etc.) and any other information the file carried (measurement conditions, sample
    identity, anything that changes how the spectrum should be read).
@@ -1061,9 +1065,11 @@ def _call_tool(ctx: dict, name: str, args: dict) -> dict:
         return {"ok": False, "error": f"Unknown tool: {name}"}
 
     if name == "acquire_spectrum":
-        power = float(args.get("power", 40.0))
-        exposure = float(args.get("exposure", 0.2))
-        dose_inc = power * exposure * 0.01
+        # 생략 시 acquire_spectrum 은 현재 장비 설정을 유지하므로 실제 값을 알 수 없다 —
+        # 기본값으로 근사한다(AILA 와 동일 정책).
+        power = float(args.get("power") or 40.0)
+        exposure = float(args.get("exposure") or 0.2)
+        dose_inc = estimate_dose_mj(power, exposure)
         if ctx["dose"] + dose_inc > _MAX_DOSE_MJ_PER_TURN:
             return {"ok": False,
                     "error": (f"Safety block: this turn's cumulative dose would exceed the limit "
@@ -1082,9 +1088,9 @@ def _call_tool(ctx: dict, name: str, args: dict) -> dict:
     if name == "run_grid_scan":
         rows = int(args.get("rows", 0) or 0)
         cols = int(args.get("cols", 0) or 0)
-        power = float(args.get("power", 40.0))
-        exposure = float(args.get("exposure", 0.2))
-        dose_inc = rows * cols * power * exposure * 0.01
+        power = float(args.get("power") or 40.0)
+        exposure = float(args.get("exposure") or 0.2)
+        dose_inc = estimate_dose_mj(power, exposure, rows * cols)
         if ctx["dose"] + dose_inc > _MAX_DOSE_MJ_PER_TURN:
             return {"ok": False,
                     "error": (f"Safety block: this turn's cumulative dose would exceed the limit "

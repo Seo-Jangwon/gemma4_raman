@@ -94,10 +94,14 @@ _MAX_AGENT_STEPS = 100   # LLM 무한 루프 방지
 # (원격 GPU 32GB VRAM 기준. VRAM이 부족해 OOM이면 이 값을 낮출 것.)
 _NUM_CTX = 100000
 
-# 조사량 하드 상한 (대화 한 턴 기준, mJ 단위 근사치 = power_pct * exposure_s * 0.01의 누계).
+# 조사량 하드 상한 (대화 한 턴 기준, mJ 단위 근사치의 누계).
 # 별도 위치별 추적이나 시료별 클램프 없이 "이번 턴에 쏜 총량"만 본다 —
 # 유일한 목적은 폭주(무한 재시도로 계속 고출력 조사)를 막는 최후의 회로차단기.
-_MAX_DOSE_MJ_PER_TURN = 1000.0
+# 상한값과 계산식은 backend.safety_limits 단일 출처다(2026-07-30): 예전에는 같은 1000.0
+# 과 같은 식이 이 파일·CoALA·raman_tools 세 곳에 각각 박혀 있어서, 한 곳만 고치면
+# 나머지가 조용히 갈라졌다 — 하필 갈라지는 대상이 '레이저를 얼마나 쏘게 둘 것인가'였다.
+# safety_limits 는 Config.ini 에 의존하지 않으므로 하드웨어 없이도 항상 import 된다.
+from backend.safety_limits import MAX_DOSE_MJ_PER_TURN as _MAX_DOSE_MJ_PER_TURN, estimate_dose_mj
 
 # LLM HTTP 호출 상한(초). ChatOllama 1.1.0 에는 timeout 파라미터가 없고, 밑단
 # ollama.Client(httpx)의 기본값도 무제한이라 '연결은 살아 있는데 응답이 안 오는'
@@ -192,8 +196,8 @@ The only images you actually see are those from analyze_microscope_image and pre
 [Conversation-type decision - do this first on every message]
 - Greeting / small talk / questions about system capabilities: do not call tools; answer immediately in English.
 - Instrument-status questions ("can you see the view?", "where is the stage?"): answer only after
-  actually checking with observation tools (get_stage_position, capture_camera_frame,
-  analyze_microscope_image, get_ccd_info). Do not turn the laser on.
+  actually checking with observation tools (get_stage_position, analyze_microscope_image,
+  get_hardware_status, get_ccd_info). Do not turn the laser on.
 - Raman measurement requests: plan and execute the measurement procedure below yourself.
 - Requests about a file the user attached: follow the attached-data-files section below. Do not turn
   the laser on just because a file arrived.
@@ -211,8 +215,9 @@ The only images you actually see are those from analyze_microscope_image and pre
    correction, normalization, plotting, or comparison against spectra you measured. Inside the code
    the file is available as files[i]["table"]["<column name>"].
    If the task asks you to save a processed spectrum, save it inside that same run_analysis call with
-   save_result(filename, intensity, raman_shift=...) - never print the array and feed it to
-   save_spectrum, which overflows the context and loses precision. print() only short summaries.
+   save_result(filename, intensity, raman_shift=...) - that is the ONLY way to write an array, and it
+   keeps the numbers out of the context entirely. Never print an array in order to re-type it
+   somewhere else: it overflows the context and loses precision. print() only short summaries.
 4. Report both kinds of content separately: the spectral information you extracted (peak positions
    and assignments, SNR, etc.) and any other information the file carried (measurement conditions,
    sample identity, anything that changes how the spectrum should be read).
@@ -221,8 +226,8 @@ The only images you actually see are those from analyze_microscope_image and pre
 
 [Measurement procedure - proceed step by step, using your own judgment]
 1. If you do not know the sample type, substrate, or target location (coordinates or appearance),
-   infer it from the request, the knowledge base, and your observation tools (analyze_microscope_image,
-   capture_camera_frame), then proceed on your own judgment and state the assumptions you made.
+   infer it from the request, the knowledge base, and your observation tools
+   (analyze_microscope_image), then proceed on your own judgment and state the assumptions you made.
 2. Once you know the sample type, use search_knowledge_base to look up the measurement protocol and
    recommended parameters (laser power, exposure time, main peak positions) for that sample. Do not
    guess parameters - base them on the lookup result; if the sample is not in the KB, decide yourself
@@ -302,8 +307,8 @@ if not _AUTONOMOUS:
     _INTERACTIVE_SUBS = [
         # 측정 절차 1번 — 시료 미상 시 되묻기 게이트 복원
         ("1. If you do not know the sample type, substrate, or target location (coordinates or appearance),\n"
-         "   infer it from the request, the knowledge base, and your observation tools (analyze_microscope_image,\n"
-         "   capture_camera_frame), then proceed on your own judgment and state the assumptions you made.",
+         "   infer it from the request, the knowledge base, and your observation tools\n"
+         "   (analyze_microscope_image), then proceed on your own judgment and state the assumptions you made.",
          "1. If you do not know the sample type, substrate, or target location (coordinates or appearance),\n"
          "   ask the user first before calling any tool. Do not turn the laser on without identifying the sample."),
         # 안전 규칙 — 사람에게 넘기는 경로 복원
@@ -456,9 +461,12 @@ def _call_tool(ctx: dict, name: str, args: dict) -> dict:
         return {"ok": False, "error": f"Unknown tool: {name}"}
 
     if name == "acquire_spectrum":
-        power = float(args.get("power", 40.0))
-        exposure = float(args.get("exposure", 0.2))
-        dose_inc = power * exposure * 0.01
+        # power/exposure 를 생략하면 acquire_spectrum 은 '현재 장비 설정을 유지'한다.
+        # 여기서는 그 값을 알 수 없으므로 기본값으로 근사한다 — 누계가 실제보다 작게
+        # 잡힐 수 있지만, 도구 계층(run_grid_scan)과 시료 자체의 상한이 따로 있다.
+        power = float(args.get("power") or 40.0)
+        exposure = float(args.get("exposure") or 0.2)
+        dose_inc = estimate_dose_mj(power, exposure)
         if ctx["dose"] + dose_inc > _MAX_DOSE_MJ_PER_TURN:
             return {"ok": False,
                     "error": (f"Safety block: this turn's cumulative dose would exceed the limit "
@@ -478,9 +486,9 @@ def _call_tool(ctx: dict, name: str, args: dict) -> dict:
     if name == "run_grid_scan":
         rows = int(args.get("rows", 0) or 0)
         cols = int(args.get("cols", 0) or 0)
-        power = float(args.get("power", 40.0))
-        exposure = float(args.get("exposure", 0.2))
-        dose_inc = rows * cols * power * exposure * 0.01
+        power = float(args.get("power") or 40.0)
+        exposure = float(args.get("exposure") or 0.2)
+        dose_inc = estimate_dose_mj(power, exposure, rows * cols)
         if ctx["dose"] + dose_inc > _MAX_DOSE_MJ_PER_TURN:
             return {"ok": False,
                     "error": (f"Safety block: this turn's cumulative dose would exceed the limit "

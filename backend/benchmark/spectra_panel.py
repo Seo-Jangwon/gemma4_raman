@@ -122,7 +122,7 @@ def read_curves(path: Path, max_groups: int = MAX_GROUPS) -> list[dict]:
     if ycol is None:                       # intensity 열이 없으면 마지막 열을 세기로 본다
         ycol = headers[-1]
     # 후보 목록 순서(라만시프트 > 파장 > 픽셀번호)가 우선순위다. headers 를 돌면 CSV 의
-    # 열 순서가 우선순위를 결정해 버린다 — save_spectrum 출력은
+    # 열 순서가 우선순위를 결정해 버린다 — save_result 출력은
     # 'pixel_index,raman_shift_cm-1,intensity' 라서 입력 파일(raman_shift 만 있음)과
     # 서로 다른 축에 그려지고, 두 패널의 x축 정렬이 깨진다.
     xcol = next((h for h in _X_CANDIDATES if h in headers), None)
@@ -394,7 +394,7 @@ def _rel_to_data(p: str) -> Path | None:
 def find_outputs(rec: dict) -> tuple[list[Path], list[str]]:
     """이 실행이 만든 스펙트럼 CSV 목록 + 에이전트 그림(상대경로) 목록.
 
-    1순위 manifest(run_store), 2순위 툴 트레이스(save_spectrum.path /
+    1순위 manifest(run_store), 2순위 툴 트레이스(결과 dict 의 path /
     run_analysis.saved_files). 중복은 경로로 제거한다.
     """
     csvs: list[Path] = []

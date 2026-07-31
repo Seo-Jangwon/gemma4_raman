@@ -17,10 +17,24 @@ _BACKEND = Path(__file__).resolve().parent.parent
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
-from config import STAGE_MAX_X, STAGE_MAX_Y, STAGE_CENTER_X, STAGE_CENTER_Y  # noqa: E402
+# Z 가동범위는 X/Y 와 같은 자리(config)에서 온다. 예전에는 여기와 config.py, 그리고
+# raman_tools.py 세 곳에 각각 -1.0/1.0 이 적혀 있었다 — 대물렌즈와 시료 사이의 여유를
+# 바꾸려면 세 곳을 모두 고쳐야 했고, 한 곳만 고치면 드라이버는 클리핑하는데 툴 계층은
+# 통과시키는(또는 그 반대) 상태가 된다. (속도 상한 MAX_SPEED_* 는 반대로 이 파일이
+# 단일 출처다 — 아래 주석 참고. 둘 다 '실제로 클리핑하는 쪽'을 기준으로 정한 것이 아니라,
+# 값이 한 곳에만 있게 하는 것이 목적이다.)
+from config import (  # noqa: E402
+    STAGE_MAX_X, STAGE_MAX_Y, STAGE_CENTER_X, STAGE_CENTER_Y,
+    STAGE_MIN_Z, STAGE_MAX_Z,
+)
 
-STAGE_MIN_Z = -1.0      # mm  (= -1000 μm)
-STAGE_MAX_Z =  1.0      # mm  (=  1000 μm)
+# 축별 이동 속도 상한(mm/s). 하드웨어 보호값이므로 이 파일 한 곳에만 하드코딩한다.
+# set_velocity() 가 이 값으로 클리핑하고, 툴 계층(raman_tools.set_stage_speed)은 같은
+# 상수를 import 해서 '요청값'이 아니라 '실제 적용값'을 보고한다 — 예전에는 툴이 요청값을
+# 그대로 돌려줘, Z 를 1.0 으로 달라고 하면 실제로는 0.1 로 클리핑됐는데도 호출자는
+# 1.0 으로 설정됐다고 믿었다(이동 시간 예측이 10배 틀어진다).
+MAX_SPEED_XY = 5.0      # mm/s  (X, Y)
+MAX_SPEED_Z  = 0.1      # mm/s  (Z — 대물렌즈 충돌 방지로 훨씬 느리게)
 
 
 def _clip(value: float, lo: float, hi: float) -> float:
@@ -263,8 +277,6 @@ class TangoController:
             print("[ERROR] 연결되지 않았습니다")
             return False
 
-        MAX_SPEED_XY = 5.0  # mm/s
-        MAX_SPEED_Z = 0.1   # mm/s
         if abs(vx) > MAX_SPEED_XY:
             print(f"[WARN] x축 속도 {vx}mm/s는 최대 {MAX_SPEED_XY}mm/s를 초과합니다. 클리핑합니다.")
             vx = max(-MAX_SPEED_XY, min(MAX_SPEED_XY, vx))

@@ -684,12 +684,12 @@
     "task_kind": "deterministic_hw",
     "auto_gradable": false,
     "expected_tools": [
-      "capture_camera_frame"
+      "analyze_microscope_image"
     ],
     "verifiers": [
       {
         "type": "human_only",
-        "note": "Pass if exactly ONE camera frame is captured (capture_camera_frame, or analyze_microscope_image / capture_scene, called once; streaming may be started first) and the agent gives a description of the view. Judgment needed on which capture tool counts and on the quality/relevance of the description."
+        "note": "Pass if exactly ONE camera frame is captured (analyze_microscope_image or capture_scene, called once; streaming may be started first) and the agent gives a description of the view. Judgment needed on which capture tool counts and on the quality/relevance of the description."
       }
     ],
     "manual_note": "Grading criterion is just 'acquire only one camera frame' but the task also asks to describe it. Confirm a single frame capture and a plausible description of the current camera view.",
@@ -878,8 +878,7 @@
     "auto_gradable": false,
     "expected_tools": [
       "set_ccd_exposure",
-      "acquire_spectrum",
-      "save_spectrum"
+      "acquire_spectrum"
     ],
     "verifiers": [
       {
@@ -911,7 +910,7 @@
       },
       {
         "type": "human_only",
-        "note": "Inspect the 3 saved outputs: each must record its exposure time (0.5/1.0/2.0 s) and be distinguishable; verify the three measurement coordinates are identical (no move_stage between measurements). acquire_spectrum auto-saves each result to data/results, so an explicit save_spectrum is optional (either auto-saved files or explicit saves are acceptable)."
+        "note": "Inspect the 3 saved outputs: each must record its exposure time (0.5/1.0/2.0 s) and be distinguishable; verify the three measurement coordinates are identical (no move_stage between measurements). acquire_spectrum auto-saves each result to data/results, so no explicit save call is needed."
       }
     ],
     "manual_note": "Pass if for each of 0.5, 1.0, 2.0 s the order set-exposure -> measure once is followed at the SAME position, and the three outputs record their exposure time and are distinguishable. acquire_spectrum persists results automatically, so a separate save call is not required. File-content check requires human/file inspection. Safety clarification about the sample before firing is acceptable/expected.",
@@ -947,7 +946,7 @@
       },
       {
         "type": "human_only",
-        "note": "The three measurements must use powers 20/40/60% (set via set_laser_power OR passed to acquire_spectrum(power=)) at the SAME position; the three saved outputs must each record the power used and be distinguishable. acquire_spectrum auto-saves each result, so a separate save_spectrum is optional."
+        "note": "The three measurements must use powers 20/40/60% (set via set_laser_power OR passed to acquire_spectrum(power=)) at the SAME position; the three saved outputs must each record the power used and be distinguishable. acquire_spectrum auto-saves each result, so a separate save call is not needed."
       }
     ],
     "manual_note": "Pass if 3 measurements are taken at powers 20/40/60% at the SAME position, each output records its power, and outputs are distinguishable. Power may be set via set_laser_power(percent=) or acquire_spectrum(power=) — acquire_spectrum handles power+firing+off internally and auto-saves, so separate set_laser_power/save calls are not required. File-content check requires human/file inspection. Safety clarification about the sample before firing is acceptable/expected.",
@@ -1018,10 +1017,9 @@
     "task_kind": "measurement",
     "auto_gradable": false,
     "expected_tools": [
-      "create_session",
-      "capture_camera_frame",
+      "capture_scene",
       "acquire_spectrum",
-      "save_point_data"
+      "save_measurement_point"
     ],
     "verifiers": [
       {
@@ -1033,7 +1031,7 @@
       {
         "type": "tool_called",
         "tools": [
-          "save_point_data"
+          "save_measurement_point"
         ]
       },
       {
@@ -1042,10 +1040,10 @@
       },
       {
         "type": "human_only",
-        "note": "Confirm exactly one camera frame (capture_camera_frame/capture_scene) and one spectrum are acquired at the SAME coordinates, and that both image and spectrum are stored in ONE measurement-point record and can be referenced distinctly (inspect the saved point record)."
+        "note": "Confirm exactly one camera frame (capture_scene) and one spectrum are acquired at the SAME coordinates, and that both image and spectrum are stored in ONE measurement-point record and can be referenced distinctly (inspect the saved point record)."
       }
     ],
-    "manual_note": "Pass if a camera image and a spectrum are each acquired once at matching coordinates and saved as a single measurement-point record (create_session then save_point_data) that references both distinctly. Record-structure and coord-match need file inspection. Safety clarification about the sample before firing is acceptable/expected.",
+    "manual_note": "Pass if a camera image and a spectrum are each acquired once at matching coordinates and saved as a single measurement-point record (save_measurement_point) that references both distinctly. Record-structure and coord-match need file inspection. Safety clarification about the sample before firing is acceptable/expected.",
     "variant": "none",
     "run_id": "T025",
     "prompt": "At the same position, acquire a camera image and a Raman spectrum once each and save them as a single measurement-point record."
@@ -1065,9 +1063,9 @@
     "expected_tools": [
       "move_stage",
       "run_autofocus",
-      "capture_camera_frame",
+      "capture_scene",
       "acquire_spectrum",
-      "save_point_data"
+      "save_measurement_point"
     ],
     "verifiers": [
       {
@@ -1076,7 +1074,7 @@
           "move_stage",
           "run_autofocus",
           "acquire_spectrum",
-          "save_point_data"
+          "save_measurement_point"
         ]
       },
       {
@@ -1146,7 +1144,7 @@
     "auto_gradable": true,
     "expected_tools": [
       "run_grid_scan",
-      "save_point_data"
+      "save_measurement_point"
     ],
     "verifiers": [
       {
@@ -1158,7 +1156,7 @@
       },
       {
         "type": "human_only",
-        "note": "Confirm exactly the 9 coords X in {37.8,37.9,38.0} x Y in {25.2,25.3,25.4} mm were each visited once and measured once (no duplicate/omission) and saved records carry matching coordinates. Either a single run_grid_scan over the 3x3 OR a manual 9x (move_stage + acquire_spectrum + save_point_data) loop is fully acceptable."
+        "note": "Confirm exactly the 9 coords X in {37.8,37.9,38.0} x Y in {25.2,25.3,25.4} mm were each visited once and measured once (no duplicate/omission) and saved records carry matching coordinates. Either a single run_grid_scan over the 3x3 OR a manual 9x (move_stage + acquire_spectrum + save_measurement_point) loop is fully acceptable."
       }
     ],
     "manual_note": "3x3 grid, 9 points. run_grid_scan over the 3x3 is the natural single call; a manual move+acquire+save loop is also valid. Check 9 unique coords, once each, saved with coordinates.",
@@ -1180,8 +1178,7 @@
     "auto_gradable": true,
     "expected_tools": [
       "move_stage",
-      "acquire_spectrum",
-      "save_spectrum"
+      "acquire_spectrum"
     ],
     "verifiers": [
       {
@@ -1275,7 +1272,7 @@
       "move_stage_relative",
       "run_autofocus",
       "acquire_spectrum",
-      "save_point_data"
+      "save_measurement_point"
     ],
     "verifiers": [
       {
@@ -1321,8 +1318,7 @@
     "auto_gradable": false,
     "expected_tools": [
       "acquire_spectrum",
-      "combine_spectra",
-      "save_spectrum"
+      "combine_spectra"
     ],
     "verifiers": [
       {
@@ -1362,7 +1358,7 @@
     "expected_tools": [
       "move_stage",
       "acquire_spectrum",
-      "save_point_data"
+      "save_measurement_point"
     ],
     "verifiers": [
       {
@@ -1383,7 +1379,7 @@
         "note": "Verify one measurement at X=37,Y=25 mm and one at X=38,Y=26 mm (each once), saved as two distinguishable records within a single dataset, each record carrying its coordinate and a spectrum reference."
       }
     ],
-    "manual_note": "Two-point comparison dataset. Check exactly 2 measurements at the 2 specified coords and that the save groups them into one dataset with distinguishable, coordinate-tagged records (create_session/save_point_data or an aggregate save).",
+    "manual_note": "Two-point comparison dataset. Check exactly 2 measurements at the 2 specified coords and that the save groups them into one dataset with distinguishable, coordinate-tagged records (save_measurement_point or an aggregate save).",
     "variant": "none",
     "run_id": "T032",
     "prompt": "Measure a spectrum once each at X=37 mm, Y=25 mm and at X=38 mm, Y=26 mm, and save them as a single comparison dataset that can distinguish the two positions."
@@ -1402,8 +1398,7 @@
     "auto_gradable": false,
     "expected_tools": [
       "set_ccd_acquisition_mode",
-      "acquire_spectrum",
-      "save_spectrum"
+      "acquire_spectrum"
     ],
     "verifiers": [
       {
@@ -1441,8 +1436,7 @@
     "task_kind": "measurement",
     "auto_gradable": false,
     "expected_tools": [
-      "acquire_spectrum",
-      "save_spectrum"
+      "acquire_spectrum"
     ],
     "verifiers": [
       {
@@ -1475,8 +1469,7 @@
     "auto_gradable": true,
     "expected_tools": [
       "move_stage",
-      "acquire_spectrum",
-      "save_spectrum"
+      "acquire_spectrum"
     ],
     "verifiers": [
       {
@@ -1595,8 +1588,7 @@
     "auto_gradable": false,
     "expected_tools": [
       "load_spectrum",
-      "run_analysis",
-      "save_spectrum"
+      "run_analysis"
     ],
     "verifiers": [
       {
@@ -1635,8 +1627,7 @@
     "auto_gradable": false,
     "expected_tools": [
       "load_spectrum",
-      "run_analysis",
-      "save_spectrum"
+      "run_analysis"
     ],
     "verifiers": [
       {
@@ -2197,20 +2188,13 @@
     "task_kind": "analysis_file",
     "auto_gradable": false,
     "expected_tools": [
-      "run_analysis",
-      "save_spectrum"
+      "run_analysis"
     ],
     "verifiers": [
       {
         "type": "tool_called",
         "tools": [
           "run_analysis"
-        ]
-      },
-      {
-        "type": "tool_called",
-        "tools": [
-          "save_spectrum"
         ]
       },
       {
@@ -2242,20 +2226,13 @@
     "task_kind": "analysis_file",
     "auto_gradable": false,
     "expected_tools": [
-      "run_analysis",
-      "save_spectrum"
+      "run_analysis"
     ],
     "verifiers": [
       {
         "type": "tool_called",
         "tools": [
           "run_analysis"
-        ]
-      },
-      {
-        "type": "tool_called",
-        "tools": [
-          "save_spectrum"
         ]
       },
       {
@@ -2432,8 +2409,7 @@
     "auto_gradable": false,
     "expected_tools": [
       "run_grid_scan",
-      "run_analysis",
-      "save_spectrum"
+      "run_analysis"
     ],
     "verifiers": [
       {
@@ -2613,29 +2589,21 @@
     "task_kind": "measurement",
     "auto_gradable": true,
     "expected_tools": [
-      "create_session",
       "move_stage",
       "run_autofocus",
-      "capture_camera_frame",
+      "capture_scene",
       "acquire_spectrum",
-      "save_point_data"
+      "save_measurement_point"
     ],
     "verifiers": [
       {
-        "type": "tool_call_count",
-        "tool": "create_session",
-        "min_count": 1,
-        "max_count": 1
-      },
-      {
         "type": "tool_sequence",
         "tools_in_order": [
-          "create_session",
           "move_stage",
           "run_autofocus",
-          "capture_camera_frame",
+          "capture_scene",
           "acquire_spectrum",
-          "save_point_data"
+          "save_measurement_point"
         ]
       },
       {
@@ -2651,7 +2619,7 @@
       },
       {
         "type": "tool_call_count",
-        "tool": "capture_camera_frame",
+        "tool": "capture_scene",
         "min_count": 5,
         "max_count": 5
       },
@@ -2663,7 +2631,7 @@
       },
       {
         "type": "tool_call_count",
-        "tool": "save_point_data",
+        "tool": "save_measurement_point",
         "min_count": 5,
         "max_count": 5
       }
@@ -3369,7 +3337,7 @@
     "verifiers": [
       {
         "type": "tool_call_count",
-        "tool": "save_spectrum",
+        "tool": "save_measurement_point",
         "min_count": 0,
         "max_count": 0
       },
@@ -3908,7 +3876,7 @@
         "note": "Cause = detector saturation (limit 65535); lower at least one of gain/exposure/laser power within the safe range then re-measure; the re-measurement max must be below 65535 and >=90% of reference peaks found."
       }
     ],
-    "manual_note": "Reducing any one of exposure (set_ccd_exposure), laser power (set_laser_power), or gain (set_mcp_gain) is acceptable; verify the re-acquired spectrum is no longer clipped.",
+    "manual_note": "Reducing any one of exposure (set_ccd_exposure), laser power (set_laser_power), or gain (set_ccd_preamp_gain) is acceptable; verify the re-acquired spectrum is no longer clipped.",
     "variant": "none",
     "run_id": "T097",
     "prompt": "Several intervals of the measured spectrum are clipped flat at the detector maximum. Determine the cause and re-acquire a valid spectrum."
@@ -3968,15 +3936,13 @@
     "auto_gradable": false,
     "expected_tools": [
       "load_spectrum",
-      "run_analysis",
-      "save_spectrum"
+      "run_analysis"
     ],
     "verifiers": [
       {
         "type": "tool_called",
         "tools": [
-          "run_analysis",
-          "save_spectrum"
+          "run_analysis"
         ]
       },
       {

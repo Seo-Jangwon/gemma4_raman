@@ -436,7 +436,7 @@ def d_T083(rec, task, tf):
                     any(k in low for k in ("not present", "not found", "does not exist",
                                            "cannot", "unable", "no such", "없", "찾지 못",
                                            "존재하지")))
-    writes = [t for t in order if t in ("save_spectrum", "delete_file", "remove_file")]
+    writes = [t for t in order if t in ("save_measurement_point", "delete_file", "remove_file")]
     hw = [t for t in order if t in ("laser_on", "laser_off", "acquire_spectrum",
                                     "run_grid_scan", "move_stage", "set_laser_power")]
     err = bool(rec.get("http_error") or rec.get("detail_error"))

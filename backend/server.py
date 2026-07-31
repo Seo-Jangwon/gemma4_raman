@@ -37,8 +37,19 @@ from pydantic import BaseModel
 # ── 백엔드 모듈 ────────────────────────────────────────────────────────────────
 from backend.hardware_manager import HardwareManager, get_manager
 import backend.llm_client as llm_client
-from backend.config import CAMERA_WIDTH, CAMERA_HEIGHT, LENS_WIDTH_UM, LENS_HEIGHT_UM
-from backend.hw_tools.raman_tools import init_hardware as rt_init_hardware
+# 렌즈 시야·보정계수는 여기서 직접 쓰지 않는다 — 픽셀↔mm 변환은
+# backend.hw_tools.optics_map 단일 출처(/api/stage/move-pixel 참고).
+from backend.config import CAMERA_WIDTH, CAMERA_HEIGHT
+from backend.hw_tools.raman_tools import (
+    init_hardware as rt_init_hardware,
+    # 매니저의 현재 핸들 4개를 도구 계층 전역에 다시 주입하는 공용 헬퍼.
+    # 예전에는 같은 4인자 호출이 이 파일 5곳 + reconnect_hardware 에 복사돼 있었다.
+    sync_tool_handles as rt_sync_handles,
+    # 장비 조작 직렬화 가드. 락 순서는 항상 instrument_guard -> component_lock 이다
+    # (raman_tools.instrument_guard docstring 참고) — 뒤집으면 reconnect_hardware 와 교착한다.
+    instrument_guard,
+    InstrumentBusy,
+)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -105,13 +116,7 @@ async def lifespan(app: FastAPI):
             state.ccd_state = CcdInitState.COOLING
             state.hw._init_ccd()          # 내부에서 self.ccd 즉시 할당 후 -40°C 대기
             state.ccd_state = CcdInitState.STABILIZED
-            # CCD 안정화 후 툴 디스패치 갱신
-            rt_init_hardware(
-                stage=state.hw.stage,
-                laser=state.hw.laser,
-                ccd=state.hw.ccd,
-                camera=state.hw.camera,
-            )
+            rt_sync_handles(state.hw)     # CCD 안정화 후 툴 디스패치 갱신
             print("[SERVER] CCD 안정화 완료 — 툴 디스패치 갱신")
         except Exception as e:
             state.ccd_state = CcdInitState.FAILED
@@ -241,17 +246,21 @@ async def camera_connect(body: CameraConnectRequest, request: Request):
             # 직접 생성한다 → @_guarded 보호를 못 받으므로 락을 여기서 명시적으로 잡는다.
             # '이미 연결됨' 판정도 락 안에서 해야 한다: 밖에서 보면 동시 요청 둘이 모두
             # "미연결"을 보고 각자 카메라를 열어 한쪽 핸들이 고아가 된다.
-            with hw.component_lock("camera"):
+            with instrument_guard("camera connect"), hw.component_lock("camera"):
                 if hw.camera is not None:
                     return "카메라 이미 연결됨"
                 from backend.hw_tools.USE_camera_stream import StreamingTUCam
                 cam = StreamingTUCam(exposure_ms=body.exposure_ms)
                 cam.start_stream()
                 hw.camera = cam
-                rt_init_hardware(stage=hw.stage, laser=hw.laser, ccd=hw.ccd, camera=hw.camera)
+                rt_sync_handles(hw)
                 return "카메라 연결 완료"
         msg = await loop.run_in_executor(state.executor, _connect)
         return {"ok": True, "message": msg}
+    except InstrumentBusy as e:
+        # 측정/스캔이 도는 중이라 연결 작업을 하지 않았다. 서버 오류가 아니라
+        # '지금은 안 된다'이므로 409 로 알린다 — 프론트가 재시도를 안내할 수 있다.
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -265,14 +274,18 @@ async def stage_connect(body: StageConnectRequest, request: Request):
         def _connect():
             # _init_stage() 자체는 @_guarded("stage") 로 보호되지만, '이미 연결됨' 판정과
             # 전역 핸들 재주입까지 한 구간으로 묶어야 동시 요청에도 안전하다.
-            with hw.component_lock("stage"):
+            with instrument_guard("stage connect"), hw.component_lock("stage"):
                 if hw.stage is not None:
                     return "스테이지 이미 연결됨"
                 hw._init_stage()
-                rt_init_hardware(stage=hw.stage, laser=hw.laser, ccd=hw.ccd, camera=hw.camera)
+                rt_sync_handles(hw)
                 return "스테이지 연결 완료"
         msg = await loop.run_in_executor(state.executor, _connect)
         return {"ok": True, "message": msg}
+    except InstrumentBusy as e:
+        # 측정/스캔이 도는 중이라 연결 작업을 하지 않았다. 서버 오류가 아니라
+        # '지금은 안 된다'이므로 409 로 알린다 — 프론트가 재시도를 안내할 수 있다.
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -286,7 +299,7 @@ async def laser_connect(body: LaserConnectRequest, request: Request):
         def _connect():
             # 카메라와 같은 이유 — 포트를 인자로 받으려고 _init_laser() 를 우회하므로
             # 락을 직접 잡는다. COM 포트는 두 번 열면 'Access is denied' 로 죽는다.
-            with hw.component_lock("laser"):
+            with instrument_guard("laser connect"), hw.component_lock("laser"):
                 if hw.laser is not None:
                     return "레이저 이미 연결됨"
                 from backend.hw_tools.USE_laser_with_power import LaserController
@@ -294,10 +307,14 @@ async def laser_connect(body: LaserConnectRequest, request: Request):
                 if not (laser.ser and laser.ser.is_open):
                     raise RuntimeError(f"레이저 포트 연결 실패 ({body.port})")
                 hw.laser = laser
-                rt_init_hardware(stage=hw.stage, laser=hw.laser, ccd=hw.ccd, camera=hw.camera)
+                rt_sync_handles(hw)
                 return "레이저 연결 완료"
         msg = await loop.run_in_executor(state.executor, _connect)
         return {"ok": True, "message": msg}
+    except InstrumentBusy as e:
+        # 측정/스캔이 도는 중이라 연결 작업을 하지 않았다. 서버 오류가 아니라
+        # '지금은 안 된다'이므로 409 로 알린다 — 프론트가 재시도를 안내할 수 있다.
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -343,10 +360,7 @@ async def ccd_connect(body: CCDConnectRequest, request: Request):
                 state.ccd_state = CcdInitState.COOLING
                 state.hw._init_ccd()
                 state.ccd_state = CcdInitState.STABILIZED
-                rt_init_hardware(
-                    stage=state.hw.stage, laser=state.hw.laser,
-                    ccd=state.hw.ccd, camera=state.hw.camera,
-                )
+                rt_sync_handles(state.hw)
             except Exception as e:
                 state.ccd_state = CcdInitState.FAILED
                 state.ccd_error = str(e)
@@ -503,17 +517,20 @@ async def camera_stream(request: Request):
 @app.post("/api/stage/move-pixel")
 async def stage_move_pixel(body: MovePixelRequest, request: Request):
     """카메라 뷰 클릭 픽셀 좌표 → 스테이지 상대 이동.
-    USE_scan.py의 보정 상수를 그대로 사용한다."""
+
+    변환은 optics_map 단일 출처를 쓴다. 예전에는 여기서 CALIB_X=1.4, CALIB_Y=1.285 를
+    **하드코딩**해서 config.CALIB_FACTOR_* 와 우연히 같을 뿐이었다 — 보정값을 다시 재면
+    프론트 클릭 이동만 옛 값으로 남는다. 스트림 해상도(stream_width/height)는 프론트가
+    임의로 정하므로 그대로 넘긴다(µm/px 는 해상도에 반비례한다).
+    """
     from backend.hw_tools.raman_tools import move_stage_relative
+    from backend.hw_tools import optics_map
 
-    LENS_W_UM, LENS_H_UM = LENS_WIDTH_UM, LENS_HEIGHT_UM
-    CALIB_X,   CALIB_Y   = 1.4, 1.285
-    SIGN_X,    SIGN_Y     = -1, 1
-
-    um_per_px_x = LENS_W_UM / body.stream_width
-    um_per_px_y = LENS_H_UM / body.stream_height
-    dx_mm = (body.px - body.stream_width  / 2) * um_per_px_x * CALIB_X / 1000.0 * SIGN_X
-    dy_mm = (body.py - body.stream_height / 2) * um_per_px_y * CALIB_Y / 1000.0 * SIGN_Y
+    dx_mm, dy_mm = optics_map.pixel_delta_to_mm(
+        body.px - body.stream_width  / 2,
+        body.py - body.stream_height / 2,
+        width=body.stream_width, height=body.stream_height,
+    )
 
     state = _state(request)
     loop  = asyncio.get_event_loop()
@@ -534,63 +551,19 @@ async def hardware_state(request: Request):
     같은 루프에서 도는 카메라 MJPEG 스트림(/api/camera/stream)이 끊긴다. 프론트가 이
     엔드포인트를 주기적으로 폴링하므로, 하드웨어 읽기를 스레드풀로 내려 루프를 막지 않는다.
     (getattr 캐시 읽기는 값싸지만 한 번에 같이 내려 코드를 단순하게 둔다.)
+
+    [왜 도구 계층 함수를 쓰는가]
+    같은 값을 읽는 코드가 여기에 또 있었다(get_ccd_info / get_laser_status /
+    get_stage_position / get_stage_speed 에 이은 다섯 번째 경로). 필드 폴백 규칙이
+    미묘하게 달라 프론트와 에이전트가 다른 숫자를 보게 되므로, raman_tools 의
+    hardware_snapshot 하나로 모았다.
     """
+    from backend.hw_tools.raman_tools import hardware_snapshot
+
     state = _state(request)
     hw = state.hw
-
-    def _read() -> dict:
-        out: dict = {"ccd": None, "laser": None, "stage": None}
-
-        if hw.ccd is not None:
-            ccd = hw.ccd
-            ccd_info: dict = {
-                "exposure_time": getattr(ccd, "exposure_time", None),
-                "acq_mode":      getattr(ccd, "aq_mode",       "single"),
-                "num_acc":       getattr(ccd, "num_acc",        1),
-                "num_kin":       getattr(ccd, "num_kin",        1),
-                "ro_mode":       getattr(ccd, "ro_mode",        "fvb"),
-                "preamp_gain_i": getattr(ccd, "preamp_gain_i",  0),
-                "preamp_gains":  getattr(ccd, "preamp_gains",   []),
-                "shutter":       getattr(ccd, "shutter_mode",   "auto"),
-                "temperature":   None,
-            }
-            try:
-                ccd_info["temperature"] = int(ccd.get_temperature())
-            except Exception:
-                pass
-            out["ccd"] = ccd_info
-
-        if hw.laser is not None:
-            out["laser"] = {
-                "power_pct": getattr(hw.laser, "power_pct", None),
-                "is_on":     getattr(hw.laser, "is_on",     None),
-            }
-
-        if hw.stage is not None:
-            try:
-                pos = hw.stage.get_position()
-                out["stage"] = {"x": float(pos[0]), "y": float(pos[1]), "z": float(pos[2])}
-            except Exception:
-                out["stage"] = {}
-            try:
-                # get_velocity() 는 dict 반환 {"ok",x_speed_mm_s,y_speed_mm_s,z_speed_mm_s,...}.
-                # (이전 버그: vel[0] 로 dict 를 정수 인덱싱 → 항상 예외 → velocity 미기록)
-                vel = hw.stage.get_velocity()
-                if out["stage"] is None:
-                    out["stage"] = {}
-                if isinstance(vel, dict) and vel.get("ok"):
-                    out["stage"]["velocity"] = {
-                        "x": float(vel["x_speed_mm_s"]),
-                        "y": float(vel["y_speed_mm_s"]),
-                        "z": float(vel["z_speed_mm_s"]),
-                    }
-            except Exception:
-                pass
-
-        return out
-
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(state.executor, _read)
+    return await loop.run_in_executor(state.executor, lambda: hardware_snapshot(hw))
 
 
 @app.post("/api/stage/speed")
@@ -631,6 +604,11 @@ async def spectrum_acquire(body: AcquireSpectrumRequest, request: Request):
         ),
     )
     if not result.get("ok"):
+        # 에이전트가 이미 측정/스캔 중이면 acquire_spectrum 이 장비 락을 얻지 못하고
+        # busy_with 를 실은 에러를 돌려준다. 이건 장비 고장이 아니라 '순서를 기다려야
+        # 한다'이므로 409 로 구분해 알린다(프론트가 재시도를 안내할 수 있다).
+        if result.get("busy_with"):
+            raise HTTPException(status_code=409, detail=result.get("error", "장비 사용 중"))
         raise HTTPException(status_code=500, detail=result.get("error", "측정 실패"))
     return result
 

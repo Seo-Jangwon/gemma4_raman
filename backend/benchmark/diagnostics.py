@@ -437,7 +437,7 @@ def d_T048(rec, task, tf):
                     "완전 일치" if same else "불일치", verdict=PASS if same else FAIL, note=note))
     extra = [k for k in (out[0].keys() if out else []) if k not in ("raman_shift_cm-1", "intensity")]
     if extra:
-        rows.append(row("추가 열", "참고 — save_spectrum 툴이 붙이는 열은 감점 대상이 아니다",
+        rows.append(row("추가 열", "참고 — save_result 가 붙이는 열은 감점 대상이 아니다",
                         ", ".join(extra)))
     return rows
 

@@ -120,6 +120,10 @@ class AndorCCD(object):
         # 현재 셔터 모드 캐시('auto'|'open'|'close'). Andor SDK는 SetShutter만 있고
         # 읽기(GetShutter)가 없어, ro_mode처럼 set 시점에 캐시해야 상태 조회가 가능하다.
         self.shutter_mode = 'auto'
+        # 트리거 모드 캐시도 같은 이유(GetTriggerMode 없음). acquire_spectrum 이
+        # trigger_mode 를 생략했을 때 '현재 설정 유지'를 판단하는 근거이자,
+        # get_ccd_info 가 트리거 모드를 보고할 수 있게 하는 값이다.
+        self.trigger_mode = 'internal'
         self.ad_chan = 0
         self.output_amp = DEFAULT_OUTPUT_AMP
         self.cooler_on = False
@@ -631,6 +635,7 @@ class AndorCCD(object):
         mode = mode.lower()
         with self.lock:
             _check(self.sdk.SetTriggerMode(self.trigger_modes[mode]), "SetTriggerMode")
+        self.trigger_mode = mode
 
     def send_software_trigger(self):
         """소프트웨어 트리거 발송 (software 트리거 모드 시 사용)."""

@@ -1,7 +1,6 @@
 import sys
 import os
 import cv2
-import numpy as np
 from pathlib import Path
 
 _BACKEND = Path(__file__).resolve().parent.parent
@@ -16,21 +15,12 @@ from config import (  # noqa: E402
     CAMERA_HEIGHT,
     STAGE_MAX_X,
     STAGE_MAX_Y,
-    LENS_WIDTH_UM  as LENS_WIDTH,
-    LENS_HEIGHT_UM as LENS_HEIGHT,
-    CALIB_FACTOR_X,
-    CALIB_FACTOR_Y,
 )
-
-# ── 축 부호 ───────────────────────────────────
-# pixel +X(right) -> stage -X  (stage +X 이동시 이미지는 -X로 이동)
-# pixel +Y(down)  -> stage -Y
-SIGN_X = -1
-SIGN_Y = +1
-
-# um/px 스케일  (StartPosX=250, StartPosY=135은 카메라 ROI 시작점 — 좌표 계산에 불필요)
-UM_PER_PX_X = LENS_WIDTH  / CAMERA_WIDTH    # 305/1060 = 0.2877 um/px
-UM_PER_PX_Y = LENS_HEIGHT / CAMERA_HEIGHT   # 230/800  = 0.2875 um/px
+# 픽셀→스테이지 변환과 프레임 전처리는 공용 모듈을 쓴다(2026-07-30).
+# 예전에는 여기서 SIGN_*/UM_PER_PX_* 를 따로 정의해, raman_tools.move_to_pixel 이나
+# server 의 클릭 이동과 상수가 갈라질 수 있었다.
+import optics_map  # noqa: E402
+import vision      # noqa: E402
 
 def main():
     camera = StreamingTUCam()
@@ -59,14 +49,8 @@ def main():
             if frame is None:
                 continue
 
-            disp = frame.copy()
-            if disp.dtype == np.uint16:
-                disp = (disp / 256).astype(np.uint8)
-            if len(disp.shape) == 2:
-                disp = cv2.cvtColor(disp, cv2.COLOR_GRAY2BGR)
-
-            if disp.shape[:2] != (CAMERA_HEIGHT, CAMERA_WIDTH):
-                disp = cv2.resize(disp, (CAMERA_WIDTH, CAMERA_HEIGHT))
+            # 뷰 해상도로 정규화 — 이 화면의 픽셀 좌표계 = 도구 좌표계
+            disp = vision.to_view_bgr(frame)
 
             # 중심 십자선
             cx, cy = CAMERA_WIDTH // 2, CAMERA_HEIGHT // 2
@@ -84,11 +68,8 @@ def main():
                 pending_click[0] = None
                 pos = stage.get_position()
                 if pos is not None:
-                    dx_px = px - CAMERA_WIDTH  / 2.0
-                    dy_px = py - CAMERA_HEIGHT / 2.0
-                    
-                    abs_x = pos[0] + (dx_px * UM_PER_PX_X * CALIB_FACTOR_X) / 1000.0 * SIGN_X
-                    abs_y = pos[1] + (dy_px * UM_PER_PX_Y * CALIB_FACTOR_Y) / 1000.0 * SIGN_Y
+                    # raman_tools.move_to_pixel 과 정확히 같은 변환(optics_map 단일 출처)
+                    abs_x, abs_y = optics_map.pixel_to_stage(px, py, pos[0], pos[1])
                     print(f"[CLICK] pixel=({px}, {py})  stage X={abs_x:.4f}  Y={abs_y:.4f} mm")
                 else:
                     print("[CLICK] stage position unavailable")
