@@ -276,6 +276,16 @@ async def stage_connect(body: StageConnectRequest, request: Request):
             # 전역 핸들 재주입까지 한 구간으로 묶어야 동시 요청에도 안전하다.
             with instrument_guard("stage connect"), hw.component_lock("stage"):
                 if hw.stage is not None:
+                    # 해제에 실패해 '죽은' 핸들은 고아 세션을 막으려고 일부러 남겨둔 것이다
+                    # (raman_tools._teardown_component). 여기서 '이미 연결됨' 으로 200 을
+                    # 돌려주면 프론트는 초록불을 켜지만 실제로는 아무것도 못 한다 —
+                    # 재초기화도 불가능하다(새 핸들을 만들면 죽은 세션이 고아가 된다).
+                    # 그래서 재시작이 필요하다고 503 으로 정직하게 알린다.
+                    if getattr(hw.stage, "dead", False):
+                        raise HTTPException(status_code=503, detail=(
+                            f"스테이지 세션이 무효 상태입니다({getattr(hw.stage, 'dead_reason', 'unknown')}). "
+                            f"DLL 세션을 해제하지 못해 재연결로는 복구할 수 없습니다 — "
+                            f"서버 프로세스를 재시작해야 합니다."))
                     return "스테이지 이미 연결됨"
                 hw._init_stage()
                 rt_sync_handles(hw)
@@ -286,6 +296,8 @@ async def stage_connect(body: StageConnectRequest, request: Request):
         # 측정/스캔이 도는 중이라 연결 작업을 하지 않았다. 서버 오류가 아니라
         # '지금은 안 된다'이므로 409 로 알린다 — 프론트가 재시도를 안내할 수 있다.
         raise HTTPException(status_code=409, detail=str(e))
+    except HTTPException:
+        raise                       # 위에서 만든 503 을 아래 500 이 삼키지 않게 한다
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

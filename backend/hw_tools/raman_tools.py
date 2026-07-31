@@ -168,6 +168,62 @@ def _serialized(what: str, timeout: float = _BUSY_TIMEOUT_S):
     return deco
 
 
+# ── 스테이지 '읽기' 경로의 DLL 동시 호출 차단 ──────────────────────────────────
+# [왜 필요한가 — 2026-07-31 사고]
+# 조회 전용 경로(위 주석대로 _INSTRUMENT_LOCK 을 일부러 잡지 않는다)가 스테이지 DLL 을
+# 직접 부른다. 프론트는 /api/hardware/state 를 1초마다 폴링하고, 서버는 워커 4개짜리
+# 스레드풀로 그것을 처리한다. 그 사이 reconnect_hardware 가 다른 스레드에서
+# LSX_Disconnect / LSX_FreeLSID 를 부르면 Tango DLL 안에서 C++ 예외(0xE06D7363)가
+# 터져 나온다 — 해제가 실패하고, 세션은 고아가 되고, 스테이지는 프로세스 재시작
+# 전까지 죽는다. 실제로 그렇게 죽였다.
+#
+# 그렇다고 읽기에 _INSTRUMENT_LOCK 을 잡으면 안 된다(10분짜리 스캔 동안 패널이 얼어붙는다).
+# 대신 '연결/해제를 직렬화하는' component_lock('stage') 만 **기다리지 않고** 잡는다:
+#   · 평소에는 아무도 안 잡고 있으므로 즉시 통과 → 폴링 성능 그대로
+#   · 재연결 중(수 초)에는 즉시 실패 → DLL 을 아예 건드리지 않는다
+# 락 순서(instrument_guard → component_lock)를 어기지 않는다 — 여기서는 component_lock
+# 하나만 잡고, 그 안에서 다른 락을 잡지 않는다.
+_STAGE_BUSY = object()      # '락을 못 잡았다'(= 연결/해제 진행 중). DLL 실패와 구분한다.
+
+
+def _stage_read(fn):
+    """스테이지 DLL 읽기를 component_lock('stage') 안에서만 수행한다.
+
+    락을 못 잡으면 fn 을 **부르지 않고** _STAGE_BUSY 를 돌려준다 — 호출자는 직전 값을
+    쓰거나 '지금 재연결 중'이라고 보고해야 한다. 매니저를 얻을 수 없는 환경(단독 스크립트,
+    테스트)에서는 보호할 대상도 없으므로 그냥 실행한다.
+    """
+    try:
+        from backend.hardware_manager import get_manager
+        lock = get_manager().component_lock("stage")
+    except Exception:
+        return fn()
+
+    if not lock.acquire(blocking=False):
+        return _STAGE_BUSY
+    try:
+        return fn()
+    finally:
+        lock.release()
+
+
+def _stage_unavailable() -> dict:
+    """스테이지를 쓸 수 없으면 그 이유를 담은 에러 dict, 쓸 수 있으면 None.
+
+    'None 이면 미초기화' 하나만 보던 검사를 한 곳에 모았다 — 해제에 실패해 죽은 세션은
+    핸들이 남아 있어서 예전 검사를 그대로 통과했고, 도구들은 죽은 DLL 로 명령을 계속 보냈다.
+    """
+    if _stage is None:
+        return {"ok": False, "error": "Stage is not initialized."}
+    if getattr(_stage, "dead", False):
+        return {"ok": False, "error": (
+            f"The stage session is dead and cannot be used: {getattr(_stage, 'dead_reason', 'unknown')}. "
+            f"The DLL session could not be released, so no tool can revive it - the server process must "
+            f"be restarted. Do NOT retry reconnect_hardware; continue without the stage if the task "
+            f"allows it and say so explicitly in your answer.")}
+    return None
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 세션별 도구 상태 (2026-07-31)
 #
@@ -409,6 +465,11 @@ def _teardown_component(mgr, comp: str) -> dict:
         # 참조를 버려도 안전하다. 반대로 free 가 실패하면 반드시 핸들을 남겨야 한다.
         freed = _try("free_session", obj.free_session)
         released = freed
+        if not released and hasattr(obj, "mark_dead"):
+            # 세션을 풀지 못했다 = 이 핸들로는 아무도 자원을 되찾을 수 없다(프로세스 재시작만이 답).
+            # 핸들은 남기되(고아 세션 방지) '죽었다'고 표시한다 — 안 그러면 get_hardware_status 가
+            # connected: true 로 보고하고, 에이전트는 죽은 스테이지로 다음 작업을 시도한다.
+            obj.mark_dead(f"release failed during reconnect ({steps})")
     elif comp == "camera":
         _try("stop_stream", obj.stop_stream)
         released = _try("close", obj.close)
@@ -454,21 +515,38 @@ def get_hardware_status() -> dict:
     out: dict = {"ok": True, "connected": {}, "notes": {}}
     for name in ("stage", "laser", "ccd", "camera"):
         obj = getattr(mgr, name, None)
-        out["connected"][name] = obj is not None
+        # 핸들이 있어도 '죽은' 세션은 연결로 치지 않는다 — 해제에 실패한 핸들은 고아 세션을
+        # 막으려고 일부러 남겨둔 것이지, 쓸 수 있다는 뜻이 아니다(_teardown_component 참고).
+        dead = obj is not None and getattr(obj, "dead", False)
+        out["connected"][name] = obj is not None and not dead
         if obj is None:
             out["notes"][name] = ("Not connected. Try reconnect_hardware(component='%s'). "
                                   "If that reports the resource is still held, the server process "
                                   "must be restarted - no tool can clear it." % name)
+        elif dead:
+            out["notes"][name] = (
+                "Dead session (%s): the handle still exists but the DLL session could not be "
+                "released, so no tool can revive it. reconnect_hardware will NOT help - the server "
+                "process must be restarted. Continue without the %s if the task allows it."
+                % (getattr(obj, "dead_reason", "unknown"), name))
 
     # 연결된 것은 실제로 응답하는지도 가볍게 확인한다 — 핸들이 살아 있어도 장비가
     # 먹통이면 '연결됨'만 보고 진행하다 뒤에서 터진다.
-    if mgr.stage is not None:
+    # 읽기도 component_lock('stage') 안에서만 한다 — 재연결 중 DLL 동시 호출이 세션을
+    # 죽인다(_stage_read 주석 참고).
+    if out["connected"].get("stage"):
         try:
-            pos = mgr.stage.get_position()
-            out["stage_position"] = (
-                {"x": pos[0], "y": pos[1], "z": pos[2]} if pos else None)
-            if not pos:
-                out["notes"]["stage"] = "Handle exists but get_position() returned nothing - stage is unresponsive."
+            probe = _stage_read(lambda: mgr.stage.get_position())
+            if probe is _STAGE_BUSY:
+                out["notes"]["stage"] = ("The stage is being connected or released by another thread "
+                                         "right now, so its position was not read. Nothing is wrong - "
+                                         "check again in a few seconds.")
+            else:
+                out["stage_position"] = (
+                    {"x": probe[0], "y": probe[1], "z": probe[2]} if probe else None)
+                if not probe:
+                    out["notes"]["stage"] = ("Handle exists but get_position() returned nothing - "
+                                             "stage is unresponsive.")
         except Exception as e:
             out["notes"]["stage"] = f"Handle exists but reading position raised {type(e).__name__}: {e}"
     if mgr.laser is not None:
@@ -526,21 +604,42 @@ def hardware_snapshot(mgr=None) -> dict:
                         "is_on":     getattr(laser, "is_on",     None)}
 
     if stage is not None:
-        try:
-            pos = stage.get_position()
-            out["stage"] = {"x": float(pos[0]), "y": float(pos[1]), "z": float(pos[2])}
-        except Exception:
-            out["stage"] = {}
-        try:
-            # get_velocity() 는 dict 반환 {"ok",x_speed_mm_s,...}.
-            vel = stage.get_velocity()
-            if isinstance(vel, dict) and vel.get("ok"):
-                out["stage"]["velocity"] = {"x": float(vel["x_speed_mm_s"]),
-                                            "y": float(vel["y_speed_mm_s"]),
-                                            "z": float(vel["z_speed_mm_s"])}
-        except Exception:
-            pass
+        # 이 함수는 프론트가 1초마다 폴링하는 경로다. 재연결이 도는 동안 여기서 DLL 을
+        # 부르면 LSX_Disconnect/LSX_FreeLSID 와 겹쳐 세션을 죽인다(_stage_read 주석).
+        # 락을 못 잡으면 DLL 을 건드리지 않고 직전 값을 그대로 보여준다 — 재연결은 몇 초라
+        # 패널이 잠깐 안 움직일 뿐이고, 숫자가 사라졌다 나타나는 것보다 덜 혼란스럽다.
+        snap = _stage_read(lambda: _read_stage_values(stage))
+        if snap is _STAGE_BUSY:
+            snap = _last_stage_values.get("value", {})
+        else:
+            _last_stage_values["value"] = snap
+        out["stage"] = snap
 
+    return out
+
+
+# 폴링이 재연결과 겹쳐 스킵됐을 때 프론트에 보여줄 직전 값. 한 스레드가 통째로 교체하고
+# 다른 스레드는 통째로 읽으므로(부분 갱신 없음) 별도 락이 필요 없다.
+_last_stage_values: dict = {"value": {}}
+
+
+def _read_stage_values(stage) -> dict:
+    """스테이지 위치/속도를 프론트 형식으로 읽는다 — **_stage_read 안에서만** 부를 것."""
+    out: dict = {}
+    try:
+        pos = stage.get_position()
+        out = {"x": float(pos[0]), "y": float(pos[1]), "z": float(pos[2])}
+    except Exception:
+        out = {}
+    try:
+        # get_velocity() 는 dict 반환 {"ok",x_speed_mm_s,...}.
+        vel = stage.get_velocity()
+        if isinstance(vel, dict) and vel.get("ok"):
+            out["velocity"] = {"x": float(vel["x_speed_mm_s"]),
+                               "y": float(vel["y_speed_mm_s"]),
+                               "z": float(vel["z_speed_mm_s"])}
+    except Exception:
+        pass
     return out
 
 
@@ -691,11 +790,17 @@ def _reconnect_locked(mgr, targets, done, errors, detail) -> dict:
 
 def get_stage_speed() -> dict:
     """현재 스테이지 이동 속도를 반환한다. 단위는 mm/s."""
-    if _stage is None:
-        return {"ok": False, "error": "Stage is not initialized."}
+    err = _stage_unavailable()
+    if err:
+        return err
     try:
         # get_velocity() 는 dict 반환. (이전 버그: speeds[0] 로 dict 를 정수 인덱싱 → 항상 에러)
-        vel = _stage.get_velocity()
+        # 조회는 _INSTRUMENT_LOCK 을 잡지 않으므로 재연결과 겹칠 수 있다 → _stage_read.
+        vel = _stage_read(lambda: _stage.get_velocity())
+        if vel is _STAGE_BUSY:
+            return {"ok": False, "error": (
+                "The stage is being connected or released right now, so its speed was not read. "
+                "Nothing was changed - try again in a few seconds.")}
         if not (isinstance(vel, dict) and vel.get("ok")):
             return {"ok": False, "error": vel.get("error", "Failed to read velocity") if isinstance(vel, dict) else "Unexpected velocity type"}
         return {"ok": True,
@@ -714,8 +819,9 @@ def set_stage_speed(x_speed_mm_s: float = None, y_speed_mm_s: float = None, z_sp
     0.1 로 걸렸는데도 호출자는 1.0 으로 설정됐다고 믿었다(이동 시간 예측이 10배 틀어진다).
     이제 같은 상수로 미리 클리핑해 '실제 적용될 값'을 보고하고, 잘린 축은 clipped 로 알린다.
     """
-    if _stage is None:
-        return {"ok": False, "error": "Stage is not initialized."}
+    err = _stage_unavailable()
+    if err:
+        return err
 
     try:
         # 1. 현재 장비에 설정된 속도를 읽어옵니다.
@@ -765,8 +871,11 @@ def set_stage_speed(x_speed_mm_s: float = None, y_speed_mm_s: float = None, z_sp
 @_serialized("move_stage")
 def move_stage(x: float, y: float, z: float = None) -> dict:
     """스테이지를 절대 좌표(mm)로 이동."""
-    if _stage is None:
-        return {"ok": False, "error": "Stage is not initialized."}
+    # 이동 경로는 _serialized(=_INSTRUMENT_LOCK)가 reconnect_hardware 와 이미 배타적이라
+    # component_lock 을 따로 잡지 않아도 DLL 동시 호출이 생기지 않는다.
+    err = _stage_unavailable()
+    if err:
+        return err
 
     err = _check_stage_target(x, y, z)      # 범위 검증(공용 — 모든 이동 경로가 같은 한계를 쓴다)
     if err:
@@ -787,10 +896,17 @@ def move_stage(x: float, y: float, z: float = None) -> dict:
 
 def get_stage_position() -> dict:
     """현재 스테이지 위치를 반환."""
-    if _stage is None:
-        return {"ok": False, "error": "Stage is not initialized."}
+    err = _stage_unavailable()
+    if err:
+        return err
     try:
-        pos = _stage.get_position()
+        pos = _stage_read(lambda: _stage.get_position())
+        if pos is _STAGE_BUSY:
+            return {"ok": False, "error": (
+                "The stage is being connected or released right now, so its position was not read. "
+                "Nothing was changed - try again in a few seconds.")}
+        if pos is None:
+            return {"ok": False, "error": "Failed to query stage position"}
         return {"ok": True, "x": pos[0], "y": pos[1], "z": pos[2]}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -804,8 +920,9 @@ def move_stage_relative(dx: float = 0.0, dy: float = 0.0, dz: float = 0.0) -> di
     계산해 검사한다. 예전에는 이 함수만 검사가 없어서, 같은 목적지라도 절대 이동이면
     거부되고 상대 이동이면 통과하는 비대칭이 있었다.
     """
-    if _stage is None:
-        return {"ok": False, "error": "Stage is not initialized."}
+    err = _stage_unavailable()
+    if err:
+        return err
     try:
         pos = _stage.get_position()
         if pos is None:
@@ -1903,8 +2020,9 @@ def run_autofocus(
     dict
         optimal_z, best_area_px, step_count, z_scores, current_position
     """
-    if _stage is None:
-        return {"ok": False, "error": "Stage is not initialized."}
+    stage_err = _stage_unavailable()
+    if stage_err:
+        return stage_err
     if _camera is None:
         return {"ok": False, "error": "Camera is not initialized."}
     if _laser is None:
@@ -2589,8 +2707,9 @@ def move_to_pixel(pixel_x: int, pixel_y: int) -> dict:
     변환식은 optics_map 단일 출처 — 예전에는 이 함수, USE_scan.py, server.py 가
     각자 같은 식을 갖고 있었고 server.py 는 보정계수를 하드코딩까지 했다.
     """
-    if _stage is None:
-        return {"ok": False, "error": "Stage is not initialized."}
+    stage_err = _stage_unavailable()
+    if stage_err:
+        return stage_err
     try:
         pos = _stage.get_position()
         if pos is None:
@@ -2777,8 +2896,9 @@ def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
     err = _validate_grid_args(rows, cols, spacing_mm)
     if err:
         return err
-    if _stage is None:
-        return {"ok": False, "error": "Stage is not initialized."}
+    stage_err = _stage_unavailable()
+    if stage_err:
+        return stage_err
     if _camera is None:
         return {"ok": False, "error": "Camera is not initialized."}
     try:
@@ -2885,8 +3005,9 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
     gate_err = _grid_gate_check(_grid_gate_geom(rows, cols, spacing_mm, center_x, center_y))
     if gate_err:
         return gate_err
-    if _stage is None:
-        return {"ok": False, "error": "Stage is not initialized."}
+    stage_err = _stage_unavailable()
+    if stage_err:
+        return stage_err
     if _ccd is None:
         return {"ok": False, "error": "CCD is not initialized (cooling or not connected)."}
     if _laser is None:

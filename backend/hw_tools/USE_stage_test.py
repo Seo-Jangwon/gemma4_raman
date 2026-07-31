@@ -50,7 +50,31 @@ class TangoController:
         self.dll = None
         self.LSID = c_int()
         self.connected = False
-        
+        # 이 세션이 회복 불가 상태인가 — mark_dead() 참고. 프로세스 재시작 전까지 False 로
+        # 돌아오지 않는다.
+        self.dead = False
+        self.dead_reason = None
+
+    def mark_dead(self, reason: str) -> None:
+        """이 세션을 '회복 불가'로 표시한다 — 이후 DLL 호출을 전부 막는다.
+
+        [왜 필요한가 — 2026-07-31]
+        LSX_Disconnect / LSX_FreeLSID 가 DLL 내부에서 C++ 예외(0xE06D7363)를 던지면
+        해제가 실패하는데, 그때 파이썬 쪽 상태(connected=True, LSID!=0)와 DLL 쪽 상태
+        (연결이 이미 끊김)가 갈라진다. 그 결과:
+          · 프론트 폴링이 부를 때마다 LSX_GetPos 가 4006 을 뱉어 로그가 도배된다
+          · get_hardware_status 는 핸들이 있으니 'connected: true' 로 보고하고,
+            에이전트는 멀쩡한 줄 알고 다음 작업을 그 스테이지로 시도한다
+        해제에 실패한 세션은 아무도 되찾을 수 없으므로(FreeLSID 를 부를 방법이 없다)
+        솔직하게 '죽었다'고 표시하고, 회복 방법(프로세스 재시작)을 이유에 남긴다.
+        """
+        self.dead = True
+        self.dead_reason = reason
+        self.connected = False          # 이 핸들로는 더 이상 아무것도 하지 않는다
+        # print 안에는 em dash 를 쓰지 않는다: 콘솔이 cp949 면 UnicodeEncodeError 로
+        # 죽는데, 하필 '장비가 고장난 순간'에 로그가 예외로 바뀌는 최악의 자리다.
+        print(f"[STAGE] 세션 무효 표시 - {reason}")
+
     def load_dll(self) -> bool:
         """DLL 로드"""
         try:
@@ -168,6 +192,8 @@ class TangoController:
     
     def get_position(self) -> tuple:
         """현재 위치 조회"""
+        if self.dead:
+            return None                      # 조용히 — 폴링 경로라 로그를 도배하면 안 된다
         if not self.connected:
             print("[ERROR] 연결되지 않았습니다")
             return None
@@ -208,6 +234,9 @@ class TangoController:
     
     def move_absolute(self, x: float, y: float, z: float, a: float = 0, wait: bool = True) -> bool:
         """절대 위치로 이동 (범위 초과 시 경계값으로 클리핑)"""
+        if self.dead:
+            print(f"[ERROR] 스테이지 세션 무효 - 이동 취소 ({self.dead_reason})")
+            return False
         if not self.connected:
             print("[ERROR] 연결되지 않았습니다")
             return False
@@ -247,6 +276,8 @@ class TangoController:
 
     def get_velocity(self) -> dict:
         """현재 설정된 속도 조회, mm/s 단위"""
+        if self.dead:
+            return {"ok": False, "error": f"세션 무효 - {self.dead_reason}"}
         if not self.connected:
             return {"ok": False, "error": "연결되지 않았습니다"}
 
@@ -273,6 +304,9 @@ class TangoController:
     
     def set_velocity(self, vx: float, vy: float, vz: float, va: float) -> bool:
         """속도 설정, mm/s 단위"""
+        if self.dead:
+            print(f"[ERROR] 스테이지 세션 무효 - 속도 설정 취소 ({self.dead_reason})")
+            return False
         if not self.connected:
             print("[ERROR] 연결되지 않았습니다")
             return False
