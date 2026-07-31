@@ -1136,7 +1136,8 @@ def acquire_spectrum(
         CCD 노출 시간 [초]. None이면 현재 CCD 설정을 유지한다.
     power : float or None
         레이저 출력 [%], 0.004~100 (ND 필터 연속 조절).
-        None이면 마지막으로 설정된 파워를 재적용한다(한 번도 없었다면 40%).
+        None이면 이 세션에서 마지막으로 설정된 파워를 재적용한다. **한 번도 설정된 적이
+        없으면 임의값으로 쏘지 않고 거부한다** — 조사량 결정을 도구가 대신하지 않는다.
         레이저는 이 값을 항상 하드웨어에 적용한다 — 아래 주석 참고.
     stabilize_sec : float
         레이저 ON 후 안정화 대기 [초]. 기본 0.5.
@@ -1191,7 +1192,21 @@ def acquire_spectrum(
     # 드라이버의 _power_set 플래그가 True여야 하고, 그 플래그는 set_power()만이 세운다
     # (가이드빔 모드나 오토포커스 직후엔 False다). 같은 위치로의 재이동은 무해하다.
     if power is None:
-        eff_power = float(getattr(_laser, "power_pct", None) or 40.0)
+        # [왜 40% 폴백을 없앴는가 — 2026-07-31]
+        # 예전에는 한 번도 파워를 정한 적이 없어도 조용히 40% 로 쏘았다. 그건 '유지'가
+        # 아니라 이 도구가 조사량을 대신 결정한 것이고, 시료가 무엇인지 모르는 상태에서
+        # 가장 하면 안 되는 결정이다(생체·고분자 시료는 40% 에서 태워 먹는다).
+        # 이미 정해진 값이 있으면 그대로 재적용한다 — 가이드빔 모드로 갔다 와도
+        # power_pct 는 남아 있으므로 '다시 무장'이 되어 의도대로 동작한다.
+        last = getattr(_laser, "power_pct", None)
+        if last is None:
+            return {"ok": False, "error": (
+                "No laser power has been set in this session, so there is nothing to 'keep' and this "
+                "tool will not pick one for you - firing an unknown sample at an arbitrary power can "
+                "photobleach or burn it. Decide the power yourself and pass acquire_spectrum(power=...), "
+                "or set it once with set_laser_power(percent) and then measure. If you do not know the "
+                "sample's tolerance, start low (a few percent), look at the signal, and raise it.")}
+        eff_power = float(last)
     else:
         eff_power = power                   # 검증은 _apply_laser_power 가 한다(단일 정책)
 
@@ -1589,48 +1604,27 @@ def set_ccd_preamp_gain(index: int) -> dict:
         return {"ok": False, "error": str(e)}
 
 
-@_serialized("set_ccd_em_gain")
-def set_ccd_em_gain(gain: int) -> dict:
-    """
-    EM(Electron Multiplication) 이득을 설정한다.
-    EM CCD 전용. get_ccd_info()의 em_gain_range 참조.
-    """
-    err = _ccd_ready()
-    if err:
-        return err
-    if not getattr(_ccd, 'em_mode', False):
-        return {"ok": False, "error": "This camera is not an EM CCD."}
-    try:
-        _ccd.set_EMCCD_gain(gain)
-        return {"ok": True, "em_gain": gain}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
-# [제거됨 — set_mcp_gain / get_mcp_gain_range, 2026-07-30]
-# 이 장비는 MCP(Micro-Channel Plate) 이득을 지원하지 않는다. 실측 로그에서 SDK 가
-# GetMCPGainRange/SetMCPGain 에 DRV_NOT_SUPPORTED(20991) 를 반환한다(iStar ICCD 전용
-# 기능이고 현재 카메라는 iDus 계열). 두 툴을 남겨 두면 에이전트가 "게인을 낮춰 포화를
-# 해결하라"는 과제에서 반드시 실패하는 경로로 유인된다 — 실제로 그렇게 실패했다.
-# 지원되는 대체 수단: set_ccd_preamp_gain(index) + get_ccd_info()의 preamp_gains_available.
-
-
-@_serialized("set_ccd_output_amp")
-def set_ccd_output_amp(amp: int) -> dict:
-    """
-    출력 앰프를 선택한다.
-    0 = EMCCD 앰프, 1 = 일반(Conventional) 앰프.
-    """
-    err = _ccd_ready()
-    if err:
-        return err
-    if amp not in (0, 1):
-        return {"ok": False, "error": "amp must be 0 (EM) or 1 (Conventional)."}
-    try:
-        _ccd.set_output_amp(amp)
-        return {"ok": True, "output_amp": amp, "mode": "EM" if amp == 0 else "Conventional"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+# [제거됨 — 이 장비가 지원하지 않는 이득 도구들]
+#
+# ── set_mcp_gain / get_mcp_gain_range (2026-07-30) ──
+# MCP(Micro-Channel Plate) 이득 미지원. 실측 로그에서 SDK 가 GetMCPGainRange/SetMCPGain 에
+# DRV_NOT_SUPPORTED(20991) 를 반환한다(iStar ICCD 전용 기능).
+#
+# ── set_ccd_em_gain / set_ccd_output_amp (2026-07-31) ──
+# 이 카메라는 EM CCD 가 아니라 iDus 다 — Config.ini 가 명시한다:
+#     /*CCDType : 0 (IDUS), 1 (EM)*/   →  [ANDOR_IDUS]
+# 그래서 두 툴은 구조적으로 아무 일도 못 했다:
+#   · set_ccd_em_gain   : em_mode 가 False 라 **항상** "This camera is not an EM CCD." 만 반환
+#   · set_ccd_output_amp: 일반 CCD 는 출력 앰프가 하나뿐이라 고를 대상이 없다
+#                         (hardware_manager._init_ccd 도 em_mode 일 때만 set_output_amp 를 부른다)
+# 남겨 두면 MCP 때와 같은 함정이 된다 — "포화됐으니 게인을 낮춰라" 류의 과제에서 에이전트가
+# 반드시 실패하는 경로로 유인되고, 실패 원인이 '툴이 없어서'가 아니라 '툴이 거짓말을 해서'가
+# 되어 스스로 회복하지 못한다.
+#
+# 이 장비에서 실제로 이득을 조절하는 수단은 하나다:
+#     set_ccd_preamp_gain(index)  +  get_ccd_info()의 preamp_gains_available
+# 드라이버 메서드(AndorCCD.set_EMCCD_gain / set_output_amp)는 그대로 둔다 —
+# hardware_manager 가 EM 장비로 교체될 경우를 위해 쓰고 있고, 여기서 없앤 것은 '에이전트 툴'이다.
 
 
 @_serialized("set_ccd_shift_speeds")
@@ -1870,6 +1864,11 @@ def set_guide_beam_mode() -> dict:
 # 오토포커스 (카메라 선명도 기반 Z 스윕)
 # ──────────────────────────────────────────
 
+# 스팟 면적을 연속으로 이만큼 못 재면 오토포커스를 실패로 끝낸다. 한 번은 프레임 한 장을
+# 놓친 것일 수 있지만(버퍼 타이밍), 연달아 못 받으면 스트림이 멈췄거나 가이드빔이 안 나오는
+# 것이다. 그 상태로 계속 돌면 Z 만 흔들다가 '성공'을 보고하게 된다.
+_AF_UNMEASURED_ABORT = 3
+
 @_serialized("run_autofocus")
 def run_autofocus(
     initial_z: float = None,
@@ -1945,8 +1944,11 @@ def run_autofocus(
 
         # 목적함수는 vision.guide_beam_spot_area 단일 출처다 — USE_autofocus_local 의
         # 대화형 오토포커스와 같은 함수를 쓰므로 두 경로가 같은 Z 로 수렴한다.
-        def _capture_spot_area() -> int:
+        # None 은 '못 쟀다'(프레임 미수신)이고 0 과 다르다 — vision 쪽 주석 참고.
+        def _capture_spot_area():
             return _vis.guide_beam_spot_area(_camera, _laser, n_avg=3)
+
+        n_unmeasured = 0         # 스팟 면적을 못 잰 횟수(카메라가 프레임을 안 준다)
 
         # 힐클라이밍 상태
         best_z = cur_z
@@ -1963,6 +1965,23 @@ def run_autofocus(
             z_now = pos_now[2] if pos_now else cur_z
 
             area = _capture_spot_area()
+            if area is None:
+                # 목적함수를 잴 수 없다 = 초점을 맞출 근거가 없다. 계속 돌면 Z 만 흔들다가
+                # '성공'을 돌려주게 되므로 여기서 끝낸다(카메라 스트림·가이드빔을 먼저 봐야 한다).
+                n_unmeasured += 1
+                if n_unmeasured >= _AF_UNMEASURED_ABORT:
+                    _goto_z(cur_z)          # 탐색 시작 Z 로 되돌린다(아래 문구가 사실이 되도록)
+                    _laser_off_quiet()
+                    return {"ok": False, "error": (
+                        f"Autofocus could not measure the guide-beam spot at all - the camera returned "
+                        f"no frames {n_unmeasured} times in a row. Focus was NOT adjusted and the stage "
+                        f"is back where it started. This is not something a retry fixes: check that the "
+                        f"camera is streaming (start_camera_stream) and that the guide beam is actually "
+                        f"emitting (get_laser_status / set_guide_beam_mode)."),
+                        "z_scores": z_scores, "unmeasured_samples": n_unmeasured}
+                # 아직 한도 전이면 한 칸 움직여 다시 시도한다.
+                _goto_z(z_now + direction * step_size)
+                continue
             z_scores.append({"z": round(z_now, 4), "area_px": area})
 
             if 0 < area < global_best_area:
@@ -1988,6 +2007,20 @@ def run_autofocus(
                         sweep_state = 'done'
                     else:
                         _goto_z(best_z + direction * step_size)
+
+        # 유효한 측정이 한 번도 없었으면(전부 면적 0 이거나 못 잼) 최적 Z 라는 것이 없다.
+        # 이때 global_best_z 는 그냥 시작 Z 인데, 그걸 optimal_z 로 돌려주면 "초점을 맞췄다"는
+        # 거짓 보고가 된다. 스팟이 전혀 안 보이는 상황(가이드빔 미출력, 시료 없음)이다.
+        if global_best_area == float('inf'):
+            _goto_z(cur_z)
+            _laser_off_quiet()
+            return {"ok": False, "error": (
+                "Autofocus finished without ever detecting a guide-beam spot - every sample came back "
+                "with zero spot area, so there was nothing to minimise and no focus was found. The Z "
+                "position is unchanged. Check that the guide beam is actually emitting "
+                "(set_guide_beam_mode, then look with analyze_microscope_image) and that a sample is "
+                "actually under the objective."),
+                "z_scores": z_scores, "unmeasured_samples": n_unmeasured}
 
         # 역대 최솟값 위치로 최종 귀환
         _goto_z(global_best_z)
@@ -2048,7 +2081,7 @@ def _ipbsa(intensity, poly_order=5, max_iterations=100, threshold=0.001):
 
 
 def apply_background_subtraction(
-    poly_order: int = 5,
+    poly_order: int,
     max_iterations: int = 100,
     threshold: float = 0.001,
     source: str = "last",
@@ -2583,6 +2616,12 @@ def move_to_pixel(pixel_x: int, pixel_y: int) -> dict:
 # 대략 같은 크기로 그린다. 물리적 빔 지름이 아니라 조사점 표식이다(사용자 지시: 대충 그 크기).
 _GRID_SPOT_RADIUS_PX = 14
 
+# 오토포커스가 연속으로 이만큼 실패하면 격자 스캔을 중단한다. 한두 번은 그 점만의
+# 문제(프레임 한 장을 놓쳤다)일 수 있지만, 연달아 실패하면 카메라·가이드빔·시료 높이 쪽
+# 계통 문제다. 그 상태로 남은 점을 계속 쏘면 초점이 안 맞은 스펙트럼만 쌓이고 시료에는
+# 조사량이 그대로 누적된다 — 되돌릴 수 없는 쪽(레이저)이 손해라 멈추는 편을 택한다.
+_GRID_AF_ABORT_STREAK = 3
+
 # run_grid_scan 한 번이 낼 수 있는 누적 조사량 상한(mJ)은 _GRID_MAX_DOSE_MJ 로 파일
 # 상단에서 import 한다(backend.safety_limits). 에이전트 층의 per-turn 회로차단기는 도구
 # 이름이 acquire_spectrum일 때만 도는데 run_grid_scan은 내부에서 N번 조사하므로, 여기서
@@ -2819,8 +2858,8 @@ def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
 
 @_serialized("run_grid_scan")
 def run_grid_scan(rows: int, cols: int, spacing_mm: float,
-                  center_x: float = None, center_y: float = None,
-                  autofocus: str = "each", exposure: float = 0.2, power: float = 40) -> dict:
+                  exposure: float, power: float, autofocus: str,
+                  center_x: float = None, center_y: float = None) -> dict:
     """격자 스캔 '실행'. rows×cols 격자를 내부 루프로 순회하며 각 점에서
     이동→(오토포커스)→스펙트럼 측정·자동저장하고, 압축 요약 1개만 반환한다.
 
@@ -2828,6 +2867,12 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
       "each"   — 매 점에서 오토포커스(가장 정확, 느림; 예전 수동 방식과 동일)
       "center" — 격자 중심에서 1회만 오토포커스 후 그 Z로 전체 측정(빠름, 평탄 시료용)
       "none"   — 오토포커스 없이 현재 Z로 측정
+
+    [exposure / power / autofocus 에 기본값이 없는 이유 — 2026-07-31]
+    예전에는 0.2s / 40% / "each" 가 기본값이었다. 그런데 이 셋은 '실험 조건' 자체이고
+    격자 전체에 rows*cols 번 반복 적용된다 — 생략하면 도구가 조사량을 대신 결정하는 셈이다.
+    필수 인자로 바꿔 호출자가 반드시 값을 정하게 한다(스키마 required 와 일치시킨다).
+
     레이저 조사가 실제로 일어나므로, 예상 누적 조사량이 상한을 넘으면 시작 전에 거부한다.
     """
     err = _validate_grid_args(rows, cols, spacing_mm)
@@ -2891,22 +2936,58 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
 
         results = []
         n_ok = 0
+        af_failed, af_limit_hits, af_streak = 0, 0, 0
+        aborted = None
         for idx, i, j, sx, sy in pts:
             mv = move_stage(x=sx, y=sy)
             if not mv.get("ok"):
                 results.append({"i": idx, "row": i, "col": j, "x": sx, "y": sy,
                                 "ok": False, "error": mv.get("error")})
                 continue
+
+            # ── 오토포커스 결과를 '읽는다' — 2026-07-31 ────────────────────────
+            # 예전에는 run_autofocus() 를 부르고 반환을 통째로 버렸다("실패해도 치명적이지
+            # 않다"). 그런데 초점이 안 맞은 Z 에서 찍은 스펙트럼은 신호가 약하거나 사실상
+            # 빈 스펙트럼이고, 그걸 성공으로 세어 "25/25 측정 완료"라고 보고하면 호출자는
+            # 데이터가 왜 이상한지 알 방법이 없다. 실패를 점별로 남기고 요약에 싣는다.
+            af_ok = None
             if autofocus == "each":
-                run_autofocus()   # 실패해도 치명적이지 않다 — 현재 Z로 측정을 이어간다.
+                af = run_autofocus()
+                af_ok = bool(af.get("ok"))
+                if af_ok:
+                    af_streak = 0
+                    if af.get("z_limit_hits"):
+                        af_limit_hits += 1
+                else:
+                    af_failed += 1
+                    af_streak += 1
+                    # 연속 실패는 이 점의 문제가 아니라 계통적 문제다(카메라 정지, 시료가
+                    # Z 가동범위 밖, 가이드빔 미출력). 남은 점을 계속 쏘아 봐야 초점이 안 맞은
+                    # 스펙트럼만 쌓이고 시료에는 조사량만 누적된다 — 여기서 멈춘다.
+                    if af_streak >= _GRID_AF_ABORT_STREAK:
+                        aborted = {
+                            "at_point": idx, "row": i, "col": j,
+                            "reason": (
+                                f"Autofocus failed {af_streak} times in a row (last error: "
+                                f"{af.get('error')}). That is a systematic problem, not a bad point - "
+                                f"the camera may have stopped streaming, the guide beam may be off, or "
+                                f"the sample may sit outside the Z travel range. The scan was STOPPED "
+                                f"here instead of firing the laser at the remaining points out of focus."),
+                        }
+                        break
+
             res = _cache_and_return(acquire_spectrum(exposure=exposure, power=power))
             if res.get("ok"):
                 n_ok += 1
                 files = (res.get("saved") or {}).get("files") or {}
                 ref = files.get("csv") or files.get("png") or ""
                 fname = ref.replace("\\", "/").rsplit("/", 1)[-1]
-                results.append({"i": idx, "x": sx, "y": sy,
-                                "max_intensity": res.get("max_intensity"), "file": fname})
+                rec = {"i": idx, "x": sx, "y": sy,
+                       "max_intensity": res.get("max_intensity"), "file": fname}
+                if af_ok is False:
+                    # 측정 자체는 됐지만 초점이 안 맞은 Z 에서 찍혔다 — 값을 그대로 믿으면 안 된다.
+                    rec["autofocus_failed"] = True
+                results.append(rec)
             else:
                 results.append({"i": idx, "row": i, "col": j, "x": sx, "y": sy,
                                 "ok": False, "error": res.get("error")})
@@ -2917,7 +2998,9 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
         fails = [r for r in results if r.get("ok") is False]
         inten = [r["max_intensity"] for r in oks if r.get("max_intensity") is not None]
         out = {
-            "ok": True,
+            # 중단됐으면 성공이 아니다 — 여기서 ok:True 를 주면 호출자가 "격자 스캔 완료"로
+            # 보고해 버린다. 측정된 점들은 이미 자동저장돼 있으므로 데이터가 사라지지는 않는다.
+            "ok": aborted is None,
             "rows": rows, "cols": cols, "spacing_mm": spacing_mm,
             "center": {"x": round(cx, 4), "y": round(cy, 4)},
             "autofocus": autofocus, "exposure": exposure, "power": power,
@@ -2928,6 +3011,27 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
             "note": ("Each point was auto-saved with its (x,y) tag. Use aggregate_spectra_csv / "
                      "combine_spectra / bundle_results / run_analysis to merge or inspect per-point data."),
         }
+        if aborted is not None:
+            out["aborted"] = aborted
+            out["error"] = aborted["reason"]
+            out["note"] = (
+                f"STOPPED EARLY at point {aborted['at_point']} of {n}. The {n_ok} point(s) measured "
+                f"before that were auto-saved and are still usable, but the grid is INCOMPLETE - do not "
+                f"report it as finished. Fix the focus problem (check the camera stream and the sample "
+                f"height with run_autofocus on its own), then preview and re-run the grid.")
+        if autofocus == "each" and af_failed:
+            out["n_autofocus_failed"] = af_failed
+            out.setdefault("warnings", []).append(
+                f"Autofocus failed at {af_failed} of the points that were measured. Those spectra were "
+                f"taken at whatever Z the stage happened to be at, so they may be out of focus and their "
+                f"intensities are not comparable with the rest - the affected points are marked with "
+                f"autofocus_failed. Do not read a weak signal there as a property of the sample.")
+        if af_limit_hits:
+            out["n_autofocus_z_limit"] = af_limit_hits
+            out.setdefault("warnings", []).append(
+                f"At {af_limit_hits} point(s) the focus search ran into the Z travel limit, meaning the "
+                f"true focus is probably outside the reachable range. Repeating the scan will not help - "
+                f"the sample or the objective needs to be repositioned.")
         if fails:
             out["failed_points"] = fails[:10]
         if n <= 32:
@@ -2979,8 +3083,7 @@ TOOL_DISPATCH = {
     "set_ccd_trigger_mode":     lambda a: set_ccd_trigger_mode(**a),
     "set_ccd_read_mode":        lambda a: set_ccd_read_mode(**a),
     "set_ccd_preamp_gain":      lambda a: set_ccd_preamp_gain(**a),
-    "set_ccd_em_gain":          lambda a: set_ccd_em_gain(**a),
-    "set_ccd_output_amp":       lambda a: set_ccd_output_amp(**a),
+    # (set_ccd_em_gain / set_ccd_output_amp 제거 — 이 카메라는 EM CCD 가 아니다. 위 주석 참고)
     "set_ccd_shift_speeds":     lambda a: set_ccd_shift_speeds(**a),
     "set_ccd_temperature":      lambda a: set_ccd_temperature(**a),
     "set_ccd_cooler":           lambda a: set_ccd_cooler(**a),

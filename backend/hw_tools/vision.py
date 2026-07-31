@@ -123,6 +123,21 @@ def capture_laser_diff(camera, laser, n_avg: int = 3) -> dict:
             "diff_clip": diff_clip, "diff_absdiff": cv2.absdiff(lit, ref)}
 
 
-def guide_beam_spot_area(camera, laser, n_avg: int = 3) -> int:
-    """capture_laser_diff 의 면적만 필요할 때 쓰는 얇은 래퍼(오토포커스 목적함수)."""
-    return int(capture_laser_diff(camera, laser, n_avg).get("area_px", 0))
+def guide_beam_spot_area(camera, laser, n_avg: int = 3):
+    """capture_laser_diff 의 면적만 필요할 때 쓰는 얇은 래퍼(오토포커스 목적함수).
+
+    Returns
+    -------
+    int | None — 스팟 면적(픽셀 수). **프레임을 한 장도 못 받았으면 None** 이다.
+
+    [왜 0 이 아니라 None 인가 — 2026-07-31]
+    예전에는 실패도 0 으로 뭉갰다. 그런데 이 값은 '작을수록 초점이 맞다'는 목적함수라,
+    0 은 최고의 점수다. 즉 카메라가 죽어 아무것도 못 본 상태가 "완벽한 초점"으로 읽혔고,
+    run_autofocus 는 카메라가 통째로 멈춰도 ok:True 를 돌려줬다. 격자 스캔은 그 성공을
+    믿고 초점이 안 맞은 채 모든 점을 측정했다(테스트로 재현). '못 쟀다'와 '재 봤더니 0'은
+    반드시 구분돼야 한다.
+    """
+    d = capture_laser_diff(camera, laser, n_avg)
+    if not d.get("ok"):
+        return None
+    return int(d.get("area_px", 0))

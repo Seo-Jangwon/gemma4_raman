@@ -193,8 +193,14 @@ RAMAN_TOOLS = [
                     },
                     "power": {
                         "type": "number",
-                        "description": ("Laser power (transmittance %). A real value in 0.004-100. "
-                                        "Omit to reuse the last power that was set (40 if never set)."),
+                        "description": ("Laser power (transmittance %), a real value in 0.004-100. "
+                                        "Omit ONLY to reuse a power you already set earlier in this "
+                                        "session - if none has ever been set the call is REFUSED rather "
+                                        "than defaulted, because choosing a dose for an unknown sample "
+                                        "is your decision, not the tool's. Higher power gives more "
+                                        "signal but photobleaches or burns fragile samples; when the "
+                                        "sample's tolerance is unknown, start low and raise it after "
+                                        "looking at the result."),
                         "minimum": 0.004,
                         "maximum": 100,
                     },
@@ -366,7 +372,10 @@ RAMAN_TOOLS = [
                     },
                     "num_accumulations": {
                         "type": "integer",
-                        "description": "Number of accumulations (used in accumulate/kinetic mode). Default 1",
+                        "description": ("Number of accumulations (used in accumulate/kinetic mode). "
+                                        "Omit to keep the value already on the CCD. Note that "
+                                        "accumulate mode with 1 accumulation is just a single "
+                                        "shot - set this deliberately when you want averaging."),
                     },
                     "num_kinetics": {
                         "type": "integer",
@@ -473,48 +482,11 @@ RAMAN_TOOLS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "set_ccd_em_gain",
-            "description": (
-                "Set the EM (Electron Multiplication) gain. EMCCD only. "
-                "Higher values amplify the signal more, but too high may saturate the image."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "gain": {
-                        "type": "integer",
-                        "description": "EM gain value. Within the em_gain_range from get_ccd_info()",
-                    }
-                },
-                "required": ["gain"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "set_ccd_output_amp",
-            "description": (
-                "Select the output amplifier. "
-                "0 = EMCCD amp (EM gain enabled). "
-                "1 = Conventional amp (EM disabled, low noise)."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "amp": {
-                        "type": "integer",
-                        "description": "Amplifier selection: 0 (EM) or 1 (Conventional)",
-                        "enum": [0, 1],
-                    }
-                },
-                "required": ["amp"],
-            },
-        },
-    },
+    # [스키마에서 제거 — set_ccd_em_gain / set_ccd_output_amp, 2026-07-31]
+    # 이 카메라는 EM CCD 가 아니라 iDus 다(Config.ini: CCDType 0 = IDUS). 두 툴은 각각
+    # "항상 에러만 반환" / "선택지가 하나뿐" 이라 모델을 막다른 길로 유인하기만 했다 —
+    # set_mcp_gain 을 내린 것과 같은 사유다. 자세한 근거는 raman_tools.py 의 같은 자리 주석.
+    # 이 장비에서 이득을 조절하는 유일한 수단은 set_ccd_preamp_gain 이다.
     {
         "type": "function",
         "function": {
@@ -911,7 +883,14 @@ RAMAN_TOOLS = [
                 "(3) the user EXPLICITLY approved that exact layout in a later message. If the user has not "
                 "explicitly approved the previewed grid, do not call this - preview first and wait. "
                 "The laser is fired at every point, so the "
-                "estimated cumulative dose is checked up front and the scan is refused if it exceeds the safety limit."
+                "estimated cumulative dose is checked up front and the scan is refused if it exceeds the safety limit. "
+                "READ THE RESULT BEFORE REPORTING SUCCESS: n_measured can be lower than n_points, and with "
+                "autofocus='each' the response may carry n_autofocus_failed (those points were measured at "
+                "whatever Z the stage was at, so a weak signal there is an artefact, not a property of the "
+                "sample) or n_autofocus_z_limit (the focus is physically out of reach - re-running will not "
+                "help). If autofocus fails several times in a row the scan STOPS EARLY and comes back with "
+                "ok=false plus an 'aborted' field; the points measured up to then are still saved, but the "
+                "grid is incomplete and you must say so rather than reporting the map as done."
             ),
             "parameters": {
                 "type": "object",
@@ -927,13 +906,39 @@ RAMAN_TOOLS = [
                         "description": (
                             "Autofocus strategy. 'each' = autofocus at every point (most accurate, slowest); "
                             "'center' = autofocus once at the grid center then reuse that Z (fast, for flat samples); "
-                            "'none' = no autofocus, keep current Z. Default 'each'."
+                            "'none' = no autofocus, keep current Z. "
+                            "REQUIRED - this is a real trade-off, not a formality: 'each' costs an extra "
+                            "Z sweep (and guide-beam exposure) at every point, which on a large grid "
+                            "dominates the run time, while 'center' or 'none' will drift out of focus on a "
+                            "tilted or uneven sample and quietly return weak spectra. Decide from what you "
+                            "know about the sample's flatness."
                         ),
                     },
-                    "exposure": {"type": "number", "description": "Exposure time per point (s). Default 0.2"},
-                    "power": {"type": "number", "description": "Laser power (%) per point. Default 40"},
+                    "exposure": {
+                        "type": "number",
+                        "description": (
+                            "Exposure time per point (s) - REQUIRED. Together with power this sets how "
+                            "much light each point receives, so choose it for THIS sample rather than "
+                            "reusing a number: too short buries the peaks in read noise, too long "
+                            "saturates the detector and multiplies the total run time by the point count."
+                        ),
+                    },
+                    "power": {
+                        "type": "number",
+                        "description": (
+                            "Laser power (%) per point - REQUIRED. This is the dose decision, and it is "
+                            "applied at EVERY point, so the sample sees it rows*cols times. Higher power "
+                            "raises signal but photobleaches or burns fragile samples (biological, "
+                            "polymer, thin film); if you are unsure of the sample's tolerance, start low "
+                            "and check one point before committing the whole grid. The cumulative dose is "
+                            "estimated up front and the scan is refused outright if it exceeds the limit."
+                        ),
+                    },
                 },
-                "required": ["rows", "cols", "spacing_mm"],
+                # exposure / power / autofocus 를 필수로 둔다 — 이 세 값이 '실험 조건' 자체이고,
+                # 격자 전체에 rows*cols 번 반복 적용된다. 선택으로 두면 모델이 생략하고 코드
+                # 기본값(0.2s / 40% / each)이 조사량을 대신 결정한다(2026-07-31).
+                "required": ["rows", "cols", "spacing_mm", "exposure", "power", "autofocus"],
             },
         },
     },
@@ -1004,22 +1009,35 @@ RAMAN_TOOLS = [
         "function": {
             "name": "apply_background_subtraction",
             "description": (
-                "Remove the fluorescence background of a Raman spectrum using IPBSA (iterative polynomial background subtraction). "
-                "Uses the most recently acquired spectrum (source='last') or a saved file path as the source. "
-                "The result is saved under version_label, and you can compare multiple versions with list_bg_versions(). "
-                "Increasing poly_order removes more complex backgrounds but risks overfitting. "
-                "If the user does not specify a polynomial order, use the default value 5. "
-                "OVERLAP with run_analysis: you could also write your own baseline code there, but "
-                "PREFER THIS TOOL for ordinary background removal - it is the agreed method, keeps "
-                "parameters comparable across versions, and writes the standard CSV format. Use "
-                "run_analysis only when the task explicitly calls for a different algorithm, and say so."
+                "Remove the fluorescence background of a Raman spectrum using IPBSA (iterative polynomial "
+                "background subtraction). Uses the most recently acquired spectrum (source='last') or a "
+                "saved file path as the source. "
+                "YOU CHOOSE THE POLYNOMIAL ORDER, and that choice is the substance of this task - there is "
+                "no safe default to fall back on. Too low and a curved fluorescence background survives, "
+                "tilting the baseline and distorting relative peak heights; too high and the polynomial "
+                "starts following the peaks themselves, eating real signal. The right order depends on how "
+                "curved THIS spectrum's background is, so look at the data before deciding. "
+                "DO NOT settle on the first result: run it at two or three orders, compare them with "
+                "list_bg_versions(), and keep the one where the baseline is flat between peaks while peak "
+                "heights are unchanged. Say which order you chose and why. "
+                "OVERLAP with run_analysis: that sandbox can run any baseline algorithm you write yourself "
+                "(asymmetric least squares, rolling ball, wavelet, ...). This tool is IPBSA specifically, "
+                "and it keeps parameters comparable across versions and writes the standard CSV format. "
+                "Pick whichever the task calls for and state which one you used."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "poly_order": {
                         "type": "integer",
-                        "description": "Polynomial order (2-10). Default 5. Lower is a smoother background; higher estimates a more complex background.",
+                        "description": (
+                            "Polynomial order (2-10) - REQUIRED, decide it yourself from the shape of "
+                            "this spectrum's background. A low order (2-3) fits only a gentle slope and "
+                            "will leave a curved background behind; a high order (8-10) can bend enough "
+                            "to follow the peaks and subtract away real signal. Mid orders (4-6) suit "
+                            "the moderate fluorescence curvature that is typical, but confirm it against "
+                            "the data rather than assuming."
+                        ),
                         "minimum": 2,
                         "maximum": 10,
                     },
@@ -1060,7 +1078,9 @@ RAMAN_TOOLS = [
                                         "memory for this conversation."),
                     },
                 },
-                "required": [],
+                # poly_order 만 필수다 — 이 도구에서 '판단'에 해당하는 유일한 인자이고,
+                # 선택으로 두면 모델이 생략해 코드 기본값이 대신 결정해 버린다(2026-07-31).
+                "required": ["poly_order"],
             },
         },
     },
@@ -1228,8 +1248,8 @@ RAMAN_TOOLS = [
             "name": "web_search",
             "description": (
                 "Search the external web and fetch the top results (title, URL, summary). Use it to find recent/specialist information "
-                "(literature, recommended parameter values, methodology, etc.) that internal knowledge/KB (search_kb) cannot answer. "
-                "It is recommended to first check local knowledge with search_kb and use this tool for external search when that is insufficient. "
+                "(literature, recommended parameter values, methodology, etc.) that internal knowledge/KB (search_knowledge_base) cannot answer. "
+                "It is recommended to first check local knowledge with search_knowledge_base and use this tool for external search when that is insufficient. "
                 "If there is no internet it returns a failure, in which case decide from local knowledge."
             ),
             "parameters": {
