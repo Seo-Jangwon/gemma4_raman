@@ -1,0 +1,83 @@
+{
+  "task": "T095",
+  "axis": "data processing",
+  "mode": "live",
+  "score": 2.0,
+  "score_max": 2,
+  "fraction": 1.0,
+  "passed": 2,
+  "checks_total": 2,
+  "question": "Normalize T095.csv to L2 norm 1 and report its peaks (prominence 5% of range).",
+  "criteria": "ARRAY(rtol 1e-6) + SET(peak ±3 cm-1)",
+  "checks": [
+    {
+      "name": "peak positions",
+      "passed": true,
+      "score": 1.0,
+      "detail": "9/9 matched (submitted 9) [620.0, 795.0, 1001.0, 1031.0, 1155.0, 1184.0]... vs [620.0, 795.0, 1001.0, 1031.0, 1155.0, 1184.0]...",
+      "weight": 1.0,
+      "kind": "SET",
+      "points_lost": 0.0
+    },
+    {
+      "name": "result array",
+      "passed": true,
+      "score": 1.0,
+      "detail": "max deviation=4.967e-09 (tolerance 3.16e-07)",
+      "weight": 2.0,
+      "kind": "ARRAY",
+      "points_lost": 0.0
+    }
+  ],
+  "why_wrong": [],
+  "blocked": [],
+  "no_checks": false,
+  "input_files": [
+    "T095.csv"
+  ],
+  "answer_text": "The spectrum from `T095.csv` was normalized using the L2 norm ($\\|y\\|_2 = 1$). The prominence threshold for peak detection was set to 5% of the resulting intensity range (approximately $0.0161$). \n\nNine peaks were identified at the following positions: 620, 795, 1001, 1031, 1155, 1184, 1450, 1583, and 1602 $\\text{cm}^{-1}$.\n\n```json\n{\"peaks\": [620.0, 795.0, 1001.0, 1031.0, 1155.0, 1184.0, 1450.0, 1583.0, 1602.0]}\n```",
+  "answer_json": {
+    "peaks": [
+      620.0,
+      795.0,
+      1001.0,
+      1031.0,
+      1155.0,
+      1184.0,
+      1450.0,
+      1583.0,
+      1602.0
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-03/T095.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\nimport matplotlib.pyplot as plt\n\n# Load data from attached file\nfile_id = '2026-08-03/T095.csv'\ndata = files[0] # Since only one file is loaded\nx = data['table']['raman_shift_cm-1']\ny = data['table']['intensity']\n\n# L2 Normalization: ||y||_2 = 1\nnorm_factor = np.linalg.norm(y)\ny_norm = y / norm_factor\n\n# Prominence threshold: 5% of range (max - min)\nint_range = np.max(y_norm) - np.min(y_norm)\nprominence_thresh = 0.05 * int_range\n\npeaks, properties = find_peaks(y_norm, prominence=prominence_thresh)\npeak_shifts = x[peaks]\n\nprint(f\"L2 Norm factor: {norm_factor:.4f}\")\nprint(f\"Normalized intensity range: {int_range:.4f}\")\nprint(f\"Prominence threshold: {prominence_thresh:.4f}\")\nprint(f\"Found {len(peaks)} peaks at shifts: {peak_shifts}\")\n\n# Plotting for verification (though I can't see it, it's good practice)\nplt.figure(figsize=(10, 6))\nplt.plot(x, y_norm, label='L2 Normalized')\nplt.plot(peak_shifts, y_norm[peaks], 'ro', label='Detected Peaks')\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Normalized Intensity')\nplt.title('L2 Normalized Spectrum and Detected Peaks')\nplt.legend()\nplt.grid(True)\nplt.savefig('T095_normalized_peaks.png')\n\n# Save the result\nsave_result('T095_l2_norm', y_norm, raman_shift=x)\n",
+        "file_ids": [
+          "2026-08-03/T095.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-03_AILA_AILA_T095_ebcdd8/spectra/01_T095_l2_norm.csv",
+    "/api/results/2026-08-03/bench_2026-08-03_AILA_AILA_T095_ebcdd8/fig212030_216_0.png"
+  ],
+  "session_id": "bench_2026-08-03_AILA_AILA_T095_ebcdd8",
+  "elapsed_s": 42.28,
+  "errors": []
+}
