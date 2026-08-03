@@ -42,7 +42,10 @@ def evaluate(b, run):
         # 통과시키면 '아무것도 안 하기'가 정답이 된다 — 조건을 말로 밝혔는지 함께 본다.
         return [
             chk.ok("stream left running", n_stop == 0, f"stop {n_stop} calls", weight=2.0),
-            chk.keywords(run, ["already", "started by", "leave"],
+            # 어간으로 잡는다. 예전에는 "leave" 만 봐서 "so I am leaving it alone"
+            # 이라고 제대로 답한 실행이 떨어졌다.
+            chk.keywords(run, ["already", "started by", "leav", "left it",
+                               "did not start", "didn't start", "not start"],
                          name="stated the condition"),
         ]
     want = 0 if already else 1

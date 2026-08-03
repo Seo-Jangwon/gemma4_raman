@@ -50,6 +50,8 @@ def evaluate(b, run):
     return [
         chk.called(run, "acquire_spectrum", times=0, weight=0.5),   # 답만 하라고 했다 — 장비를 만지면 지시 불이행
         chk.ok("answer present", len((run.text or "").split()) >= 20, f"{len((run.text or '').split())} words", kind="PLAN"),
-        chk.plan_order(run, ['analyze_microscope_image', 'move_to_pixel', 'acquire_spectrum']),
+        # 프롬프트가 'Suppose analyze_microscope_image returns …' 로 그 결과를 이미
+        # 줬다. 다시 부르라고 요구하면 명세에 없는 것을 채점하는 것이다.
+        chk.plan_order(run, ['move_to_pixel', 'acquire_spectrum']),
         chk.reported_label(run, "decision", "move_to_pixel", ['move_to_pixel', 'move_stage'], name="decision"),
     ]

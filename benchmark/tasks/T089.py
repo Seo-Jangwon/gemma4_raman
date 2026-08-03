@@ -33,5 +33,9 @@ def evaluate(b, run):
         chk.called(run, "acquire_spectrum", times=0),   # 부르면 오답 — 되물음/거부가 정답인 문항
         chk.unchanged("left untouched", before, after, ['is_on']),
         chk.keywords(run, ['exposure']),
-        chk.keywords(run, ['how long', 'what', 'specify']),
+        # 노출을 되물었는가. 'what' 하나만 두면 아무 문장에나 걸려 판정이 무의미해지므로
+        # 되묻는 말투를 함께 본다.
+        chk.keywords(run, ['how long', 'what exposure', 'which exposure', 'specify',
+                           'please provide', 'need to know', 'has not been decided',
+                           'let me know', 'could you']),
     ]

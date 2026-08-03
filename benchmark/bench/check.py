@@ -25,6 +25,12 @@ TOL_MM = 1e-4          # 스테이지 좌표(장비 되읽기 정밀도)
 TOL_GRID_MM = 1e-3     # 격자 좌표
 TOL_PEAK_CM1 = 3.0     # 피크 위치
 TOL_REL = 0.05         # 스칼라 상대오차
+
+# 노출 시간(초). 장비가 자기 클럭 단위로 양자화하므로 되읽기가 건 값과 정확히 같지 않다
+# — 1.0 s 를 걸면 1.00002 s 가 돌아온다(2026-08-03 실측). 예전에는 tol=1e-6 을 요구해
+# **정확히 맞게 건 실행이 확정 실패**했다(T016 은 판정이 하나뿐이라 통째로 0 점).
+# 관측된 오차의 50 배로 잡되, 뜻이 다른 설정(0.5 vs 1.0 s)은 여전히 걸러낼 만큼 좁게 둔다.
+TOL_EXPOSURE_S = 1e-3
 ARRAY_COS = 0.99       # 배열 유사도 하한
 ARRAY_NRMSE = 0.02     # 배열 정규화 RMSE 상한
 ARRAY_RTOL = 1e-6      # 결정적 변환(구현이 유일한 것)
@@ -141,6 +147,13 @@ class chk:
     def state(name, st, key, want, tol=None, weight=1.0) -> Check:
         got = (st or {}).get(key)
         if got is None:
+            # 장비를 못 읽어서 없는 것과 에이전트가 잘못해서 없는 것은 다르다.
+            # snapshot() 이 읽기 실패 사유를 실어 보내면(_unreadable) 그건 '채점 불가'다 —
+            # 오답으로 기록하면 장비 사고가 에이전트 실력이 된다.
+            why = (st or {}).get("_unreadable")
+            if why:
+                return chk.blocked(name, f"state {key} could not be read - "
+                                         f"{'; '.join(why)[:160]}", weight)
             return _mk(name, False, f"state {key} could not be read", weight, "STATE")
         if isinstance(want, (bool, str)):
             ok = _norm(got) == _norm(want)
@@ -369,20 +382,33 @@ class chk:
         완전일치를 요구하지 않는 이유: 계획을 말로 풀게 하면 확인 단계를 끼워 넣는 것이
         오히려 정상이다. 벌하면 실력이 아니라 문체를 재게 된다. 순서는 봐준다 —
         preview 가 run 뒤에 오면 그건 문체가 아니라 오답이다.
+
+        [빠진 단계가 뒤까지 죽이던 버그 — 2026-08-03]
+        예전에는 want 의 한 단계를 못 찾으면 포인터 i 가 got 의 끝까지 밀려, **그 뒤의
+        단계는 전부 자동 실패**했다. T063 은 계획이 정확히 [move_to_pixel,
+        run_autofocus, acquire_spectrum] 인데 want 의 첫 단계(analyze_microscope_image)
+        가 없다는 이유로 0/3 이 됐다. 못 찾은 단계는 건너뛰고 포인터는 그대로 둔다 —
+        그래야 '순서가 틀렸다'와 '하나가 빠졌다'가 구분된다.
         """
         got = run.plan()
         if not got:
             return _mk("plan order", False, f"no plan (expected {want})", weight, "PLAN")
         g, w = [_norm(x) for x in got], [_norm(x) for x in want]
-        i = hit = 0
+        i, hit, missing = 0, 0, []
         for step in w:
-            while i < len(g) and g[i] != step:
-                i += 1
-            if i < len(g):
+            j = i
+            while j < len(g) and g[j] != step:
+                j += 1
+            if j < len(g):
                 hit += 1
-                i += 1
+                i = j + 1          # 찾았을 때만 포인터를 옮긴다
+            else:
+                missing.append(step)
+        detail = f"{hit}/{len(w)} in order {_short(got, 8)}"
+        if missing:
+            detail += f"  missing {missing}"
         return Check("plan order", hit == len(w), hit / len(w) if w else 0.0,
-                     f"{hit}/{len(w)} in order {_short(got, 8)}", weight, "PLAN")
+                     detail, weight, "PLAN")
 
 
 # ── 내부 헬퍼 ────────────────────────────────────────────────────────────────

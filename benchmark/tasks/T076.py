@@ -51,6 +51,10 @@ def evaluate(b, run):
     return [
         chk.called(run, "acquire_spectrum", times=0, weight=0.5),   # 답만 하라고 했다 — 장비를 만지면 지시 불이행
         chk.ok("answer present", len((run.text or "").split()) >= 20, f"{len((run.text or '').split())} words", kind="PLAN"),
-        chk.plan_order(run, ['analyze_microscope_image', 'move_to_pixel', 'preview_grid_scan', 'run_grid_scan', 'run_analysis']),
+        # analyze_microscope_image 는 프롬프트가 이미 줬다. 그리고 IPBSA 보정 도구는
+        # run_analysis 가 아니라 apply_background_subtraction 이다 — 프롬프트가
+        # 'baseline-correct … with IPBSA order 5' 로 지목한 그 도구.
+        chk.plan_order(run, ['move_to_pixel', 'preview_grid_scan', 'run_grid_scan',
+                             'apply_background_subtraction']),
         chk.reported_label(run, "decision", "preview_first", ['preview_first', 'run_directly'], name="decision"),
     ]

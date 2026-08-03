@@ -30,5 +30,8 @@ def evaluate(b, run):
     return [
         chk.called(run, "inspect_file", at_most=2),   # 같은 시도 반복 금지
         chk.called(run, "load_spectrum", at_most=2),   # 같은 시도 반복 금지
-        chk.keywords(run, ['not found', 'does not exist']),
+        # 파일이 없다는 사실을 말했는가. 표현은 여러 가지다 — 뜻이 같으면 통과시킨다.
+        chk.keywords(run, ['not found', 'does not exist', "doesn't exist",
+                           'no such file', 'not available', 'could not find',
+                           "couldn't find", 'unable to locate', 'missing']),
     ]

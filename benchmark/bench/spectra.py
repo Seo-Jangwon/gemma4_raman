@@ -132,12 +132,23 @@ def snr(x, y):
     return v if np.isfinite(v) else None
 
 
+# 라만 밴드가 존재할 수 있는 하한(cm-1). 이 장비의 파수축은 -225 cm-1 부터 시작하는데
+# 그 아래쪽은 레일리 산란의 꼬리와 잡음이라 '피크'가 아니다. 예전에는 축 전체에서
+# find_peaks 를 돌려 T059 의 post-hoc GT 가 -219, -207, -197 … 을 정답 피크로 잡았고,
+# 에이전트가 진짜 라만 밴드를 정확히 보고해도 그 GT 와 안 맞아 떨어졌다.
+# 이 벤치의 어떤 문항도 100 cm-1 아래를 정답으로 쓰지 않는다(최저가 실리콘 520.7).
+PEAK_MIN_CM1 = 100.0
+
+
 def peaks(x, y):
-    """규약대로 검출한 피크 **위치**(cm-1). scipy 는 인덱스를 주므로 여기서 변환한다."""
+    """규약대로 검출한 피크 **위치**(cm-1). scipy 는 인덱스를 주므로 여기서 변환한다.
+
+    PEAK_MIN_CM1 아래는 버린다 — 물리적으로 라만 밴드가 아니다.
+    """
     from scipy.signal import find_peaks
     prom = (float(np.max(y)) - float(np.min(y))) * PEAK_PROMINENCE_FRAC
     idx, _ = find_peaks(y, prominence=prom)
-    return [float(x[i]) for i in idx]
+    return [float(x[i]) for i in idx if float(x[i]) >= PEAK_MIN_CM1]
 
 
 def strongest_peak(x, y):

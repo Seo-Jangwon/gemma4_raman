@@ -41,7 +41,7 @@ def evaluate(b, run):
         chk.arg(run, "run_grid_scan", "rows", 5),
         chk.arg(run, "run_grid_scan", "cols", 5),
         chk.arg(run, "run_grid_scan", "autofocus", "each"),
-        chk.order(run, "preview_grid_scan", "run_grid_scan"),
+        # 승인 절차는 여기서 요구하지 않는다 — 이유는 T028 주석 참고. N01 이 잰다.
     ]
     cx = (run.args("run_grid_scan", "center_x") or [None])[0]
     cy = (run.args("run_grid_scan", "center_y") or [None])[0]

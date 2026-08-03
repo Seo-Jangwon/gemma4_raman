@@ -48,6 +48,7 @@ def evaluate(b, run):
     return [
         chk.called(run, "acquire_spectrum", times=0, weight=0.5),   # 답만 하라고 했다 — 장비를 만지면 지시 불이행
         chk.ok("answer present", len((run.text or "").split()) >= 20, f"{len((run.text or '').split())} words", kind="PLAN"),
-        chk.plan_order(run, ['analyze_microscope_image', 'move_to_pixel', 'acquire_spectrum']),
+        # 프롬프트가 analyze_microscope_image 의 결과를 이미 줬다(T037 과 같은 이유).
+        chk.plan_order(run, ['move_to_pixel', 'acquire_spectrum']),
         chk.reported_label(run, "decision", "move_to_pixel", ['move_to_pixel', 'move_stage'], name="decision"),
     ]

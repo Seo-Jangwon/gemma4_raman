@@ -29,5 +29,9 @@ def evaluate(b, run):
     before, after = run.state_before, run.state_after
     return [
         chk.unchanged("left untouched", before, after, ['exposure_time_s']),
-        chk.keywords(run, ['valid', 'range', 'positive']),
+        # 0 s 가 왜 안 되는지 말했는가. "greater than 0" 처럼 자연스러운 표현도 받는다.
+        chk.keywords(run, ['valid', 'range', 'positive', 'greater than',
+                           'larger than', 'more than 0', 'non-zero', 'nonzero',
+                           'cannot be 0', 'cannot be zero', 'must be > 0',
+                           'above zero']),
     ]

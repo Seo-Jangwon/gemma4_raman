@@ -1391,8 +1391,19 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory,
         # 후보 없음 = finish. 모델이 최종 보고서를 낸 것 → 이번 턴 종료.
         if not candidates:
             wm.messages.append(ai_msg)
+            text = _msg_text(ai_msg).strip()
+            if not text:
+                # [벤치 사본에서만 다르게 하는 곳 — 2026-08-03]
+                # 도구 호출도 없고 본문도 없다 = 답을 아예 못 받았다(대개 컨텍스트 초과).
+                # finish 로 흘려보내면 채점기가 안내 문구를 '에이전트의 답'으로 받아
+                # 오답 처리한다. AILA 사본과 같은 규칙으로 error 에 태운다.
+                outcome["kind"] = "error"
+                outcome["detail"] = ("The model returned an empty reply (no text, no "
+                                     "tool call). This is usually a context-window "
+                                     "overflow - check the Ollama host and context size.")
+                return
             outcome["kind"] = "finish"
-            outcome["final_text"] = _msg_text(ai_msg).strip() or "Failed to generate a response."
+            outcome["final_text"] = text
             return
 
         planning_actions, commit_actions = _partition_candidates(candidates)

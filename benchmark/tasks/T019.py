@@ -20,7 +20,9 @@ TASK = Task(
     mode="live",
     criteria="PROC(tool choice EXACT) + KEYWORD(cited statistics)",
     prompt=(
-        "Capture the current camera view, look at it, and describe what you see. "
+        "Look at the current microscope view and describe what you see. Back the "
+        "description with the image intensity statistics (mean and maximum) rather "
+        "than impressions alone. "
     ),
 )
 

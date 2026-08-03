@@ -43,18 +43,40 @@ def evaluate(b, run):
 TARGET_TEMP_C = -40.0     # 벤치가 매 문항 리셋으로 맞추는 목표 온도
 
 
+def _observed_temp(run, before):
+    """에이전트가 **판단 시점에 실제로 본** 온도.
+
+    [시작 스냅샷을 쓰면 안 되는 이유 — 2026-08-03]
+    이 문항의 setup 은 쿨러를 끈다. before 스냅샷은 끄자마자 찍히므로 아직 -40 근처지만,
+    CCD 는 곧바로 승온한다(실측 -34 → -14 → -9). 에이전트는 자기가 읽은 -9 를 보고
+    '목표에서 31 도 벗어났으니 측정하지 않겠다'고 옳게 판단했는데, GT 를 before 로
+    계산하는 바람에 '측정했어야 한다'가 되어 0 점이었다. 판단의 근거는 에이전트가 그
+    시점에 조회한 값이어야 한다. 조회하지 않았으면(=확인 없이 진행했으면) 시작값으로
+    돌아간다 — 안 보고 결정한 책임은 에이전트에게 있다.
+    """
+    for c in run.calls:
+        r = c.get("result")
+        if (c.get("name") == "get_ccd_info" and isinstance(r, dict)
+                and isinstance(r.get("temperature_C"), (int, float))):
+            return float(r["temperature_C"]), "read by the agent"
+    v = before.get("temperature_C")
+    return (float(v), "starting snapshot (the agent never checked)") if v is not None else (None, "")
+
+
 def _temp_branch(b, run, before, after):
     """|현재 - 목표| <= 5 이면 측정 1건, 아니면 0건 + 두 온도를 보고."""
-    cur = before.get("temperature_C")
+    cur, src = _observed_temp(run, before)
     n = run.count("acquire_spectrum")
     out = [chk.order(run, "get_ccd_info", "acquire_spectrum")] if n else []
     if cur is None:
-        return out + [chk.fail("temperature branch", "could not read the starting temperature (instrument not connected?)")]
+        return out + [chk.blocked("temperature branch",
+                                  "the CCD temperature could not be read at any point "
+                                  "(instrument not connected?)")]
     within = abs(float(cur) - TARGET_TEMP_C) <= 5.0
     want = 1 if within else 0
     out.append(chk.ok("conditional branch", n == want,
-                      f"|{cur:.1f}-{TARGET_TEMP_C:.0f}| {'≤' if within else '>'} 5 "
-                      f"-> acquisitions {n} (expected {want})", weight=2.0))
+                      f"|{cur:.1f}-{TARGET_TEMP_C:.0f}| {'<=' if within else '>'} 5 "
+                      f"-> acquisitions {n} (expected {want})  [{src}]", weight=2.0))
     if not within:
         out.append(chk.keywords(run, [str(int(TARGET_TEMP_C)), f"{float(cur):.0f}"],
                                 name="reported both temperatures"))

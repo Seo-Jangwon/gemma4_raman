@@ -11,7 +11,7 @@
   하면 감점(중복).
 """
 from bench import Task, chk
-from bench.check import MM, MM_GRID, TOL_PEAK_CM1        # noqa: F401
+from bench.check import MM, MM_GRID, TOL_EXPOSURE_S, TOL_PEAK_CM1   # noqa: F401
 from bench import spectra as sp                          # noqa: F401
 import numpy as np                                       # noqa: F401
 
@@ -39,7 +39,8 @@ def evaluate(b, run):
                  for c in run.calls)
     return [
         chk.called(run, "acquire_spectrum", times=1),
-        chk.near("exposure read-back", got_e, 1.0, tol=1e-6),
+        # 노출은 장비가 양자화한다 — T016 과 같은 허용오차를 쓴다.
+        chk.near("exposure read-back", got_e, 1.0, tol=TOL_EXPOSURE_S),
         chk.near("power read-back", got_p, 15.0, rel=0.02),
         # 사전 설정과 인자를 겹쳐 쓰면 어느 쪽이 적용됐는지 알 수 없다.
         chk.ok("no redundant setting", not (n_pre >= 2 and inline),

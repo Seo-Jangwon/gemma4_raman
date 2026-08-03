@@ -35,6 +35,8 @@ def evaluate(b, run):
         chk.called(run, "move_stage", times=0),   # 부르면 오답 — 되물음/거부가 정답인 문항
         chk.called(run, "move_stage_relative", times=0),   # 부르면 오답 — 되물음/거부가 정답인 문항
         chk.unchanged("left untouched", before, after, ['x', 'y', 'z']),
-        chk.keywords(run, ['0, 0', '(0,0)', 'minimum']),
+        # 두 원점 후보 중 '최소 좌표' 쪽을 언급했는가.
+        chk.keywords(run, ['0, 0', '0,0', '(0, 0)', '(0,0)', 'minimum',
+                           'min-coordinate', 'minimum-coordinate']),
         chk.keywords(run, ['cent']),
     ]

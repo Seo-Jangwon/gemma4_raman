@@ -750,6 +750,19 @@ def _bench_event(ev: dict) -> dict:
     return {"type": t or "message"}
 
 
+# 벤치 이벤트에 실을 배열의 최대 길이.
+#
+# 예전 값은 256 이었다. 검출기가 1024 px 라 스펙트럼 배열이 늘 잘렸고, 잘린 자리에는
+# "...<768 more>" 라는 표식 문자열이 들어갔다. N07 은 그 표식을 float() 로 바꾸다
+# ValueError 로 죽었는데, 채점기 예외는 이미 통과한 판정까지 통째로 지우므로 3 점이
+# 0 점이 됐다(2026-08-03).
+#
+# 이 경로는 **채점용 채널**이라 올려도 부담이 없다: 결과 파일(<문항>.json)에는 도구의
+# name/args/ok 만 남고 result 는 안 실린다(report.score_task 참고). 커지는 것은 실행
+# 중 메모리뿐이다. 1024 px 프레임을 온전히 담고도 남게 잡는다.
+_BENCH_ARRAY_LIMIT = 4096
+
+
 def _slim_json(v, depth=0):
     if depth > 5:
         return "..."
@@ -757,9 +770,9 @@ def _slim_json(v, depth=0):
         return {k: ("<base64>" if k == "image_base64" else _slim_json(x, depth + 1))
                 for k, x in v.items()}
     if isinstance(v, (list, tuple)):
-        # 스펙트럼 배열은 그대로 두면 한 이벤트가 수십 KB 다. 채점은 저장 파일로 한다.
-        return ([_slim_json(x, depth + 1) for x in v[:256]] +
-                ([f"...<{len(v)-256} more>"] if len(v) > 256 else []))
+        n = _BENCH_ARRAY_LIMIT
+        return ([_slim_json(x, depth + 1) for x in v[:n]] +
+                ([f"...<{len(v)-n} more>"] if len(v) > n else []))
     if isinstance(v, str) and len(v) > 4000:
         return v[:4000] + "...<잘림>"
     if isinstance(v, (int, float, bool)) or v is None:

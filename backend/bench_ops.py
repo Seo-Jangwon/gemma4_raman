@@ -274,8 +274,17 @@ def call_tool(tool: str, args: dict) -> dict:
 
 
 def snapshot() -> dict:
-    """채점에 쓰는 최소 상태. 장비가 없으면 빈 dict(예외로 죽지 않는다)."""
+    """채점에 쓰는 최소 상태. 장비가 없으면 빈 dict(예외로 죽지 않는다).
+
+    [못 읽은 이유를 남기는 까닭 — 2026-08-03]
+    예전에는 도구가 ok=false 를 주거나 예외를 던지면 그 키 묶음을 통째로 조용히 버렸다.
+    그러면 채점기 쪽에서는 '에이전트가 그 값을 잘못 만들었다'와 '장비를 못 읽었다'가
+    똑같이 키 없음으로 보인다. 실제로 N10 이 그 사고로 감점됐다 — read_mode 는 드라이버가
+    항상 문자열을 주는 값이라 에이전트가 어떻게 해도 사라질 수 없는데도.
+    사유를 _unreadable 에 실어 보내면 chk.state 가 '오답'이 아니라 '채점 불가'로 뺀다.
+    """
     st = {}
+    unreadable: list[str] = []
     for fn, keys in (
         (T.get_stage_position, ("x", "y", "z")),
         (T.get_laser_status, ("is_on", "power_percent", "power_armed", "beam_if_turned_on",
@@ -294,8 +303,10 @@ def snapshot() -> dict:
             r = fn()
             if r.get("ok"):
                 st.update({k: r.get(k) for k in keys if r.get(k) is not None})
-        except Exception:
-            pass
+            else:
+                unreadable.append(f"{fn.__name__}: {r.get('error') or 'ok=false'}")
+        except Exception as e:
+            unreadable.append(f"{fn.__name__}: {type(e).__name__}: {e}")
 
     # ND 에 걸린 설정값. 무장 해제(가이드빔) 상태에서 get_laser_status 는 power_percent 를
     # None 으로 주고 마지막 값을 last_requested_power_percent 로 옮긴다. 리셋이 매 문항
@@ -304,6 +315,8 @@ def snapshot() -> dict:
     if "power_percent" in st or "last_requested_power_percent" in st:
         st["power_setpoint_pct"] = st.get("power_percent",
                                           st.get("last_requested_power_percent"))
+    if unreadable:
+        st["_unreadable"] = unreadable
     return st
 
 

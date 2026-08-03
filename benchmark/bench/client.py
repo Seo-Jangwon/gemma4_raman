@@ -130,16 +130,25 @@ class Run:
     def positions(self) -> list[tuple]:
         """이동 호출이 실제로 도달한 좌표들(순서대로).
 
-        move_stage / move_stage_relative 의 응답에 x,y,z 가 실려 온다. 확인용
-        get_stage_position 은 세지 않는다 — 그건 '들른 자리'가 아니라 '본 것'이다.
+        확인용 get_stage_position 은 세지 않는다 — 그건 '들른 자리'가 아니라 '본 것'이다.
+
+        [좌표가 어디 실려 오는가 — 2026-08-03]
+        raman_tools.move_stage 는 {"ok": True, "position": {"x":…, "y":…, "z":…}} 를
+        돌려준다. 여기서는 최상위 r["x"] 만 찾고 있었고, 그래서 이 함수는 **어떤 실행에서도
+        빈 목록**이었다. 좌표로 채점하는 T029·T033·T066·T074 는 에이전트가 무엇을 하든
+        0 점이 확정돼 있었다(실제로 T029 는 6 개 좌표를 정확히 찍고도 0 점).
+        중첩·평면 두 모양을 다 받는다 — 도구가 어느 쪽으로 바뀌어도 안 깨지게.
         """
         out = []
         for c in self.calls:
             if c.get("name") not in ("move_stage", "move_stage_relative", "move_to_pixel"):
                 continue
             r = c.get("result")
-            if isinstance(r, dict) and _is_num(r.get("x")) and _is_num(r.get("y")):
-                out.append((float(r["x"]), float(r["y"]), _f(r.get("z"))))
+            if not isinstance(r, dict):
+                continue
+            p = r.get("position") if isinstance(r.get("position"), dict) else r
+            if _is_num(p.get("x")) and _is_num(p.get("y")):
+                out.append((float(p["x"]), float(p["y"]), _f(p.get("z"))))
         return out
 
     # ── 답변 ─────────────────────────────────────────────────────────────────

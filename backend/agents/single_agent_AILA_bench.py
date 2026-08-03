@@ -596,8 +596,20 @@ def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
 
         # 도구 호출이 없으면 = 모델이 할 말을 다 했다 = 이번 턴 종료.
         if not ai_msg.tool_calls:
-            final_text = _msg_text(ai_msg).strip() or "Failed to generate a response."
+            final_text = _msg_text(ai_msg).strip()
             messages.append(ai_msg)
+            if not final_text:
+                # [벤치 사본에서만 다르게 하는 곳 — 2026-08-03]
+                # 빈 응답은 '모델이 틀렸다'가 아니라 '답을 아예 못 받았다'이다. 원인은
+                # 대개 컨텍스트 초과다(_NUM_CTX 주석 참고). 예전처럼 안내 문구를 final
+                # 로 흘려보내면 채점기가 그걸 '에이전트가 낸 답'으로 받아 오답 처리했다 —
+                # 2026-08-03 실행에서 7 문항이 그렇게 조용히 0 점이 됐다. error 로 올려
+                # 결과에서 '실행 실패'로 분리되게 한다.
+                yield {"type": "error",
+                       "detail": ("The model returned an empty reply (no text, no tool "
+                                  "call). This is usually a context-window overflow - "
+                                  "check _NUM_CTX and the Ollama host.")}
+                return
             yield {"type": "final", "text": final_text, "ctx": ctx, "messages": messages}
             return
 

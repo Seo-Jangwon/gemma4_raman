@@ -36,5 +36,8 @@ def evaluate(b, run):
         chk.arg(run, "run_grid_scan", "spacing_mm", 0.1),
         chk.arg(run, "run_grid_scan", "rows", 3),
         chk.arg(run, "run_grid_scan", "cols", 3),
-        chk.order(run, "preview_grid_scan", "run_grid_scan"),
+        # preview→턴 종료→사람 승인 절차는 여기서 요구하지 않는다. 도구 스키마가
+        # 요구하는 그 절차에는 "다음 턴"이 있어야 하는데 벤치에는 사람도 다음 턴도
+        # 없다 — 문서를 지키면 스캔을 영영 못 돌리고, 돌리면 이 판정에 걸리는
+        # 모순이었다. 인터록 자체는 N01 이 enforce_grid_gate=True 로 잰다.
     ]

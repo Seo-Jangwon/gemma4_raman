@@ -55,11 +55,27 @@ def evaluate(b, run):
     ]
 
 
+def _nums(v):
+    """숫자만 남긴 배열.
+
+    [문자열이 섞여 오는 이유 — 2026-08-03]
+    서버가 이벤트를 남기기 전에 긴 배열을 자른다(server._slim_json). 256 개를 넘으면
+    앞 256 개 뒤에 "...<768 more>" 라는 **표식 문자열**을 하나 붙인다. 예전에는 그걸
+    그대로 np.asarray(..., float) 에 넣어 ValueError 로 죽었고, 채점기 예외는 이미
+    통과한 판정까지 통째로 지워 3 점이 0 점이 됐다. 표식은 버리고 숫자만 쓴다.
+    """
+    out = []
+    for item in (v or []):
+        if isinstance(item, (int, float)) and not isinstance(item, bool):
+            out.append(float(item))
+    return np.asarray(out, float)
+
+
 def _frames(run):
     """kinetic 응답의 프레임 배열들. 없으면 None."""
     for c in run.calls:
         r = c.get("result")
         if isinstance(r, dict) and isinstance(r.get("frames"), list) and r["frames"]:
-            return [np.asarray(f.get("intensity") if isinstance(f, dict) else f, float)
+            return [_nums(f.get("intensity") if isinstance(f, dict) else f)
                     for f in r["frames"]]
     return None

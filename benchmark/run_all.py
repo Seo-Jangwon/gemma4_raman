@@ -287,9 +287,11 @@ def main() -> int:
         b.reset()
         R.write_eval(out, task.id, payload)
         results.append(payload)
-        print(f" {payload['score']:.1f}/{payload['score_max']:g}점  "
-              f"({payload['passed']}/{payload['checks_total']} 판정)"
-              f"{'  !' + payload['errors'][0][:36] if payload['errors'] else ''}")
+        MARK = {"pass": "O 맞음", "fail": "X 틀림",
+                "blocked": "- 채점제외", "error": "! 실행실패"}
+        print(f" {MARK.get(payload['result'], payload['result']):9s}"
+              f" ({payload['checks_passed']}/{payload['checks_total']} 판정)"
+              f"{'  ' + payload['reason'][:44] if payload['reason'] else ''}")
 
     summary = R.summarize(results, all_tasks,
                           meta={"agent": args.agent, "run_id": run_id,
@@ -298,9 +300,11 @@ def main() -> int:
                                 "memory_scope": pf.get("memory_scope", "?")})
     (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2),
                                       encoding="utf-8")
+    md = R.write_markdown(out, summary)
     print()
     R.print_summary(summary)
     print(f"→ {out / 'summary.json'}")
+    print(f"→ {md}")
     return 0
 
 
