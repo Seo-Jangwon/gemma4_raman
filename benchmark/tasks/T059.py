@@ -26,6 +26,11 @@ TASK = Task(
         "Perform autofocus, measure a spectrum once, apply IPBSA baseline correction with "
         "order 5, and report the peaks found (prominence 5% of range). "
     ),
+    answer_keys=[
+        ("peaks",
+         "list of numbers - peak positions in cm-1 after the baseline correction, "
+         "ascending"),
+    ],
 )
 
 

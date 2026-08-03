@@ -26,6 +26,11 @@ TASK = Task(
         "remove them by linear interpolation and then report the major peaks again "
         "(prominence 5% of range). "
     ),
+    answer_keys=[
+        ("peaks",
+         "list of numbers - peak positions in cm-1 after spike removal, ascending. "
+         "Numbers only, not objects"),
+    ],
 )
 
 

@@ -25,6 +25,11 @@ TASK = Task(
         "Identify the material of T117.csv against reference_library.csv, which includes PET "
         "and PMMA references. "
     ),
+    answer_keys=[
+        ("material",
+         'string - one of "polystyrene", "PET", "PMMA", "calcite", "aragonite", '
+         '"silicon"'),
+    ],
 )
 
 

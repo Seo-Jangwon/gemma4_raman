@@ -26,6 +26,9 @@ TASK = Task(
         "each SNR with the T050 definition and report the difference (2.0 s value minus 0.5 "
         "s value). "
     ),
+    answer_keys=[
+        ("snr_diff", "number - SNR at 2.0 s minus SNR at 0.5 s"),
+    ],
 )
 
 

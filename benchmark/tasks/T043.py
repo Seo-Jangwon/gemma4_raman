@@ -26,6 +26,11 @@ TASK = Task(
         "with prominence set to 5% of the intensity range, and report the 7 largest by "
         "prominence in ascending order of position, with their intensities. "
     ),
+    answer_keys=[
+        ("peaks",
+         "list of 7 numbers - peak positions in cm-1, ascending. Numbers only, not "
+         "objects"),
+    ],
 )
 
 

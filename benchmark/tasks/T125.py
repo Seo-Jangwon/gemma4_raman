@@ -25,6 +25,11 @@ TASK = Task(
         "Report the material in reference_library.csv most similar to T125.csv, and present "
         "at least two basis peaks that distinguish it from the second-ranked candidate. "
     ),
+    answer_keys=[
+        ("material",
+         'string - one of "polystyrene", "PET", "PMMA", "calcite", "aragonite", '
+         '"silicon"'),
+    ],
 )
 
 

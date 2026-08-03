@@ -24,6 +24,11 @@ TASK = Task(
         "Identify the material of each of T126_1.csv through T126_5.csv against "
         "reference_library.csv, and report them in that order. "
     ),
+    answer_keys=[
+        ("materials",
+         "list of 5 strings - the material of T126_1.csv through T126_5.csv, in "
+         "that order"),
+    ],
 )
 
 

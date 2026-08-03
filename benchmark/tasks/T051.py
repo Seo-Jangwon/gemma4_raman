@@ -27,6 +27,11 @@ TASK = Task(
         "each position take the intensity of the sample nearest to 1000 cm-1 and save a "
         "spatial heatmap. "
     ),
+    answer_keys=[
+        ("heatmap",
+         "list of 3 lists of 3 numbers - rows are X = 37.8, 37.9, 38.0 and columns "
+         "are Y = 25.2, 25.3, 25.4, both ascending"),
+    ],
 )
 
 

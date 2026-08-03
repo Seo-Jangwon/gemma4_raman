@@ -31,13 +31,13 @@ TASK = Task(
     ),
     prompt=(
         "Suppose a spectrum shows a strong broad component unrelated to the sample and you "
-        "suspect room light entering the spectrometer. State the tools you would call, in "
-        "order, to quantify the external-light contribution, and state the subtraction you "
-        "would perform. decision must be one of: normal_minus_dark, dark_minus_normal. Do "
-        "not operate the instrument for this question — answer only. End your reply with a "
-        "single ```json block of exactly this shape: {\"plan\": [\"<tool name>\", ...], "
-        "\"decision\": \"<one of the listed values>\", \"rationale\": \"<one sentence>\"} "
+        "suspect room light entering the spectrometer. State the tools you would call, in order, "
+        "to quantify the external-light contribution, and state the subtraction you would "
+        "perform. Do not operate the instrument for this question — answer only. "
     ),
+    answer_keys=[
+        ("external_fraction", "number - the stray-light fraction, 0 to 1"),
+    ],
 )
 
 

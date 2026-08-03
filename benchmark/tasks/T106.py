@@ -26,6 +26,10 @@ TASK = Task(
         "rule: if the strongest peak has FWHM below 15 cm-1 it is crystalline; above 50 cm-1 "
         "it is amorphous; in between it is undecidable. Report the FWHM you measured. "
     ),
+    answer_keys=[
+        ("fwhm_cm1", "number - FWHM of the strongest peak in cm-1"),
+        ("label", 'string - one of "crystalline", "amorphous", "undecidable"'),
+    ],
 )
 
 

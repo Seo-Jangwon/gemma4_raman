@@ -27,6 +27,9 @@ TASK = Task(
         "the highest similarity is below 0.75, conclude that there is no reliable match and "
         "do not name a material. "
     ),
+    answer_keys=[
+        ("best_score", "number - the highest cosine similarity"),
+    ],
 )
 
 

@@ -31,6 +31,26 @@ class Task:
              그 경우를 '오답'이 아니라 '채점 불가'로 빼기 위해 문항이 스스로 밝힌다.
 
     needs    사람이 미리 해 두면 좋은 것(선택). 안 해도 채점은 성립해야 한다.
+
+    answer_keys
+             에이전트가 답 JSON 블록에 담아야 할 키와 그 모양. [(키, 설명), ...]
+             client 가 프롬프트 끝의 출력 규약에 그대로 박아 보낸다.
+
+             [왜 필요한가 — 2026-08-03]
+             출력 규약은 "Use the exact names the task asked for" 라고 하는데, 정작
+             문항이 이름을 대지 않았다. 그래서 에이전트가 지은 이름과 evaluate() 가
+             찾는 이름이 갈렸다. 실제로 T044 는 정답 [1001, 1602, 1031] 을 내고도
+             키가 highest_intensity_peaks 라 0 점, T126 은 물질 5 개를 다 맞히고도
+             파일명을 키로 써서 0 점이었다. 채점기가 못 읽은 것을 못 맞힌 것으로
+             기록하는 셈이라, 이름을 문항이 먼저 밝힌다.
+
+             모양까지 적는다. T043 은 키가 맞았는데도
+                 [{"position": 620.0, "intensity": 180.6}, ...]
+             로 내서 0/7 이었다 — 채점기가 기다린 건 [620.0, 793.0, ...] 였다.
+             그래서 설명에 "list of numbers" 같은 모양을 반드시 넣는다.
+
+             evaluate() 가 읽는 키와 여기 선언이 어긋나면 그 문항은 조용히 0 점이
+             된다. run_all.py --check 가 둘을 대조해 실행 전에 잡는다.
     """
     id: str
     score: float
@@ -41,6 +61,7 @@ class Task:
     mode: str = "live"
     windows: list[tuple] = field(default_factory=list)
     needs: str = ""
+    answer_keys: list[tuple] = field(default_factory=list)
 
     # 그리드 승인 인터록을 이 문항에서 강제할지.
     #
@@ -61,3 +82,22 @@ class Task:
         # 판정 이름만 남아 근거 없는 감점처럼 보인다.
         if not self.criteria.strip():
             raise ValueError(f"{self.id}: criteria 가 비어 있습니다")
+        # 선언이 (키, 설명) 두 칸이 아니면 렌더링에서 조용히 깨진다. 여기서 잡는다.
+        for i, item in enumerate(self.answer_keys):
+            if not (isinstance(item, (tuple, list)) and len(item) == 2
+                    and all(isinstance(s, str) and s.strip() for s in item)):
+                raise ValueError(f"{self.id}: answer_keys[{i}] 는 (키, 설명) 두 문자열이어야 "
+                                 f"합니다: {item!r}")
+
+    def answer_contract(self) -> str:
+        """답 JSON 블록의 키·모양을 에이전트에게 알리는 문장. 없으면 빈 문자열."""
+        if not self.answer_keys:
+            return ""
+        lines = "\n".join(f'  "{k}": {desc}' for k, desc in self.answer_keys)
+        # 두 군데를 조심해서 쓴다.
+        #   '중첩 금지' 라고 쓰면 안 된다 — T113·T121 처럼 객체 목록을 요구하는 문항이
+        #   있어 규약과 키 설명이 정면으로 어긋난다. 모양은 키 설명이 정한다.
+        #   '이 키만' 이라고 쓰면 안 된다 — 여분 키는 아무 판정도 보지 않으므로 해가
+        #   없는데, 금지해 두면 설명을 덧붙인 답이 규약 위반이 된다.
+        return ("\nThe JSON block must include these keys, spelled exactly like this, "
+                "with the shape described for each:\n" + lines + "\n")

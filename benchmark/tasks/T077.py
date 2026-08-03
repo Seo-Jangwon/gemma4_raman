@@ -29,6 +29,10 @@ TASK = Task(
         "saturated pixel, and at least 90% of the T077_ref.csv reference peaks detected, "
         "select the one with the lowest dose, where dose = power x exposure x 0.01 mJ. "
     ),
+    answer_keys=[
+        ("exposure", "number - the exposure time in seconds you chose"),
+        ("power", "number - the laser power in percent you chose"),
+    ],
 )
 
 

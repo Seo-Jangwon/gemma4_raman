@@ -26,6 +26,11 @@ TASK = Task(
         "table of the strongest peak position and intensity at each position together with "
         "its coordinates. "
     ),
+    answer_keys=[
+        ("peak_positions",
+         "list of 9 numbers - the strongest peak position in cm-1 at each grid "
+         "point, in the order you measured them"),
+    ],
 )
 
 

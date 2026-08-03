@@ -25,6 +25,9 @@ TASK = Task(
     prompt=(
         "Normalize T095.csv to L2 norm 1 and report its peaks (prominence 5% of range). "
     ),
+    answer_keys=[
+        ("peaks", "list of numbers - peak positions in cm-1, ascending"),
+    ],
 )
 
 

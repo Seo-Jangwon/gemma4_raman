@@ -23,6 +23,11 @@ TASK = Task(
         "In T044.csv, report the positions of the 3 highest-intensity peaks in descending "
         "order of intensity. "
     ),
+    answer_keys=[
+        ("peaks",
+         "list of 3 numbers - peak positions in cm-1, ordered by descending "
+         "intensity. Numbers only, not objects"),
+    ],
 )
 
 

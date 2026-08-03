@@ -27,6 +27,9 @@ TASK = Task(
         "of each with the T050 definition (signal = max in 990-1012, noise = std ddof=1 in "
         "1800-1900) and plot SNR versus laser power. "
     ),
+    answer_keys=[
+        ("snr", "list of 3 numbers - the SNR at 20, 40 and 60 % laser power, in that order"),
+    ],
 )
 
 

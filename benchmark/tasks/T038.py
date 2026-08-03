@@ -25,6 +25,12 @@ TASK = Task(
         "Load T038.csv (a polystyrene Raman spectrum) and display it as a line graph of "
         "Raman shift versus intensity. "
     ),
+    answer_keys=[
+        ("n_points", "number - how many data points the spectrum has"),
+        ("x_min", "number - lowest Raman shift in cm-1"),
+        ("x_max", "number - highest Raman shift in cm-1"),
+        ("y_max", "number - maximum intensity"),
+    ],
 )
 
 

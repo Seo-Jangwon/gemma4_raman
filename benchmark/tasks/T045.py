@@ -25,6 +25,9 @@ TASK = Task(
         "half height as (peak intensity - interval minimum)/2 and find the crossings by "
         "linear interpolation. "
     ),
+    answer_keys=[
+        ("fwhm_cm1", "number - FWHM in cm-1"),
+    ],
 )
 
 

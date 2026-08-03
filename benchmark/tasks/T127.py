@@ -30,6 +30,10 @@ TASK = Task(
         "reference_library.csv: accept if the cosine similarity to the PMMA reference is "
         "0.85 or higher, otherwise reject. "
     ),
+    answer_keys=[
+        ("matches", "true or false - accept (true) or reject (false)"),
+        ("similarity", "number - cosine similarity to the claimed PMMA reference"),
+    ],
 )
 
 

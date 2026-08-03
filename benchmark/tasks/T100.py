@@ -28,6 +28,11 @@ TASK = Task(
         "focus problem: record the SNR (T050 definition) at the current Z, run autofocus, "
         "measure again, and report both SNR values and whether focus was the cause. "
     ),
+    answer_keys=[
+        ("snr_before", "number - SNR before autofocus"),
+        ("snr_after", "number - SNR after autofocus"),
+        ("focus_was_cause", "true or false - was focus the cause"),
+    ],
 )
 
 def setup(b):

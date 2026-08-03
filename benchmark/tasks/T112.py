@@ -29,6 +29,9 @@ TASK = Task(
         "correction with order 5, report the peaks recovered (prominence 5% of range), and "
         "state how many peaks were invisible before the correction. "
     ),
+    answer_keys=[
+        ("peaks", "list of numbers - the recovered peak positions in cm-1, ascending"),
+    ],
 )
 
 

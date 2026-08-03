@@ -28,6 +28,11 @@ TASK = Task(
         "spectrum differs most from the first one, using cosine distance after L2 "
         "normalization. "
     ),
+    answer_keys=[
+        ("index",
+         "number - 0-based index of the most different position, where 0=current, "
+         "1=X+0.1, 2=X-0.1, 3=Y+0.1, 4=Y-0.1"),
+    ],
 )
 
 

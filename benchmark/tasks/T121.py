@@ -28,6 +28,11 @@ TASK = Task(
         "reference by similarity, descending. If two scores are equal, order them by "
         "spectrum_id ascending. "
     ),
+    answer_keys=[
+        ("ranking",
+         'list of 8 objects, most similar first, each {"spectrum_id": string, '
+         '"score": number}'),
+    ],
 )
 
 

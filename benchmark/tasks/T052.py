@@ -27,6 +27,14 @@ TASK = Task(
         "nearest-neighbour 1:1 within 10 cm-1) and report only the pairs whose position "
         "difference is 5 cm-1 or more. "
     ),
+    answer_keys=[
+        ("pairs",
+         "list of [pos_a, pos_b] number pairs - each is one matched peak pair in "
+         "cm-1. Pairs of numbers, not objects"),
+        ("differences",
+         "list of numbers - the position difference of each pair in cm-1, same "
+         "order as pairs"),
+    ],
 )
 
 

@@ -28,6 +28,9 @@ TASK = Task(
         "reference_library_8.csv, compute the fraction of the top 3 that are the same "
         "material as the query, and report the five fractions and their mean. "
     ),
+    answer_keys=[
+        ("mean_hit_rate", "number - the mean hit rate, 0 to 1"),
+    ],
 )
 
 

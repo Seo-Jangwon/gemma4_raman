@@ -28,6 +28,11 @@ TASK = Task(
         "reference_library.csv (interpolate onto the reference axis, L2 normalize, cosine "
         "similarity) and report the 3 most similar references with their rank and score. "
     ),
+    answer_keys=[
+        ("top3",
+         'list of 3 objects, most similar first, each {"spectrum_id": string, '
+         '"material": string, "score": number}'),
+    ],
 )
 
 

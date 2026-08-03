@@ -26,6 +26,9 @@ TASK = Task(
         "divided by the sample standard deviation (ddof=1) of 1800-1900 cm-1. Both intervals "
         "are inclusive. "
     ),
+    answer_keys=[
+        ("snr", "number - the signal-to-noise ratio"),
+    ],
 )
 
 

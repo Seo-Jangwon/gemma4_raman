@@ -23,6 +23,9 @@ TASK = Task(
         "Perform autofocus once, then measure a spectrum once at the focus position it "
         "found. Report the Z before and after the autofocus. "
     ),
+    answer_keys=[
+        ("z_after", "number - stage Z in mm after the move"),
+    ],
 )
 
 

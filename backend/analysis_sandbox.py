@@ -494,6 +494,7 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
     dict — {ok, stdout, image_count, saved?{title,image_url}, images?, error?}
            그림이 생기면 saved.image_url 로 채팅에 표시된다(spectrum_event 재사용).
     """
+    import os
     import subprocess
     import tempfile
     from backend.spectrum_store import (list_results, latest_scene,
@@ -571,6 +572,31 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
         json.dump(payload, f, ensure_ascii=False)
         payload_path = f.name
 
+    # 자식의 작업 디렉터리 — **프로젝트 루트로 두면 안 된다**.
+    #
+    # 생성 코드가 plt.savefig("plot.png") 나 np.savetxt("table.csv") 처럼 상대경로로
+    # 쓰면 그 파일이 작업 디렉터리에 떨어진다. 예전에는 여기가 저장소 루트라 한 번의
+    # 벤치 실행이 comparison_plot.png, T098_corrected.png 같은 파일 21 개를 루트에
+    # 흩뿌렸고 그대로 커밋까지 됐다. open() 을 금지해도 소용없다 — 파일을 여는 것은
+    # matplotlib/numpy 내부라 AST 검사에 걸리지 않는다.
+    #
+    # 세션 폴더로 돌려 두면 그런 파일도 '이 문항이 만든 것' 자리에 모인다. 자식은
+    # sys.path 를 명시적으로 넣으므로(파일 상단) 작업 디렉터리에 기대지 않는다.
+    _cwd = Path(_spectra_dir).parent
+    try:
+        _cwd.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        _cwd = _PROJECT_ROOT / "data"
+        _cwd.mkdir(parents=True, exist_ok=True)
+
+    # `-m backend.analysis_sandbox` 는 모듈을 **파일 안의 sys.path.insert 가 돌기 전에**
+    # 찾는다. 예전에는 cwd 가 프로젝트 루트라 sys.path 의 '' 가 그 일을 대신했는데,
+    # cwd 를 세션 폴더로 옮기면 그게 사라져 ModuleNotFoundError 로 죽는다.
+    # 루트를 PYTHONPATH 로 명시해 cwd 와 무관하게 만든다.
+    _env = dict(os.environ)
+    _env["PYTHONPATH"] = (str(_PROJECT_ROOT) + os.pathsep + _env.get("PYTHONPATH", "")
+                          ).rstrip(os.pathsep)
+
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "backend.analysis_sandbox", payload_path],
@@ -578,7 +604,7 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
             # 읽기 스레드가 UnicodeDecodeError 로 죽지 않게 한다
             # (encoding 은 자식과 같은 로케일 기본값을 그대로 쓴다).
             capture_output=True, text=True, errors="replace", timeout=timeout_sec,
-            cwd=str(_PROJECT_ROOT),
+            cwd=str(_cwd), env=_env,
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": f"Execution timed out ({timeout_sec}s) - infinite loop or too heavy a computation."}

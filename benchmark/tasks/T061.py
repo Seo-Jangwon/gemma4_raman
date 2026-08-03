@@ -27,6 +27,9 @@ TASK = Task(
         "both onto the wavenumber axis of the first spectrum, normalize each to L2 norm 1, "
         "and report their cosine similarity. "
     ),
+    answer_keys=[
+        ("cosine", "number - the cosine similarity"),
+    ],
 )
 
 

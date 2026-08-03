@@ -28,6 +28,11 @@ TASK = Task(
         "cosine similarity. If two scores are equal, choose the one whose spectrum_id comes "
         "first in alphabetical order. "
     ),
+    answer_keys=[
+        ("material",
+         'string - one of "polystyrene", "PET", "PMMA", "calcite", "aragonite", '
+         '"silicon"'),
+    ],
 )
 
 

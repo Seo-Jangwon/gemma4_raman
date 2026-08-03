@@ -26,6 +26,9 @@ TASK = Task(
         "1:1 by nearest neighbour within 3 cm-1, and define the ratio as matched peaks / "
         "reference peaks. "
     ),
+    answer_keys=[
+        ("match_ratio", "number - fraction of reference peaks that matched, 0 to 1"),
+    ],
 )
 
 

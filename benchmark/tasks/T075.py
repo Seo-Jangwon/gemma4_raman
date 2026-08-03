@@ -27,6 +27,12 @@ TASK = Task(
         "in each session, and the cosine similarity between the two mean spectra (common "
         "axis, L2). "
     ),
+    answer_keys=[
+        ("rsd_a_pct", "number - RSD of group A in percent"),
+        ("rsd_b_pct", "number - RSD of group B in percent"),
+        ("cosine_of_means", "number - cosine similarity between the two mean spectra"),
+        ("peak_position_diff", "number - peak position difference in cm-1"),
+    ],
 )
 
 

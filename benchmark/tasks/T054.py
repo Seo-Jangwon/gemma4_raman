@@ -23,6 +23,9 @@ TASK = Task(
         "In T054.csv find the detected peaks nearest to 1001 and 1602 cm-1 (prominence 5% of "
         "range) and report the ratio of their intensities (1001 over 1602). "
     ),
+    answer_keys=[
+        ("ratio", "number - the peak intensity ratio"),
+    ],
 )
 
 

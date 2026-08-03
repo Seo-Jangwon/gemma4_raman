@@ -27,6 +27,11 @@ TASK = Task(
         "the ratio of matched peaks to reference peaks (1:1 nearest-neighbour pairing, no "
         "duplicates). "
     ),
+    answer_keys=[
+        ("material",
+         'string - one of "polystyrene", "PET", "PMMA", "calcite", "aragonite", '
+         '"silicon"'),
+    ],
 )
 
 

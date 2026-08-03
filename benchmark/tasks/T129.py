@@ -26,6 +26,12 @@ TASK = Task(
         "cross-correlation against reference_library.csv, correct it, identify the material, "
         "and report the estimated shift. "
     ),
+    answer_keys=[
+        ("shift_cm1", "number - the estimated shift in cm-1"),
+        ("material",
+         'string - one of "polystyrene", "PET", "PMMA", "calcite", "aragonite", '
+         '"silicon"'),
+    ],
 )
 
 

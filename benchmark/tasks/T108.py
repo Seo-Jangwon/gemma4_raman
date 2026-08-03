@@ -26,6 +26,9 @@ TASK = Task(
         "drifts over time. Quantify the drift as the linear regression slope of the median "
         "intensity per frame, and state whether it is increasing or decreasing. "
     ),
+    answer_keys=[
+        ("drift_slope", "number - the drift slope"),
+    ],
 )
 
 

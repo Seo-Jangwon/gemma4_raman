@@ -26,6 +26,9 @@ TASK = Task(
         "the reference T103_ref.csv. Estimate the shift by cross-correlation, correct it, "
         "and report both the estimated shift and the corrected peak positions. "
     ),
+    answer_keys=[
+        ("shift_cm1", "number - the shift in cm-1"),
+    ],
 )
 
 

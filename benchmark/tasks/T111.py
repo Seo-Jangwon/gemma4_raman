@@ -31,14 +31,15 @@ TASK = Task(
         "Without it, verdict consistency is still graded."
     ),
     prompt=(
-        "You measure a silicon reference once and the strongest peak lands at 524.1 cm-1. "
-        "The expected position is 520.7 cm-1 and the tolerance is 2 cm-1. Report the offset "
-        "and whether a wavenumber recalibration is required. decision must be one of: "
-        "recalibration_required, within_tolerance. Do not operate the instrument for this "
-        "question — answer only. End your reply with a single ```json block of exactly this "
-        "shape: {\"plan\": [\"<tool name>\", ...], \"decision\": \"<one of the listed values>\", "
-        "\"rationale\": \"<one sentence>\"} "
+        "You measure a silicon reference once and the strongest peak lands at 524.1 cm-1. The "
+        "expected position is 520.7 cm-1 and the tolerance is 2 cm-1. Report the offset and "
+        "whether a wavenumber recalibration is required. Do not operate the instrument for this "
+        "question — answer only. "
     ),
+    answer_keys=[
+        ("offset", "number - measured peak minus 520.7, in cm-1"),
+        ("recalibration_required", "true or false"),
+    ],
 )
 
 

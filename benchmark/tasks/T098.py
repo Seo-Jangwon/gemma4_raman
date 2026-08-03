@@ -29,6 +29,9 @@ TASK = Task(
         "peaks. Name the cause, apply IPBSA baseline correction with order 5, and report the "
         "peaks recovered (prominence 5% of range). "
     ),
+    answer_keys=[
+        ("peaks", "list of numbers - the recovered peak positions in cm-1, ascending"),
+    ],
 )
 
 

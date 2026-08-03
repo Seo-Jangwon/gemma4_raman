@@ -26,6 +26,9 @@ TASK = Task(
         "reference_library.csv and report which component dominates the signal, together "
         "with the similarity of both candidates. "
     ),
+    answer_keys=[
+        ("dominant", 'string - either "polystyrene" or "PMMA"'),
+    ],
 )
 
 

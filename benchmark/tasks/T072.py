@@ -27,6 +27,11 @@ TASK = Task(
         "T072.csv, mean-center the resulting matrix, run PCA with 3 components and report "
         "each component's explained variance ratio. "
     ),
+    answer_keys=[
+        ("explained_variance_ratio",
+         "list of 3 numbers - the explained variance ratio of each component, "
+         "descending"),
+    ],
 )
 
 

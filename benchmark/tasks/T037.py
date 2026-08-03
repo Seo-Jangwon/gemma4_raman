@@ -26,13 +26,15 @@ TASK = Task(
     criteria="SET(pixel 4 items, ±25px) + PROC",
     prompt=(
         "Suppose analyze_microscope_image returns four bright circular targets whose pixel "
-        "centres are (180, 140), (860, 150), (200, 660) and (840, 650) in a 1060x800 view. "
-        "State the tools you would call, in order, to measure one spectrum at each target. "
-        "decision must be one of: move_to_pixel, move_stage. Do not operate the instrument "
-        "for this question — answer only. End your reply with a single ```json block of "
-        "exactly this shape: {\"plan\": [\"<tool name>\", ...], \"decision\": \"<one of the listed "
-        "values>\", \"rationale\": \"<one sentence>\"} "
+        "centres are (180, 140), (860, 150), (200, 660) and (840, 650) in a 1060x800 view. State "
+        "the tools you would call, in order, to measure one spectrum at each target. decision "
+        "must be one of: move_to_pixel, move_stage. Do not operate the instrument for this "
+        "question — answer only. "
     ),
+    answer_keys=[
+        ("plan", "list of tool-name strings, in the order you would call them"),
+        ("decision", 'string - either "move_to_pixel" or "move_stage"'),
+    ],
 )
 
 # 장면 주입(b.inject_scene("T037.png"))은 여기 없다 — 이 문항은 가정형이라

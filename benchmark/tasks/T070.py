@@ -29,6 +29,12 @@ TASK = Task(
         "(interpolate onto a common axis, L2 normalize, cosine) and draw a 5x5 map marking "
         "the positions with similarity 0.85 or higher. "
     ),
+    answer_keys=[
+        ("similarities",
+         "list of 25 numbers - the cosine similarity at each grid point, in the "
+         "order you measured them"),
+        ("n_above_threshold", "number - how many of them are 0.85 or higher"),
+    ],
 )
 
 

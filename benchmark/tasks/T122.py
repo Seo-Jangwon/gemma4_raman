@@ -27,6 +27,12 @@ TASK = Task(
         "Report the identification info (spectrum_id and material) of the reference in "
         "reference_library.csv that best matches T122.csv. "
     ),
+    answer_keys=[
+        ("spectrum_id", 'string - the reference entry id, e.g. "PMMA_02"'),
+        ("material",
+         'string - one of "polystyrene", "PET", "PMMA", "calcite", "aragonite", '
+         '"silicon"'),
+    ],
 )
 
 

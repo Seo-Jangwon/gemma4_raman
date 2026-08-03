@@ -23,6 +23,9 @@ TASK = Task(
         "Compute the area of 990-1012 cm-1 (inclusive) of the already baseline-corrected "
         "T053.csv by trapezoidal integration, with no further baseline correction. "
     ),
+    answer_keys=[
+        ("area", "number - the integrated peak area"),
+    ],
 )
 
 

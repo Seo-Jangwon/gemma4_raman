@@ -21,6 +21,10 @@ TASK = Task(
     prompt=(
         "Tell me the CCD sensor's width and height in pixels. "
     ),
+    answer_keys=[
+        ("detector_Nx", "number - detector width in pixels"),
+        ("detector_Ny", "number - detector height in pixels"),
+    ],
 )
 
 

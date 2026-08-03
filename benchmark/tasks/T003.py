@@ -21,6 +21,11 @@ TASK = Task(
     prompt=(
         "Tell me the current stage X, Y, Z coordinates. "
     ),
+    answer_keys=[
+        ("x", "number - stage X in mm"),
+        ("y", "number - stage Y in mm"),
+        ("z", "number - stage Z in mm"),
+    ],
 )
 
 

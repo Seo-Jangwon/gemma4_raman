@@ -110,14 +110,56 @@ def check_only(pairs) -> int:
     missing_inputs = [f"{t.id}: {n}" for _, t in pairs for n in t.inputs
                       if not (HERE / "inputs" / n).is_file()]
     todo = [t.id for m, t in pairs if "[남은 일]" in inspect.getsource(m)]
+    undeclared, unused = _check_answer_keys(pairs)
 
     for label, items in (("판정 항목 없음", empty), ("도구 이름 오류", unknown),
                          ("입력 파일 없음", missing_inputs),
+                         ("답 키 미선언", undeclared),
+                         ("선언했으나 안 읽는 키", unused),
                          ("재계산 이식 대기", todo)):
         if items:
             print(f"  [{label}] {len(items)}개: {', '.join(map(str, items[:20]))}"
                   f"{' ...' if len(items) > 20 else ''}")
-    return 1 if (empty or unknown or missing_inputs) else 0
+    return 1 if (empty or unknown or missing_inputs or undeclared) else 0
+
+
+def _answer_keys_read(src: str) -> set:
+    """evaluate() 가 답 JSON 에서 실제로 꺼내는 키 이름들.
+
+    A.seq/value/flag/grid 는 후보 키를 여러 개 받는다. 그중 **첫 번째**가 정본이다
+    (bench.answer._first 가 앞에서부터 찾는다). 나머지는 예전 답 모양을 받아 주는
+    관대함이라 선언 대상이 아니다.
+    """
+    import re
+    body = src[src.find("def evaluate"):]
+    keys = set(re.findall(r'run\.answer\.get\(\s*["\']([^"\']+)', body))
+    keys |= set(re.findall(r'chk\.reported(?:_label)?\(\s*run,\s*["\']([^"\']+)', body))
+    keys |= set(re.findall(r'chk\.has_answer_key\(\s*run,\s*["\']([^"\']+)', body))
+    for m in re.finditer(r'A\.(?:seq|value|flag|grid)\(\s*run,\s*["\']([^"\']+)', body):
+        keys.add(m.group(1))
+    # plan_order 는 answer["plan"] 을 읽는다(bench.client.Run.plan).
+    if "chk.plan_order(" in body:
+        keys.add("plan")
+    return keys
+
+
+def _check_answer_keys(pairs) -> tuple:
+    """선언(Task.answer_keys)과 채점기가 읽는 키가 맞는지.
+
+    어긋나면 그 문항은 **조용히 0 점**이 된다 — 에이전트는 선언된 이름으로 답하고
+    채점기는 다른 이름을 찾으니, 정답을 내고도 '보고 없음'으로 떨어진다. 실제로
+    그 사고로 T044·T126 이 만점짜리 답을 내고 0 점을 받았다. 실행 전에 잡는다.
+    """
+    import inspect
+    undeclared, unused = [], []
+    for mod, task in pairs:
+        read = _answer_keys_read(inspect.getsource(mod))
+        declared = {k for k, _ in task.answer_keys}
+        for k in sorted(read - declared):
+            undeclared.append(f"{task.id}: 채점기는 {k!r} 를 읽는데 answer_keys 에 없음")
+        for k in sorted(declared - read):
+            unused.append(f"{task.id}: {k!r} 를 선언했는데 채점기가 안 읽음")
+    return undeclared, unused
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -196,6 +238,19 @@ def main() -> int:
 
     # 파수축 점검. 설정이 문항 구간을 못 덮으면 정답을 내도 0점이 되므로, 실행 전에 알린다.
     pf = b.preflight()
+
+    # 어느 에이전트 모듈이 도는지. 벤치 사본(single_agent_*_bench)이 아니면 출력 규약이
+    # 안 걸려 답의 키가 어긋나고, 그 결과가 '에이전트가 못 맞혔다'로 기록된다.
+    # 143 문항을 다 돌린 뒤에 알면 늦으므로 여기서 끊는다.
+    if pf.get("agent_module"):
+        print(f"[preflight] 에이전트 모듈 {pf['agent_module']}")
+        if not pf.get("agent_is_bench"):
+            print(f"[fatal] 벤치 사본이 아니라 운영 모듈이 잡혔습니다"
+                  f"({pf['agent_module']}).\n"
+                  f"        backend/agents/single_agent_{args.agent}_bench.py 가 있는지, "
+                  f"import 에러가 없는지 확인하세요.", file=sys.stderr)
+            return 2
+
     axis = pf.get("axis") if pf.get("ok") else None
     if axis:
         print(f"[preflight] 파수축 {min(axis):.1f} ~ {max(axis):.1f} cm-1 "

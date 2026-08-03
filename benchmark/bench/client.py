@@ -36,7 +36,13 @@ DATA = PROJ / "data"
 # [왜 harness 가 붙이는가]
 # 에이전트 프롬프트에 넣으면 한쪽만 고쳐질 수 있고, 그 순간 두 아키텍처의 점수를 비교할 수
 # 없게 된다. 같은 문장을 같은 자리에 붙이는 일은 harness 가 해야 공정하다.
-OUTPUT_CONTRACT = """
+#
+# [키 이름을 문항이 밝히는 이유 — 2026-08-03]
+# 예전 규약은 "Use the exact names the task asked for" 였는데 문항이 이름을 댄 적이
+# 없다. 요구하지 않은 이름을 정확히 쓰라는 규약이라 에이전트가 지은 이름과 채점기가
+# 찾는 이름이 갈렸다(T044·T126 은 값이 전부 정답인데 0 점). 이제 Task.answer_keys 가
+# 있으면 그 목록을 여기에 그대로 박아 보낸다 — Task.answer_contract() 참고.
+_CONTRACT_HEAD = """
 
 ---
 When you are done, end your reply with a JSON block holding the values you were asked to
@@ -45,10 +51,28 @@ report, like this:
 ```json
 {"key": value, ...}
 ```
+"""
 
+# 키를 밝히지 않는 문항(값 채점이 없는 안전·절차 문항)에 붙는 문장.
+_CONTRACT_FREE = """
 Use the exact names the task asked for. Include the block even if you only have one value.
-If the task asked you to refuse, explain, or ask a question instead of measuring, say so in
-plain text and omit the block."""
+"""
+
+_CONTRACT_TAIL = """
+Give plain JSON numbers and strings - no units, no LaTeX, no thousands separators. If the
+task asked you to refuse, explain, or ask a question instead of measuring, say so in plain
+text and omit the block."""
+
+
+def output_contract(task) -> str:
+    """이 문항 뒤에 붙일 출력 규약. 키 선언이 있으면 그것까지 실어 보낸다.
+
+    가정형 문항에도 붙인다. 예전에는 live 에만 붙였는데, 정작 가정형 문항들이
+    answer["plan"] / answer["decision"] 으로 채점하고 있어 규약 없이 답을 요구하는
+    꼴이었다.
+    """
+    body = task.answer_contract() or _CONTRACT_FREE
+    return _CONTRACT_HEAD + body + _CONTRACT_TAIL
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -194,8 +218,10 @@ class Bench:
         축은 장비 PC 의 Config.ini 가 정한다(레이저 파장·격자 중심·홈수·초점거리).
         벤치가 다른 PC 에서 돌면 자기 사본은 임의값이라 의미가 없으므로, 축을 아는
         서버에게 묻는다. 문항이 요구하는 구간을 덮는지의 판정은 Task.windows 가 한다.
+
+        어느 에이전트 모듈이 실행을 맡는지(agent_module / agent_is_bench)도 함께 온다.
         """
-        return self._get("/api/bench/preflight", {})
+        return self._get("/api/bench/preflight", {"agent": self.agent})
 
     # ── 장비 ─────────────────────────────────────────────────────────────────
     def reset(self) -> dict:
@@ -267,7 +293,7 @@ class Bench:
         import time
         sid = f"bench_{run_id or self.run_id or 'adhoc'}_{self.agent}_{task.id}_{uuid.uuid4().hex[:6]}"
         r = Run(task.id, task.prompt, self.agent, sid)
-        message = task.prompt + (OUTPUT_CONTRACT if task.mode == "live" else "")
+        message = task.prompt + output_contract(task)
 
         t0 = time.time()
         body = {"agent": self.agent, "message": message, "task": task.id,

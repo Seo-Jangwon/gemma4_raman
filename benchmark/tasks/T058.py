@@ -30,6 +30,9 @@ TASK = Task(
         "order 5, Savitzky-Golay (11, 3), and 0-1 normalization, and report the 3 "
         "highest-intensity peaks of the result. "
     ),
+    answer_keys=[
+        ("peaks", "list of 3 numbers - peak positions in cm-1, ordered by descending intensity"),
+    ],
 )
 
 

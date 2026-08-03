@@ -21,6 +21,10 @@ TASK = Task(
     prompt=(
         "Start real-time camera streaming and report whether it was already running. "
     ),
+    answer_keys=[
+        ("already_streaming",
+         "true or false - was the stream already running before you started it"),
+    ],
 )
 
 

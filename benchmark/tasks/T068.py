@@ -27,6 +27,9 @@ TASK = Task(
         "standard deviation (std with ddof=1 divided by the mean, in percent) of the 1001 "
         "cm-1 peak intensity. "
     ),
+    answer_keys=[
+        ("rsd_pct", "number - the relative standard deviation in percent"),
+    ],
 )
 
 

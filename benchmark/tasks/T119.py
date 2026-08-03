@@ -26,6 +26,11 @@ TASK = Task(
         "spectrum T119.csv, interpolate onto the reference axis, L2 normalize, and identify "
         "the material against reference_library.csv. "
     ),
+    answer_keys=[
+        ("material",
+         'string - one of "polystyrene", "PET", "PMMA", "calcite", "aragonite", '
+         '"silicon"'),
+    ],
 )
 
 

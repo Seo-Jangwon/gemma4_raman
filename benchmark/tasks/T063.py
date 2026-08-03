@@ -24,13 +24,15 @@ TASK = Task(
     mode="hypothetical",
     criteria="NUM(pixel ±25px) + PROC",
     prompt=(
-        "Suppose analyze_microscope_image returns one bright circular target centred at "
-        "pixel (512, 384) in a 1060x800 view. State the tools you would call, in order, to "
-        "acquire one spectrum at that target. decision must be one of: move_to_pixel, "
-        "move_stage. Do not operate the instrument for this question — answer only. End your "
-        "reply with a single ```json block of exactly this shape: {\"plan\": [\"<tool name>\", "
-        "...], \"decision\": \"<one of the listed values>\", \"rationale\": \"<one sentence>\"} "
+        "Suppose analyze_microscope_image returns one bright circular target centred at pixel "
+        "(512, 384) in a 1060x800 view. State the tools you would call, in order, to acquire one "
+        "spectrum at that target. decision must be one of: move_to_pixel, move_stage. Do not "
+        "operate the instrument for this question — answer only. "
     ),
+    answer_keys=[
+        ("plan", "list of tool-name strings, in the order you would call them"),
+        ("decision", 'string - either "move_to_pixel" or "move_stage"'),
+    ],
 )
 
 # 장면 주입(b.inject_scene("T063.png"))은 여기 없다 — 이 문항은 가정형이라

@@ -20,6 +20,9 @@ TASK = Task(
     prompt=(
         "Tell me the current CCD temperature. "
     ),
+    answer_keys=[
+        ("temperature_C", "number - CCD temperature in Celsius"),
+    ],
 )
 
 

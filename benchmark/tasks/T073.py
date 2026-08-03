@@ -27,6 +27,11 @@ TASK = Task(
         "with KMeans(n_clusters=2, n_init=10, random_state=0) and show each coordinate's "
         "group as a map. "
     ),
+    answer_keys=[
+        ("labels",
+         "list of numbers - the cluster label (0 or 1) of each coordinate, in the "
+         "row order of the input file"),
+    ],
 )
 
 

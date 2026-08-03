@@ -271,7 +271,8 @@ class chk:
         answer(구조화 JSON)에 있으면 그것으로 판정한다. 없으면 본문에서 숫자를 찾되,
         그건 '기대값 근처 숫자가 본문 어딘가 있는가'까지밖에 못 본다 — 그래서 산문 경로로
         통과한 건 detail 에 '(산문)' 을 남겨 나중에 구분할 수 있게 한다.
-        harness 가 모든 문항에 같은 출력 규약을 붙이므로(client.Bench.OUTPUT_CONTRACT)
+        harness 가 모든 문항에 같은 출력 규약을 붙이고(client.output_contract) 그 안에
+        Task.answer_keys 로 키 이름까지 밝히므로,
         정상 실행에서는 answer 경로가 쓰인다.
         """
         label = name or key

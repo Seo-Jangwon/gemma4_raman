@@ -24,6 +24,12 @@ TASK = Task(
         "T123.csv has one strong peak near 520 cm-1. Identify the material against "
         "reference_library.csv and report the peak position you used as the basis. "
     ),
+    answer_keys=[
+        ("material",
+         'string - one of "polystyrene", "PET", "PMMA", "calcite", "aragonite", '
+         '"silicon"'),
+        ("peak_cm1", "number - the peak position in cm-1"),
+    ],
 )
 
 

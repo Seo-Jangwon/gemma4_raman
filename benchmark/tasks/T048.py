@@ -25,6 +25,11 @@ TASK = Task(
         "Overlay T048_a.csv and T048_b.csv on the same axes and label which line is which "
         "with a legend. "
     ),
+    answer_keys=[
+        ("n_curves", "number - how many curves are on the plot"),
+        ("a_max", "number - maximum intensity of T048_a.csv"),
+        ("b_max", "number - maximum intensity of T048_b.csv"),
+    ],
 )
 
 

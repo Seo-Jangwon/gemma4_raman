@@ -217,18 +217,37 @@ class ExperimentRequest(BaseModel):
     agent: Optional[str] = "AILA"
 
 
-def _agent_module(name: Optional[str]):
+def _agent_module(name: Optional[str], bench: bool = False):
     """agent 이름 → (에이전트 모듈, 정규화된 이름).
 
     AILA↔CoALA를 가르는 판단은 이 함수 '하나'에만 있다 — 새 에이전트를 추가하거나
     분기 규칙을 바꿀 때 여기만 고치면 라우트는 손대지 않는다. 두 모듈 모두 동일 공개
     API(ALL_TOOLS / stream_experiment / run_experiment)를 노출하므로 호출부는 동일하다.
-    알 수 없는 값은 기본 AILA로 폴백한다(회귀 방지)."""
-    if (name or "").strip().upper() == "COALA":
+    알 수 없는 값은 기본 AILA로 폴백한다(회귀 방지).
+
+    [bench=True 일 때 _bench 사본으로 가는 이유]
+    벤치마크는 채점기가 읽을 수 있는 출력 규약을 에이전트에 강제해야 하는데, 그 규약을
+    운영 에이전트에 넣으면 실제 사용자 대화까지 매번 JSON 블록을 달게 된다. 그래서
+    single_agent_*_bench.py 사본을 따로 두고 **벤치 경로만** 그쪽으로 보낸다.
+    /api/experiment 계열은 bench=False 라 운영 모듈을 그대로 쓴다.
+    사본이 없으면 운영 모듈로 폴백한다 — 없다고 실행이 끊기는 것보다 낫다.
+    """
+    coala = (name or "").strip().upper() == "COALA"
+    arch = "CoALA" if coala else "AILA"
+    if bench:
+        try:
+            if coala:
+                from backend.agents import single_agent_CoALA_bench as mod
+            else:
+                from backend.agents import single_agent_AILA_bench as mod
+            return mod, arch
+        except ImportError:
+            pass
+    if coala:
         from backend.agents import single_agent_CoALA as mod
-        return mod, "CoALA"
+        return mod, arch
     from backend.agents import single_agent_AILA as mod
-    return mod, "AILA"
+    return mod, arch
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -547,10 +566,20 @@ class BenchInputsRequest(BaseModel):
 
 
 @app.get("/api/bench/preflight")
-async def bench_preflight():
-    """파수축과 그 근거 설정. 문항이 쓰는 구간을 덮는지는 벤치가 판정한다."""
+async def bench_preflight(agent: str = "AILA"):
+    """파수축과 그 근거 설정. 문항이 쓰는 구간을 덮는지는 벤치가 판정한다.
+
+    실제로 어느 에이전트 모듈이 실행을 맡는지도 함께 돌려준다. _bench 사본이 없어
+    운영 모듈로 폴백하면 출력 규약이 안 걸려 채점이 통째로 어긋나는데, 그걸 실행이
+    끝난 뒤에야 알게 되면 '설정 실수가 에이전트 실력으로' 기록된다. 실행 전에 알린다.
+    """
     import backend.bench_ops as B
-    return B.preflight()
+    out = dict(B.preflight())
+    mod, arch = _agent_module(agent, bench=True)
+    out["agent_module"] = getattr(mod, "__name__", "?")
+    out["agent_is_bench"] = getattr(mod, "__name__", "").endswith("_bench")
+    out["agent_arch"] = arch
+    return out
 
 
 @app.post("/api/bench/tool")
@@ -648,7 +677,9 @@ async def bench_stream(body: BenchRunRequest, request: Request):
 
     이벤트: tool {name, args, result} / final {text} / error {detail}
     """
-    mod, name = _agent_module(body.agent)
+    # bench=True: 벤치 전용 사본(single_agent_*_bench.py)으로 간다. 운영 에이전트는
+    # 손대지 않는다 — _agent_module 주석 참고.
+    mod, name = _agent_module(body.agent, bench=True)
     state = _state(request)
     loop = asyncio.get_event_loop()
     q: asyncio.Queue = asyncio.Queue()

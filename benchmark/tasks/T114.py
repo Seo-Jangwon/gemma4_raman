@@ -27,6 +27,10 @@ TASK = Task(
         "reference_library.csv (interpolate onto the reference axis, L2 normalize) and state "
         "whether it is 0.85 or higher. "
     ),
+    answer_keys=[
+        ("best_score", "number - the highest cosine similarity"),
+        ("above_threshold", "true or false - is it 0.85 or higher"),
+    ],
 )
 
 

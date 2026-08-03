@@ -23,6 +23,11 @@ TASK = Task(
     prompt=(
         "Distinguish whether T124.csv is calcite or aragonite, using reference_library.csv. "
     ),
+    answer_keys=[
+        ("material",
+         'string - one of "polystyrene", "PET", "PMMA", "calcite", "aragonite", '
+         '"silicon"'),
+    ],
 )
 
 

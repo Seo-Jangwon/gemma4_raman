@@ -26,6 +26,11 @@ TASK = Task(
         "Acquire a kinetic series of 5 frames (1 s interval) at the current position, then "
         "plot how the total intensity of each frame changes over the series. "
     ),
+    answer_keys=[
+        ("frame_sums",
+         "list of numbers - the summed intensity of each frame, in acquisition "
+         "order"),
+    ],
 )
 
 

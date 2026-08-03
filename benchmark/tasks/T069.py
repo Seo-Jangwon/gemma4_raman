@@ -29,6 +29,9 @@ TASK = Task(
         "the highest SNR (T050 definition) among the results that are not saturated. If "
         "tied, select the lower index. "
     ),
+    answer_keys=[
+        ("index", "number - the pre-amplifier gain index you chose (0, 1 or 2)"),
+    ],
 )
 
 

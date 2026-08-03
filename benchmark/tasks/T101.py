@@ -32,6 +32,9 @@ TASK = Task(
         "(5-point moving median, 5x MAD, linear interpolation) from each frame, and report "
         "the peaks of the cleaned mean spectrum. "
     ),
+    answer_keys=[
+        ("peaks", "list of numbers - peak positions in cm-1 after spike removal, ascending"),
+    ],
 )
 
 

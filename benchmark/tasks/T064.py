@@ -27,6 +27,11 @@ TASK = Task(
         "Apply spike removal (5-point median, 5x MAD), IPBSA baseline order 5 and L2 "
         "normalization to each spectrum, and plot the 1001 cm-1 intensity against position. "
     ),
+    answer_keys=[
+        ("intensities",
+         "list of 10 numbers - the 1001 cm-1 intensity at each position, in the "
+         "order you measured them"),
+    ],
 )
 
 

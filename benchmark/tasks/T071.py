@@ -27,6 +27,11 @@ TASK = Task(
         "each spectrum's similarity to T071_ref.csv (common axis, L2, cosine) and report the "
         "position where the similarity change between adjacent positions is largest. "
     ),
+    answer_keys=[
+        ("boundary_index",
+         "number - the 0-based index of the boundary position among the 20 "
+         "measured points"),
+    ],
 )
 
 

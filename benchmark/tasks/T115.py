@@ -29,6 +29,11 @@ TASK = Task(
         "spectrum T115.csv, then compare it with reference_library.csv on the reference axis "
         "and report the most similar material. "
     ),
+    answer_keys=[
+        ("material",
+         'string - one of "polystyrene", "PET", "PMMA", "calcite", "aragonite", '
+         '"silicon"'),
+    ],
 )
 
 

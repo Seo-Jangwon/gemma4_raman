@@ -27,6 +27,10 @@ TASK = Task(
         "0-9). Determine whether the Raman signal decreases and the background increases "
         "over time, quantify both trends by linear regression slope, and name the cause. "
     ),
+    answer_keys=[
+        ("signal_slope", "number - slope of the Raman signal over the frames"),
+        ("background_slope", "number - slope of the background over the frames"),
+    ],
 )
 
 
