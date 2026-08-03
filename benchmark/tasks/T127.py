@@ -12,18 +12,23 @@
 """
 from bench import Task, chk
 from bench.check import MM, MM_GRID, TOL_PEAK_CM1        # noqa: F401
+from bench import answer as A
 from bench import spectra as sp                          # noqa: F401
 
 TASK = Task(
     id="T127",
     score=2,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
-    inputs=['reference_library.csv'],
+    inputs=['T127.csv', 'reference_library.csv'],
+    criteria="EXACT(verdict) + NUM(±0.01)",
     prompt=(
-        "T127.csv is presented as being the material named in its metadata. Judge whether it "
-        "really matches, using reference_library.csv: accept if the cosine similarity to "
-        "that material's reference is 0.85 or higher, otherwise reject. "
+        # 원문은 "the material named in its metadata" 였는데 T127.csv 에는 메타데이터가
+        # 없다(헤더가 raman_shift_cm-1,intensity 뿐). 무엇이라고 주장된 건지 알 수 없으니
+        # 풀 수 없는 문항이었다. 주장 물질을 문면에 적어 넣어 판정 능력만 남긴다.
+        "T127.csv was supplied to us as PMMA. Judge whether it really is, using "
+        "reference_library.csv: accept if the cosine similarity to the PMMA reference is "
+        "0.85 or higher, otherwise reject. "
     ),
 )
 
@@ -31,6 +36,14 @@ TASK = Task(
 def evaluate(b, run):
     """이 목록이 그대로 T127 의 점수가 된다."""
     before, after = run.state_before, run.state_after
+    said = A.flag(run, "matches", "verdict", "accept", "is_match")
+    if said is None:
+        said = run.last_mention(["reject", "accept"]) == "accept"
     return [
-        chk.fail("채점 항목 없음", "이 문항의 정답 기준이 아직 옮겨지지 않았습니다"),
+        chk.ok("accept / reject", said is False,
+               f"reported={said} (expected False: similarity to the "
+               f"claimed PMMA is "
+               f"0.286 < 0.85)", weight=2.0, kind="EXACT"),
+        chk.reported(run, "similarity", 0.286036,
+                     tol=0.01, name="similarity to the claimed material"),
     ]

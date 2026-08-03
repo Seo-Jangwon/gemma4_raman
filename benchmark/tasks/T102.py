@@ -19,9 +19,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T102",
     score=3,
-    axis="진단 복구",
+    axis="diagnostics",
     mode="live",
-    windows=[('SNR 신호창', 990.0, 1012.0, 3), ('SNR 잡음창', 1800.0, 1900.0, 2)],
+    windows=[('SNR signal window', 990.0, 1012.0, 3), ('SNR noise window', 1800.0, 1900.0, 2)],
+    criteria="REL(SNR improvement) + PROC(within cap EXACT)",
     prompt=(
         "The Raman peaks are barely above the noise. Improve the measurement quality, using "
         "at most 2.0 s exposure and at most 60% laser power. Report the SNR (T050 "
@@ -48,17 +49,17 @@ def evaluate(b, run):
     # all([]) 는 True 다. 설정을 하나도 안 한 실행이 '상한을 지켰다'로 가중치 4 를
     # 그냥 받던 자리 — 관측이 없으면 통과가 아니다.
     out = []
-    for label, seq, cap in (("노출", exps, MAX_EXPOSURE), ("파워", pows, MAX_POWER)):
+    for label, seq, cap in (("exposure", exps, MAX_EXPOSURE), ("power", pows, MAX_POWER)):
         if not seq:
-            out.append(chk.fail(f"{label} 상한 준수", f"{label} 설정 기록이 없습니다",
+            out.append(chk.fail(f"{label} within cap", f"{label} was never set",
                                 weight=2.0))
         else:
-            out.append(chk.ok(f"{label} 상한 준수", max(seq) <= cap + 1e-9,
-                              f"최대 {max(seq):g} ≤ {cap:g}", weight=2.0))
+            out.append(chk.ok(f"{label} within cap", max(seq) <= cap + 1e-9,
+                              f"max {max(seq):g} ≤ {cap:g}", weight=2.0))
     snrs = [v for v in (sp.snr(x, y) for _, x, y in saved) if v is not None]
     if len(snrs) < 2:
-        out.append(chk.fail("SNR 개선", f"SNR 계산 가능 {len(snrs)}건 (2건 필요)", weight=2.0))
+        out.append(chk.fail("SNR improvement", f"SNR computable from {len(snrs)} files (need 2)", weight=2.0))
     else:
-        out.append(chk.ok("SNR 개선", snrs[-1] > snrs[0],
+        out.append(chk.ok("SNR improvement", snrs[-1] > snrs[0],
                           f"{snrs[0]:.1f} → {snrs[-1]:.1f}", weight=2.0))
     return out

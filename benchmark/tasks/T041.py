@@ -19,9 +19,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T041",
     score=2,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
     inputs=['T041.csv'],
+    criteria="ARRAY(rtol 1e-6)",
     prompt=(
         "Apply Savitzky-Golay smoothing (window_length=11, polyorder=3, default 'interp' "
         "edge handling) to T041.csv and save it. "
@@ -32,9 +33,7 @@ TASK = Task(
 def evaluate(b, run):
     """이 목록이 그대로 T041 의 점수가 된다."""
     before, after = run.state_before, run.state_after
-    return [
-        chk.fail("채점 항목 없음", "이 문항의 정답 기준이 아직 옮겨지지 않았습니다"),
-    ] + _array_check(run)
+    return _array_check(run)
 
 
 # ── 배열 GT ──────────────────────────────────────────────────────────────────
@@ -67,12 +66,12 @@ def _array_check(run):
     """
     want = _gt_array()
     if want is None:
-        return [chk.fail("결과 배열", f"정답 배열을 읽지 못했습니다: {GT_ARRAY}", weight=2.0)]
+        return [chk.fail("result array", f"could not read the expected array: {GT_ARRAY}", weight=2.0)]
     saved = run.spectra()
     if not saved:
-        return [chk.fail("결과 배열", "저장한 스펙트럼이 없습니다", weight=2.0)]
+        return [chk.fail("result array", "no spectrum was saved", weight=2.0)]
     got = saved[-1][2]
-    out = [chk.array("결과 배열", got[:len(want)] if len(got) >= len(want) else got,
+    out = [chk.array("result array", got[:len(want)] if len(got) >= len(want) else got,
                      want, mode=GT_MODE, weight=2.0)]
     if len(saved) > 3 and not out[0].passed:
         # 여러 개를 저장했는데 마지막이 답이 아니라면, 어느 것이 맞았는지 알려 준다.
@@ -80,7 +79,7 @@ def _array_check(run):
                if len(y) >= len(want)
                and chk.array("", y[:len(want)], want, mode=GT_MODE).passed]
         if hit:
-            out.append(chk.fail("결론 지목",
-                                f"{len(saved)}건 중 {hit}번째가 정답인데 마지막({len(saved)-1}번째)을 "
-                                f"결론으로 저장했습니다"))
+            out.append(chk.fail("which save is the conclusion",
+                                f"{len(saved)} saved, #{hit} matches the expected array but the last one (#{len(saved)-1}) "
+                                f"was saved as the conclusion"))
     return out

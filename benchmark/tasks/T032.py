@@ -17,8 +17,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T032",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="ARRAY(rtol 1e-6) - the mean is deterministic",
     prompt=(
         "Independently acquire a spectrum 5 times at the current position, compute the "
         "arithmetic-mean spectrum, and save it with save_result inside run_analysis. "
@@ -33,8 +34,8 @@ def evaluate(b, run):
     saved = run.spectra()
     out = [chk.called(run, "acquire_spectrum", times=5)]
     if len(saved) < 6:
-        return out + [chk.fail("평균 스펙트럼",
-                               f"저장 {len(saved)}건 (원본 5 + 평균 1 = 6건 필요)")]
+        return out + [chk.fail("mean spectrum",
+                               f"saved {len(saved)} files (5 originals + 1 mean = need 6)")]
     ys = [y for _, _, y in saved]
     n = min(len(y) for y in ys)
     ys = [y[:n] for y in ys]
@@ -45,8 +46,8 @@ def evaluate(b, run):
         others = [y for j, y in enumerate(ys) if j != i][:5]
         if len(others) < 5:
             continue
-        c = chk.array("평균 스펙트럼", ys[i], np.mean(others, axis=0), mode="exact",
+        c = chk.array("mean spectrum", ys[i], np.mean(others, axis=0), mode="exact",
                       weight=2.0)
         if best is None or c.score > best.score:
             best = c
-    return out + [best or chk.fail("평균 스펙트럼", "비교할 조합이 없습니다", weight=2.0)]
+    return out + [best or chk.fail("mean spectrum", "no combination available to compare", weight=2.0)]

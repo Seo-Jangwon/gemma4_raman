@@ -17,9 +17,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T067",
     score=3,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
-    windows=[('SNR 신호창', 990.0, 1012.0, 3), ('SNR 잡음창', 1800.0, 1900.0, 2)],
+    windows=[('SNR signal window', 990.0, 1012.0, 3), ('SNR noise window', 1800.0, 1900.0, 2)],
+    criteria="PROC(exposure EXACT) + NUM(5%) + REL(positive sign) / post-hoc GT",
     prompt=(
         "At the same position measure once with exposure 0.5 s and once with 2.0 s. Compute "
         "each SNR with the T050 definition and report the difference (2.0 s value minus 0.5 "
@@ -39,10 +40,10 @@ def evaluate(b, run):
     ]
     snrs = [v for v in (sp.snr(x, y) for _, x, y in saved) if v is not None]
     if len(snrs) < 2:
-        return out + [chk.fail("SNR 차", f"SNR 계산 가능 {len(snrs)}건 (2건 필요)")]
+        return out + [chk.fail("SNR difference", f"SNR computable from {len(snrs)} files (need 2)")]
     diff = snrs[1] - snrs[0]
     return out + [
         # 노출을 4배로 올리면 SNR 이 커진다 — 시료와 무관한 관계다.
-        chk.ok("SNR 증가", diff > 0, f"Δ={diff:+.3g}", weight=2.0),
-        chk.reported(run, "snr_diff", diff, rel=0.05, name="보고한 SNR 차"),
+        chk.ok("SNR increased", diff > 0, f"Δ={diff:+.3g}", weight=2.0),
+        chk.reported(run, "snr_diff", diff, rel=0.05, name="reported SNR difference"),
     ]

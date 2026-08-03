@@ -22,8 +22,13 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T107",
     score=3,
-    axis="진단 복구",
+    axis="diagnostics",
     mode="hypothetical",
+    criteria="PROC(shutter args EXACT) + ARRAY(post-hoc GT, rtol 1e-6) + NUM(ratio 5%)",
+    needs=(
+        "Optional: turning the room light on lets real stray light in. Grading works "
+        "without it (the fraction is simply near 0)."
+    ),
     prompt=(
         "Suppose a spectrum shows a strong broad component unrelated to the sample and you "
         "suspect room light entering the spectrometer. State the tools you would call, in "
@@ -43,7 +48,7 @@ def evaluate(b, run):
     saved = run.spectra()
     out = [chk.arg_set(run, "acquire_spectrum", "shutter", ["close", "auto"])]
     if len(saved) < 2:
-        return out + [chk.fail("암프레임 차감", f"저장 {len(saved)}건 (2건 필요)")]
+        return out + [chk.fail("dark-frame subtraction", f"saved {len(saved)} files (need 2)")]
     n = min(len(saved[0][2]), len(saved[1][2]))
     first, second = saved[0][2][:n], saved[1][2][:n]
     # 차감 방향은 판정 대상이다. 예전에는 채점기가 평균으로 알아서 정렬한 뒤
@@ -55,13 +60,13 @@ def evaluate(b, run):
     ratio = float(np.abs(dark).sum() / tot) if tot > 0 else 0.0
 
     cands = [y for _, _, y in saved if len(y) == n]
-    best = max((chk.array("차감 배열", y, want, mode="exact", weight=2.0) for y in cands),
+    best = max((chk.array("subtracted array", y, want, mode="exact", weight=2.0) for y in cands),
                key=lambda c: c.score, default=None)
-    wrong = max((chk.array("역방향", y, dark - normal, mode="exact") for y in cands),
+    wrong = max((chk.array("reversed direction", y, dark - normal, mode="exact") for y in cands),
                 key=lambda c: c.score, default=None)
     return out + [
-        best or chk.fail("차감 배열", "길이가 맞는 배열이 없습니다", weight=2.0),
-        chk.ok("차감 방향", not (wrong and wrong.passed and not (best and best.passed)),
-               "정상 - 암프레임", weight=2.0),
-        chk.reported(run, "external_fraction", ratio, rel=0.05, name="외부광 비율"),
+        best or chk.fail("subtracted array", "no saved array has a matching length", weight=2.0),
+        chk.ok("subtraction direction", not (wrong and wrong.passed and not (best and best.passed)),
+               "normal minus dark", weight=2.0),
+        chk.reported(run, "external_fraction", ratio, rel=0.05, name="stray-light fraction"),
     ]

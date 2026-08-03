@@ -18,9 +18,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T068",
     score=3,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
-    windows=[('1001 cm-1 밴드', 995.0, 1007.0, 2)],
+    windows=[('1001 cm-1 band', 995.0, 1007.0, 2)],
+    criteria="PROC + NUM(5%) + REL(0<=RSD<100) / post-hoc GT",
     prompt=(
         "Measure a spectrum 5 times at the same position and report the sample relative "
         "standard deviation (std with ddof=1 divided by the mean, in percent) of the 1001 "
@@ -36,14 +37,14 @@ def evaluate(b, run):
     saved = run.spectra()
     out = [chk.called(run, "acquire_spectrum", times=5)]
     if len(saved) < 5:
-        return out + [chk.fail("RSD", f"저장 {len(saved)}건 (5건 필요)")]
+        return out + [chk.fail("RSD", f"saved {len(saved)} files (need 5)")]
     vals = [sp.band_max(x, y, 996.0, 1006.0) for _, x, y in saved[:5]]
     if any(v is None for v in vals):
-        return out + [chk.blocked("RSD", "측정 축이 996~1006 cm-1 을 덮지 않습니다")]
+        return out + [chk.blocked("RSD", "the instrument axis does not cover 996-1006 cm-1")]
     rsd = sp.rsd_percent(vals)
     if rsd is None:
-        return out + [chk.fail("RSD", "평균이 0 이라 RSD 를 정의할 수 없습니다")]
+        return out + [chk.fail("RSD", "the mean is 0, so RSD is undefined")]
     return out + [
         chk.reported(run, "rsd_pct", rsd, rel=0.05, name="RSD(%)", weight=2.0),
-        chk.ok("범위", 0 <= rsd < 100, f"{rsd:.3g}% ∈ [0,100)"),
+        chk.ok("value range", 0 <= rsd < 100, f"{rsd:.3g}% ∈ [0,100)"),
     ]

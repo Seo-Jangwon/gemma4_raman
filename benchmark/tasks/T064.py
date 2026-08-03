@@ -18,9 +18,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T064",
     score=3,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
-    windows=[('1001 cm-1 밴드', 995.0, 1007.0, 2)],
+    windows=[('1001 cm-1 band', 995.0, 1007.0, 2)],
+    criteria="SET(coords 10 items) + NUM(5%) / post-hoc GT",
     prompt=(
         "Scan 10 positions at +0.0 to +0.9 mm in X (0.1 mm steps) from the current position. "
         "Apply spike removal (5-point median, 5x MAD), IPBSA baseline order 5 and L2 "
@@ -35,17 +36,17 @@ def evaluate(b, run):
 
     saved = run.spectra()
     if len(saved) < 10:
-        return [chk.fail("10점 스캔", f"저장 {len(saved)}건 (10건 필요)", weight=2.0)]
+        return [chk.fail("10-point scan", f"saved {len(saved)} files (need 10)", weight=2.0)]
     # 문항이 요구한 값은 '1001 cm-1 밴드의 세기'다. 스펙트럼 전체 최대값이 아니다 —
     # 예전 규칙은 전역 최대를 썼는데 그건 다른 물리량이라 보고값과 맞을 이유가 없다.
     ints = [sp.band_max(x, y, 995.0, 1007.0) for _, x, y in saved[:10]]
     if any(v is None for v in ints):
-        return [chk.blocked("1001 cm-1 세기", "측정 축이 995~1007 cm-1 을 덮지 않습니다")]
+        return [chk.blocked("intensity at 1001 cm-1", "the instrument axis does not cover 995-1007 cm-1")]
     l2ok = all(abs(float(np.linalg.norm(y)) - 1.0) < 0.05 for _, _, y in saved[:10])
     got = run.answer.get("intensities")
     return [
-        chk.ok("L2 정규화", l2ok, "각 스펙트럼의 L2 노름이 1"),
-        chk.set_match("1001 cm-1 세기 10값",
+        chk.ok("L2 normalization", l2ok, "every spectrum has L2 norm 1"),
+        chk.set_match("10 intensities at 1001 cm-1",
                       [float(v) for v in got] if isinstance(got, list) else None,
                       ints, tol=max(ints) * 0.05, ordered=True, partial=True, weight=2.0),
     ]

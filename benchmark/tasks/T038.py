@@ -17,9 +17,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T038",
     score=2,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
     inputs=['T038.csv'],
+    criteria="ARRAY(rtol 1e-6) on the plotted array",
     prompt=(
         "Load T038.csv (a polystyrene Raman spectrum) and display it as a line graph of "
         "Raman shift versus intensity. "
@@ -34,15 +35,15 @@ def evaluate(b, run):
     out = [chk.called(run, "run_analysis", at_least=1, at_most=3)]
     ref = _input(b, "T038.csv")
     if ref is None:
-        return out + [chk.fail("플롯 배열", "입력 T038.csv 를 읽지 못했습니다")]
+        return out + [chk.fail("plotted arrays", "could not read the input T038.csv")]
     # 문항이 요구한 것은 그림 한 장이다. 저장 CSV 를 강제하지 않는다 —
     # 대신 '입력의 실제 통계를 인용했는가'로 본다(그림만 그리고 값을 지어내면 걸린다).
     x, y = ref
     return out + [
-        chk.reported(run, "n_points", float(len(x)), tol=0, name="점 개수"),
-        chk.reported(run, "x_min", float(x.min()), tol=1.0, name="x 최소"),
-        chk.reported(run, "x_max", float(x.max()), tol=1.0, name="x 최대"),
-        chk.reported(run, "y_max", float(y.max()), rel=0.02, name="세기 최대"),
+        chk.reported(run, "n_points", float(len(x)), tol=0, name="number of points"),
+        chk.reported(run, "x_min", float(x.min()), tol=1.0, name="x min"),
+        chk.reported(run, "x_max", float(x.max()), tol=1.0, name="x max"),
+        chk.reported(run, "y_max", float(y.max()), rel=0.02, name="max intensity"),
     ]
 
 

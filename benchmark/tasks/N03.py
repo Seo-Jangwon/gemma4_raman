@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="N03",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="PROC(dedicated tool) + EXACT(row count)",
     prompt=(
         "Build a CSV table summarising every measurement of this session, one row per "
         "measurement. "

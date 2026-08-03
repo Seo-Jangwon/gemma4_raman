@@ -18,8 +18,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T026",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="PROC(tool choice EXACT) + STATE(missing none)",
     prompt=(
         "At the same position, capture the microscope view with capture_scene, acquire a "
         "Raman spectrum, and record both as one measurement point before moving. "
@@ -46,7 +47,7 @@ def _point_complete(run):
     """
     results = run.results("save_measurement_point")
     if not results:
-        return [chk.fail("측정점 완전", "save_measurement_point 를 부르지 않았습니다",
+        return [chk.fail("measurement point complete", "save_measurement_point was never called",
                          weight=2.0)]
     missing = [r.get("missing") for r in results if r.get("missing")]
-    return [chk.ok("측정점 완전", not missing, f"missing={missing or '없음'}", weight=2.0)]
+    return [chk.ok("measurement point complete", not missing, f"missing={missing or 'none'}", weight=2.0)]

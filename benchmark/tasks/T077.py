@@ -19,9 +19,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T077",
     score=3,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
     inputs=['T077_ref.csv'],
+    criteria="PROC(<=8 calls) + EXACT(chosen combination) / post-hoc GT",
     prompt=(
         "Test at most 8 of the combinations of exposure 0.25, 0.5, 1.0, 2.0 s and laser "
         "power 20, 40, 60 %. Among the conditions satisfying SNR >= 20 (T050 definition), no "
@@ -47,7 +48,7 @@ def evaluate(b, run):
     saved = run.spectra()
     out = [
         chk.called(run, "acquire_spectrum", at_least=1, at_most=8),
-        chk.ok("정의된 격자 안에서만 시도", not off_grid, f"격자 밖 {len(off_grid)}건"),
+        chk.ok("stayed inside the defined grid", not off_grid, f"off-grid {len(off_grid)} files"),
     ]
     # 문항의 핵심은 '조건을 만족하는 것 중 dose 가 최소인 조합'이다. 예전에는 그 선택을
     # 아예 채점하지 않아 탐색만 하면 통과였다.
@@ -61,13 +62,13 @@ def evaluate(b, run):
     got_e = run.answer.get("exposure")
     got_p = run.answer.get("power")
     if not ok_pairs:
-        return out + [chk.fail("최소 dose 조합",
-                               "조건(SNR≥10 · 포화 0)을 만족한 측정이 없습니다", weight=2.0)]
+        return out + [chk.fail("minimum-dose combination",
+                               "no acquisition met the condition (SNR >= 10, 0 saturated)", weight=2.0)]
     want = min(ok_pairs, key=lambda t: t[0] * t[1])
     return out + [
-        chk.ok("최소 dose 조합 선택",
+        chk.ok("chose the minimum-dose combination",
                got_e is not None and got_p is not None
                and abs(float(got_e) - want[0]) < 1e-6 and abs(float(got_p) - want[1]) < 1e-6,
-               f"보고=({got_e}, {got_p}) 정답={want} "
-               f"(만족 조합={ok_pairs})", weight=2.0),
+               f"reported=({got_e}, {got_p}) expected={want} "
+               f"(qualifying combinations={ok_pairs})", weight=2.0),
     ]

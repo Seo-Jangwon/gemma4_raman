@@ -18,9 +18,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T073",
     score=3,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
     inputs=['T073.csv'],
+    criteria="EXACT(labels, 100% after relabeling)",
     prompt=(
         "After the same preprocessing as T072, cluster the spectra of T073.csv into 2 groups "
         "with KMeans(n_clusters=2, n_init=10, random_state=0) and show each coordinate's "
@@ -36,25 +37,25 @@ def evaluate(b, run):
     K = 2
     src = _input(b, "T073.csv")
     if src is None:
-        return [chk.fail("클러스터 레이블", "입력 T073.csv 를 읽지 못했습니다", weight=2.0)]
+        return [chk.fail("cluster labels", "could not read the input T073.csv", weight=2.0)]
     got = run.answer.get("labels")
     if not isinstance(got, list):
-        return [chk.fail("클러스터 레이블", "answer.labels 가 없습니다", weight=2.0)]
+        return [chk.fail("cluster labels", "answer.labels is missing", weight=2.0)]
 
     want = _kmeans_labels(src, K)
     if want is None:
-        return [chk.fail("클러스터 레이블", "재계산에 실패했습니다", weight=2.0)]
+        return [chk.fail("cluster labels", "recomputation failed", weight=2.0)]
     if len(got) != len(want):
-        return [chk.fail("클러스터 레이블",
-                         f"{len(got)}개 보고 (정답 {len(want)}개)", weight=2.0)]
+        return [chk.fail("cluster labels",
+                         f"{len(got)} reported (expected {len(want)} items)", weight=2.0)]
     # 레이블 번호 자체는 임의다. 0↔1 을 바꾼 것도 같은 군집이므로 둘 중 잘 맞는 쪽으로 본다.
     g = [int(v) for v in got]
     same = sum(1 for a, c in zip(g, want) if a == c)
     flip = sum(1 for a, c in zip(g, want) if a != c)
     hit = max(same, flip)
     return [
-        chk.ok("클러스터 레이블(번호 교환 허용)", hit == len(want),
-               f"{hit}/{len(want)} 일치", weight=2.0),
+        chk.ok("cluster labels (relabeling allowed)", hit == len(want),
+               f"{hit}/{len(want)} matched", weight=2.0),
     ]
 
 

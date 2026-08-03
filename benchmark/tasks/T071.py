@@ -18,9 +18,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T071",
     score=3,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
     inputs=['T071_ref.csv'],
+    criteria="SET(coords 20 items) + EXACT(boundary index, ±1 steps) / post-hoc GT",
     prompt=(
         "Measure spectra at 20 positions from X=37.0 to 38.9 mm in 0.1 mm steps. Compute "
         "each spectrum's similarity to T071_ref.csv (common axis, L2, cosine) and report the "
@@ -36,8 +37,8 @@ def evaluate(b, run):
     ref = _input(b, "T071_ref.csv")
     saved = run.spectra()
     if ref is None or len(saved) < 20:
-        return [chk.fail("경계 위치",
-                         f"참조 {'있음' if ref else '없음'} / 저장 {len(saved)}건 (20건 필요)",
+        return [chk.fail("boundary position",
+                         f"reference {'present' if ref else 'none'} / saved {len(saved)} files (need 20)",
                          weight=2.0)]
     xr, yr = ref
     sims = []
@@ -49,8 +50,8 @@ def evaluate(b, run):
     want = int(np.argmax(np.abs(np.diff(sims))))
     got = run.answer.get("boundary_index")
     return [
-        chk.ok("경계 위치", got is not None and abs(int(got) - want) <= 1,
-               f"보고={got} 정답={want}(±1)", weight=2.0),
+        chk.ok("boundary position", got is not None and abs(int(got) - want) <= 1,
+               f"reported={got} expected={want}(±1)", weight=2.0),
     ]
 
 

@@ -18,9 +18,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T128",
     score=2,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
     inputs=['T128.csv', 'reference_library.csv'],
+    criteria="EXACT(material, spectrum_id on ties)",
     prompt=(
         "Interpolate T128.csv and reference_library.csv onto the reference axis, apply IPBSA "
         "baseline order 5 and L2 normalization, then find the material with the highest "
@@ -34,5 +35,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T128 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported_label(run, "material", "calcite", ['PET', 'PMMA', 'aragonite', 'calcite', 'polystyrene', 'silicon'], name="물질명"),
+        chk.reported_label(run, "material", "calcite", ['PET', 'PMMA', 'aragonite', 'calcite', 'polystyrene', 'silicon'], name="material"),
     ]

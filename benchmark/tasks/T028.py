@@ -17,8 +17,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T028",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="PROC(args EXACT) + SET(coords 9 items, ±0.001)",
     prompt=(
         "Measure a 3x3 grid at X=37.8, 37.9, 38.0 mm and Y=25.2, 25.3, 25.4 mm, saving each "
         "spectrum with its coordinates. "

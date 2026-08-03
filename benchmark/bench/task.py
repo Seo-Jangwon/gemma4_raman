@@ -17,6 +17,8 @@ class Task:
     score    배점(총점 가중치). xlsx '배점' 열과 같아야 한다
     axis     역량축. 축별 집계에 쓴다
     prompt   에이전트에게 그대로 보내는 문장
+    criteria 이 문항을 무엇으로 맞다고 보는지 — 한 줄 규칙. 결과 파일에 그대로 실린다.
+             영어로 쓴다: 결과 JSON 은 사람이 아니라 도구·외부 협업자도 읽는다.
     inputs   업로드해야 하는 입력 파일 이름들(benchmark 입력 폴더 기준)
 
     mode     "live"        장비를 실제로 조작하게 하고 그 결과를 채점한다(기본)
@@ -34,6 +36,7 @@ class Task:
     score: float
     axis: str
     prompt: str
+    criteria: str = ""
     inputs: list[str] = field(default_factory=list)
     mode: str = "live"
     windows: list[tuple] = field(default_factory=list)
@@ -54,3 +57,7 @@ class Task:
             raise ValueError(f"{self.id}: prompt 가 비어 있습니다")
         if self.score <= 0:
             raise ValueError(f"{self.id}: 배점이 0 이하입니다")
+        # 결과 파일은 '그것만 보고 무엇을 틀렸는지 알 수 있어야' 한다. 정답 기준이 비면
+        # 판정 이름만 남아 근거 없는 감점처럼 보인다.
+        if not self.criteria.strip():
+            raise ValueError(f"{self.id}: criteria 가 비어 있습니다")

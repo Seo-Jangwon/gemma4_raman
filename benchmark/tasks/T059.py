@@ -18,9 +18,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T059",
     score=3,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
-    windows=[('1602 cm-1 밴드', 1596.0, 1608.0, 2)],
+    windows=[('1602 cm-1 band', 1596.0, 1608.0, 2)],
+    criteria="PROC(args EXACT) + SET(peak ±3 cm-1) / post-hoc GT",
     prompt=(
         "Perform autofocus, measure a spectrum once, apply IPBSA baseline correction with "
         "order 5, and report the peaks found (prominence 5% of range). "
@@ -39,16 +40,16 @@ def evaluate(b, run):
         chk.arg(run, "apply_background_subtraction", "poly_order", 5),
     ]
     if not saved:
-        return out + [chk.fail("보정 후 피크", "저장 스펙트럼이 없습니다", weight=2.0)]
+        return out + [chk.fail("peaks after correction", "no saved spectrum", weight=2.0)]
     # 에이전트가 보정 결과를 저장했다면 그것이 곧 답이다. 채점기가 한 번 더 보정하면
     # 이중 처리가 되어, 중간 산출물을 저장했는지 여부에 따라 정답이 달라진다.
     _, x, y = saved[-1]
     want = sp.peaks(x, y)[:5]
     got = run.answer.get("peaks")
     if not want:
-        return out + [chk.fail("보정 후 피크", "저장 파일에서 피크가 검출되지 않았습니다",
+        return out + [chk.fail("peaks after correction", "no peak was detected in the saved file",
                                weight=2.0)]
     return out + [
-        chk.set_match("보정 후 피크", [float(v) for v in got] if isinstance(got, list) else None,
+        chk.set_match("peaks after correction", [float(v) for v in got] if isinstance(got, list) else None,
                       want, tol=TOL_PEAK_CM1, partial=True, weight=2.0),
     ]

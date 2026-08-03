@@ -18,8 +18,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T060",
     score=3,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="SET(coords 9 items) + NUM(peak ±3 cm-1, intensity 5%) / post-hoc GT",
     prompt=(
         "Measure a 3x3 grid at X=40.0, 40.1, 40.2 mm and Y=27.0, 27.1, 27.2 mm, and save a "
         "table of the strongest peak position and intensity at each position together with "
@@ -41,11 +42,11 @@ def evaluate(b, run):
         chk.arg(run, "run_grid_scan", "cols", 3),
     ]
     if len(saved) < 9:
-        return out + [chk.fail("격자 피크 표", f"저장 {len(saved)}건 (9건 필요)", weight=2.0)]
+        return out + [chk.fail("grid peak table", f"saved {len(saved)} files (need 9)", weight=2.0)]
     pos = [sp.strongest_peak(x, y) for _, x, y in saved[:9]]
     got = run.answer.get("peak_positions")
     return out + [
-        chk.set_match("9점 최강 피크 위치",
+        chk.set_match("strongest peak position at 9 points",
                       [float(v) for v in got] if isinstance(got, list) else None,
                       pos, tol=TOL_PEAK_CM1, ordered=True, partial=True, weight=2.0),
     ]

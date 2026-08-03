@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T010",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="PROC + EXACT(already_streaming reported)",
     prompt=(
         "Start real-time camera streaming and report whether it was already running. "
     ),

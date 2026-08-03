@@ -517,13 +517,8 @@ async def bench_reset(body: BenchResetRequest, request: Request):
         state.executor, lambda: B.reset_all(home, move_stage=body.move_stage))
 
 
-@app.post("/api/bench/setup")
-async def bench_setup(body: BenchResetRequest, request: Request):
-    """문항이 요구하는 사전 상태를 만든다(레이저 점등·쿨러 OFF·장면 주입 등)."""
-    import backend.bench_ops as B
-    state = _state(request)
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(state.executor, lambda: B.setup(body.task))
+# /api/bench/setup 은 없앴다(2026-08-03). 문항별 사전 세팅은 문항 파일의 setup(b) 가
+# /api/bench/tool 로 직접 건다 — 정의가 두 곳에 갈라지지 않게.
 
 
 @app.post("/api/bench/teardown")
@@ -598,21 +593,11 @@ async def bench_busy(body: BenchBusyRequest):
 @app.post("/api/bench/inputs")
 async def bench_inputs(body: BenchInputsRequest):
     """문항 입력 파일을 에이전트가 볼 수 있는 업로드 자리에 올린다."""
-    import shutil
-
     import backend.bench_ops as B
-    from backend.upload_store import UPLOAD_ROOT
-    out, missing = [], []
-    UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-    for name in body.names or []:
-        src = B._INPUTS / name
-        if not src.exists():
-            missing.append(name)
-            continue
-        shutil.copy2(src, UPLOAD_ROOT / src.name)
-        out.append(src.name)
-    return {"ok": not missing, "uploaded": out,
-            "error": f"입력 파일 없음: {', '.join(missing)}" if missing else ""}
+    try:
+        return B.push_inputs(body.names)
+    except Exception as e:
+        return {"ok": False, "uploaded": [], "error": f"{type(e).__name__}: {e}"}
 
 
 @app.get("/api/bench/state")

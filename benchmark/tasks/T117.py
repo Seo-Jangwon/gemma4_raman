@@ -17,9 +17,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T117",
     score=2,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
-    inputs=['reference_library.csv'],
+    inputs=['T117.csv', 'reference_library.csv'],
+    criteria="EXACT(material)",
     prompt=(
         "Identify the material of T117.csv against reference_library.csv, which includes PET "
         "and PMMA references. "
@@ -31,5 +32,6 @@ def evaluate(b, run):
     """이 목록이 그대로 T117 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.fail("채점 항목 없음", "이 문항의 정답 기준이 아직 옮겨지지 않았습니다"),
+        chk.reported_label(run, "material", 'PET', ['PET', 'PMMA', 'aragonite', 'calcite', 'polystyrene', 'silicon'], name="material",
+                           weight=2.0),
     ]

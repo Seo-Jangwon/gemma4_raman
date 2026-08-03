@@ -13,14 +13,16 @@
 """
 from bench import Task, chk
 from bench.check import MM, MM_GRID, TOL_PEAK_CM1        # noqa: F401
+from bench import answer as A
 from bench import spectra as sp                          # noqa: F401
 
 TASK = Task(
     id="T121",
     score=2,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
     inputs=['T121.csv', 'reference_library_8.csv'],
+    criteria="EXACT(8 items in order) + NUM(scores ±0.01)",
     prompt=(
         "Compare T121.csv with all 8 references in reference_library_8.csv and sort every "
         "reference by similarity, descending. If two scores are equal, order them by "
@@ -32,6 +34,13 @@ TASK = Task(
 def evaluate(b, run):
     """이 목록이 그대로 T121 의 점수가 된다."""
     before, after = run.state_before, run.state_after
+    order = ["PS_01", "PS_03", "PS_02", "PET_02", "PMMA_01", "PET_01", "CAL_01", "SI_01"]
+    scores = [0.994552, 0.993954, 0.978229, 0.228639, 0.179389, 0.167487, 0.031256, 0.010961]
+    got_i = A.seq(run, "ranking", "sorted", "results", "references", field="spectrum_id")
+    got_s = A.seq(run, "ranking", "sorted", "results", "references", field="score",
+                  cast=float)
     return [
-        chk.fail("채점 항목 없음", "이 문항의 정답 기준이 아직 옮겨지지 않았습니다"),
+        chk.set_match("all 8 references in order", got_i, order, tol=0, ordered=True,
+                      partial=True, weight=2.0),
+        chk.set_match("similarity scores", got_s, scores, tol=0.01, ordered=True),
     ]

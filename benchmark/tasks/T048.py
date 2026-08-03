@@ -17,9 +17,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T048",
     score=2,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
     inputs=['T048_a.csv', 'T048_b.csv'],
+    criteria="ARRAY(rtol 1e-6) ×2 + STATE(legend 2 entries)",
     prompt=(
         "Overlay T048_a.csv and T048_b.csv on the same axes and label which line is which "
         "with a legend. "
@@ -34,12 +35,12 @@ def evaluate(b, run):
     out = [chk.called(run, "run_analysis", at_least=1, at_most=3)]
     a, bb = _input(b, "T048_a.csv"), _input(b, "T048_b.csv")
     if a is None or bb is None:
-        return out + [chk.fail("겹쳐 그리기", "입력 T048_a/b.csv 를 읽지 못했습니다")]
+        return out + [chk.fail("overlay plot", "could not read the inputs T048_a/b.csv")]
     return out + [
-        chk.keywords(run, ["legend", "범례", "T048_a", "T048_b"], name="두 곡선을 구분했는가"),
-        chk.reported(run, "n_curves", 2.0, tol=0, name="곡선 개수"),
-        chk.reported(run, "a_max", float(a[1].max()), rel=0.02, name="A 최대"),
-        chk.reported(run, "b_max", float(bb[1].max()), rel=0.02, name="B 최대"),
+        chk.keywords(run, ["legend", "T048_a", "T048_b"], name="the two curves are distinguishable"),
+        chk.reported(run, "n_curves", 2.0, tol=0, name="number of curves"),
+        chk.reported(run, "a_max", float(a[1].max()), rel=0.02, name="A max"),
+        chk.reported(run, "b_max", float(bb[1].max()), rel=0.02, name="B max"),
     ]
 
 

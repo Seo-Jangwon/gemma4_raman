@@ -16,9 +16,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T046",
     score=2,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
     inputs=['T046_sample.csv', 'T046_ref.csv'],
+    criteria="NUM(±0.02) + SET(pairs EXACT)",
     prompt=(
         "Compare the peaks of T046_sample.csv with the polystyrene reference T046_ref.csv "
         "and compute the match ratio. Detect peaks with prominence at 5% of range, pair them "
@@ -32,5 +33,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T046 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported(run, "match_ratio", 1.0, tol=0.02, name="일치율"),
+        chk.reported(run, "match_ratio", 1.0, tol=0.02, name="match ratio"),
     ]

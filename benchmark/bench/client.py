@@ -175,6 +175,10 @@ class Bench:
         self.agent = agent
         self.timeout = timeout
         self.run_id = ""
+        # 사전 세팅이 조용히 실패한 목록. 문항 파일의 setup(b) 는 b.hw() 의 반환을 보지
+        # 않으므로(그게 읽기 좋다), 실패를 여기 모아 러너가 결과에 남긴다. 안 그러면
+        # 전제가 안 걸린 채로 돌아 **낮은 점수가 에이전트 탓처럼 기록된다**.
+        self.setup_errors: list[str] = []
 
     # ── 점검 ─────────────────────────────────────────────────────────────────
     def health(self) -> dict:
@@ -209,7 +213,9 @@ class Bench:
         에이전트가 아니라 **벤치가** 상태를 만들 때 쓴다(노출을 포화가 나게 올려 두기,
         쿨러를 꺼 두기, 오토포커스 후 일부러 흐트러뜨리기). 채점 대상 호출로 세지 않는다.
         """
-        return self._post("/api/bench/tool", {"tool": tool, "args": args}, timeout=600.0)
+        return self._track(f"{tool}(…)",
+                           self._post("/api/bench/tool", {"tool": tool, "args": args},
+                                      timeout=600.0))
 
     def inject_scene(self, png: str) -> dict:
         """analyze_microscope_image **하나만** 합성 장면을 보게 한다.
@@ -218,7 +224,8 @@ class Bench:
         보게 되어 Z 를 아무리 바꿔도 선명도가 안 변한다 — 영영 수렴하지 않는다.
         도구 하나만 바꾸면 모델이 보는 장면만 합성이고 나머지 광학은 진짜다.
         """
-        return self._post("/api/bench/scene", {"png": png}, timeout=60.0)
+        return self._track(f"inject_scene({png})",
+                           self._post("/api/bench/scene", {"png": png}, timeout=60.0))
 
     def hold_busy(self, seconds: float = 25.0) -> dict:
         """장비를 점유해 다른 호출에 busy 를 돌려준다.
@@ -226,7 +233,19 @@ class Bench:
         긴 측정을 실제로 돌려도 같은 효과지만 시료에 광량이 들어간다. 락만 잡으면
         부작용이 없다.
         """
-        return self._post("/api/bench/busy", {"seconds": seconds}, timeout=60.0)
+        return self._track(f"hold_busy({seconds})",
+                           self._post("/api/bench/busy", {"seconds": seconds}, timeout=60.0))
+
+    def _track(self, label: str, resp: dict) -> dict:
+        """사전 세팅 호출의 실패를 기억한다.
+
+        문항 파일은 `b.hw("set_ccd_cooler", on=False)` 라고만 쓴다 — 거기서 반환을 검사하게
+        하면 143개 파일이 전부 지저분해지고, 어차피 빠뜨리는 곳이 생긴다. 대신 여기서 모아
+        러너가 결과의 errors 에 남긴다. 세팅이 안 걸린 채로 돈 문항을 나중에 구별할 수 있다.
+        """
+        if isinstance(resp, dict) and resp.get("ok") is False:
+            self.setup_errors.append(f"{label}: {resp.get('error')}")
+        return resp
 
     def teardown(self) -> dict:
         """문항이 남긴 락·도구 패치를 푼다."""
@@ -270,7 +289,7 @@ class Bench:
                     elif kind == "error":
                         r.errors.append(ev.get("detail") or "unknown")
         except Exception as e:
-            r.errors.append(f"스트림 실패: {type(e).__name__}: {e}")
+            r.errors.append(f"stream failed: {type(e).__name__}: {e}")
         r.elapsed_s = time.time() - t0
         r.answer = _parse_answer(r.text)
         r.artifacts = self.artifacts(sid)
@@ -311,7 +330,7 @@ def _sse(resp):
         try:
             yield json.loads(line[5:].strip())
         except Exception:
-            yield {"type": "error", "detail": f"SSE 파싱 실패: {line[:200]}"}
+            yield {"type": "error", "detail": f"SSE parse failed: {line[:200]}"}
 
 
 _ANSWER = re.compile(r"```json\s*(\{.*?\})\s*```", re.S)

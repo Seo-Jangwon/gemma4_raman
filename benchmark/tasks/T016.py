@@ -14,8 +14,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T016",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="STATE(exposure EXACT)",
     prompt=(
         "Set the CCD exposure time to 1.0 s. "
     ),
@@ -26,5 +27,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T016 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.state("실행 후 exposure_time_s", after, "exposure_time_s", 1.0, tol=1e-06),
+        chk.state("final exposure_time_s", after, "exposure_time_s", 1.0, tol=1e-06),
     ]

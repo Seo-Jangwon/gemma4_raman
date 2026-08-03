@@ -16,8 +16,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T024",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="STATE(power EXACT ×3) + PROC(no redundant queries)",
     prompt=(
         "At the same position, measure once at laser power 20%, 40% and 60%, and report the "
         "three saved file names. "
@@ -32,5 +33,5 @@ def evaluate(b, run):
         chk.called(run, "acquire_spectrum", times=3),
         chk.called(run, "get_laser_status", at_least=0, at_most=2),
         chk.arg_set(run, "acquire_spectrum", "power", [20, 40, 60]),
-        chk.unchanged("건드리지 않았는가", before, after, ['x', 'y']),
+        chk.unchanged("left untouched", before, after, ['x', 'y']),
     ]

@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T017",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="PROC(both tools called) + STATE(cooler_on True, <5 polls)",
     prompt=(
         "Set the CCD target temperature to -45 C and turn the cooler on. "
     ),
@@ -31,5 +32,5 @@ def evaluate(b, run):
         chk.called(run, "set_ccd_cooler", times=1),
         chk.called(run, "get_ccd_info", at_least=0, at_most=4),
         chk.arg(run, "set_ccd_temperature", "temp", -45),
-        chk.state("실행 후 cooler_on", after, "cooler_on", True),
+        chk.state("final cooler_on", after, "cooler_on", True),
     ]

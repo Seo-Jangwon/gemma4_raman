@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T001",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="STATE(coords ±1e-4)",
     prompt=(
         "Move the stage once to the absolute coordinates X=35.0, Y=25.0, Z=0.5 mm. "
     ),
@@ -27,7 +28,7 @@ def evaluate(b, run):
     """이 목록이 그대로 T001 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.state("실행 후 x", after, "x", 35.0, tol=MM),
-        chk.state("실행 후 y", after, "y", 25.0, tol=MM),
-        chk.state("실행 후 z", after, "z", 0.5, tol=MM),
+        chk.state("final x", after, "x", 35.0, tol=MM),
+        chk.state("final y", after, "y", 25.0, tol=MM),
+        chk.state("final z", after, "z", 0.5, tol=MM),
     ]

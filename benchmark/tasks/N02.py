@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="N02",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="PROC(dedicated tool EXACT)",
     prompt=(
         "Combine every spectrum measured in this session into one grid image, 3 columns "
         "wide. "

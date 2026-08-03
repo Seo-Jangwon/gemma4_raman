@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T012",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="PROC(args EXACT)",
     prompt=(
         "Set the camera exposure time to 50 ms. "
     ),

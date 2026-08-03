@@ -17,9 +17,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T103",
     score=3,
-    axis="진단 복구",
+    axis="diagnostics",
     mode="live",
-    inputs=['T103_ref.csv'],
+    inputs=['T103.csv', 'T103_ref.csv'],
+    criteria="NUM(shift ±0.2 cm-1, sign included) + SET(peak ±3 cm-1)",
     prompt=(
         "All peaks of T103.csv are shifted by the same amount from the expected positions of "
         "the reference T103_ref.csv. Estimate the shift by cross-correlation, correct it, "
@@ -32,5 +33,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T103 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported(run, "shift_cm1", 1.0, tol=0.2, name="시프트"),
+        chk.reported(run, "shift_cm1", 1.0, tol=0.2, name="shift"),
     ]

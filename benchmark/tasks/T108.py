@@ -17,8 +17,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T108",
     score=3,
-    axis="진단 복구",
+    axis="diagnostics",
     mode="live",
+    inputs=['T108.csv'],
+    criteria="NUM(slope 10%) + EXACT(direction of change)",
     prompt=(
         "T108.csv holds 10 consecutive measurements (column frame_index 0-9) whose baseline "
         "drifts over time. Quantify the drift as the linear regression slope of the median "
@@ -31,5 +33,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T108 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported(run, "drift_slope", 17.98994735783482, rel=0.1, name="드리프트 기울기"),
+        chk.reported(run, "drift_slope", 17.98994735783482, rel=0.1, name="drift slope"),
     ]

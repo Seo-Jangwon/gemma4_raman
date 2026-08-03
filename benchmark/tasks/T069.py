@@ -20,9 +20,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T069",
     score=3,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
-    windows=[('SNR 신호창', 990.0, 1012.0, 3), ('SNR 잡음창', 1800.0, 1900.0, 2)],
+    windows=[('SNR signal window', 990.0, 1012.0, 3), ('SNR noise window', 1800.0, 1900.0, 2)],
+    criteria="PROC(index EXACT) + EXACT(chosen index) / post-hoc GT",
     prompt=(
         "Measure once at each pre-amplifier gain index 0, 1 and 2, and select the index with "
         "the highest SNR (T050 definition) among the results that are not saturated. If "
@@ -41,12 +42,12 @@ def evaluate(b, run):
         chk.called(run, "acquire_spectrum", times=3),
     ]
     if len(saved) < 3:
-        return out + [chk.fail("이득 선택", f"저장 {len(saved)}건 (3건 필요)")]
+        return out + [chk.fail("gain choice", f"saved {len(saved)} files (need 3)")]
     # 저장 순서 i 를 그대로 gain 인덱스로 쓰면 안 된다 — 에이전트가 어떤 순서로 돌렸는지
     # 모른다. 실제로 건 gain 인자를 순서대로 읽어 짝짓는다.
     gains = run.args("set_ccd_preamp_gain", "index")[:3]
     if len(gains) < 3:
-        return out + [chk.fail("이득 선택", f"gain 설정 {len(gains)}회 (3회 필요)")]
+        return out + [chk.fail("gain choice", f"gain set {len(gains)} times (need 3)")]
     cand = []
     for gi, (_, x, y) in zip(gains, saved[:3]):
         if sp.saturated_count(y) > 2:
@@ -55,11 +56,11 @@ def evaluate(b, run):
         if s is not None:
             cand.append((int(gi), s))
     if not cand:
-        return out + [chk.fail("이득 선택", "포화되지 않은 측정이 없습니다")]
+        return out + [chk.fail("gain choice", "no unsaturated acquisition")]
     want = min(cand, key=lambda t: (-t[1], t[0]))[0]     # 동점이면 낮은 인덱스
     got = run.answer.get("index")
     return out + [
-        chk.ok("선택한 gain 인덱스", got is not None and int(got) == want,
-               f"선택={got} 정답={want} (SNR={[(g, round(s, 1)) for g, s in cand]})",
+        chk.ok("chosen gain index", got is not None and int(got) == want,
+               f"chosen={got} expected={want} (SNR={[(g, round(s, 1)) for g, s in cand]})",
                weight=2.0),
     ]

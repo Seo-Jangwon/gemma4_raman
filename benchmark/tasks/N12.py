@@ -17,8 +17,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="N12",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="PROC(tool choice EXACT) + EXACT(cited path)",
     prompt=(
         "List everything you have produced in this session and give the data/-relative path "
         "of each. "

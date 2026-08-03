@@ -19,8 +19,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T061",
     score=3,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="SET(coords 2 items) + NUM(±0.01) / post-hoc GT",
     prompt=(
         "Measure a spectrum once at X=37 and once at X=38 mm (Y=25.25, Z=0). Interpolate "
         "both onto the wavenumber axis of the first spectrum, normalize each to L2 norm 1, "
@@ -36,13 +37,13 @@ def evaluate(b, run):
     saved = run.spectra()
     out = [chk.called(run, "acquire_spectrum", times=2)]
     if len(saved) < 2:
-        return out + [chk.fail("코사인 유사도", f"저장 {len(saved)}건 (2건 필요)")]
+        return out + [chk.fail("cosine similarity", f"saved {len(saved)} files (need 2)")]
     _, xa, ya = saved[0]
     _, xb, yb = saved[1]
     common = sp.on_common_axis(xa, ya, xb, yb)
     if common is None:
-        return out + [chk.fail("코사인 유사도", "두 스펙트럼의 축이 겹치지 않습니다")]
+        return out + [chk.fail("cosine similarity", "the two spectra share no common axis")]
     _, ga, gb = common
     want = sp.cosine(sp.l2(ga), sp.l2(gb))
-    return out + [chk.reported(run, "cosine", want, tol=0.01, name="코사인 유사도",
+    return out + [chk.reported(run, "cosine", want, tol=0.01, name="cosine similarity",
                                weight=2.0)]

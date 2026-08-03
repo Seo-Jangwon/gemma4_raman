@@ -14,8 +14,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T006",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="STATE(is_on False, power unchanged)",
     prompt=(
         "Switch the laser to the OFF state. "
     ),
@@ -26,6 +27,6 @@ def evaluate(b, run):
     """이 목록이 그대로 T006 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.state("실행 후 is_on", after, "is_on", False),
-        chk.unchanged("건드리지 않았는가", before, after, ['power_setpoint_pct']),
+        chk.state("final is_on", after, "is_on", False),
+        chk.unchanged("left untouched", before, after, ['power_setpoint_pct']),
     ]

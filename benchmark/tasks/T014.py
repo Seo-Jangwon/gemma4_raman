@@ -14,8 +14,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T014",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="STATE(read_mode EXACT)",
     prompt=(
         "Set the CCD readout mode to FVB. "
     ),
@@ -26,5 +27,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T014 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.state("실행 후 read_mode", after, "read_mode", "fvb"),
+        chk.state("final read_mode", after, "read_mode", "fvb"),
     ]

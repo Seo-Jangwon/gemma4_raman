@@ -17,8 +17,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="N06",
     score=2,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="PROC(shutter EXACT) + REL(mean comparison)",
     prompt=(
         "Acquire a dark reference frame with the shutter closed, then a normal frame with "
         "the shutter on auto, and report the mean intensity of each. "
@@ -36,10 +37,10 @@ def evaluate(b, run):
         chk.called(run, "acquire_spectrum", times=2),
     ]
     if len(saved) < 2:
-        return out + [chk.fail("암/정상 비교", f"저장 {len(saved)}건 (2건 필요)")]
+        return out + [chk.fail("dark vs normal comparison", f"saved {len(saved)} files (need 2)")]
     # 셔터를 닫고 찍은 쪽이 암프레임이다. 저장 순서가 아니라 '무엇으로 찍었는가'로 가른다.
     means = [float(y.mean()) for _, _, y in saved[:2]]
     return out + [
-        chk.ok("암프레임 평균 < 정상", means[0] < means[1],
+        chk.ok("dark mean < normal mean", means[0] < means[1],
                f"{means[0]:.4g} < {means[1]:.4g}", weight=2.0),
     ]

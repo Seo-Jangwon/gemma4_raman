@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T013",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="EXACT(2 values)",
     prompt=(
         "Tell me the CCD sensor's width and height in pixels. "
     ),
@@ -27,6 +28,6 @@ def evaluate(b, run):
     """이 목록이 그대로 T013 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported(run, "detector_Nx", after.get("detector_Nx"), tol=0, name="보고한 detector_Nx"),
-        chk.reported(run, "detector_Ny", after.get("detector_Ny"), tol=0, name="보고한 detector_Ny"),
+        chk.reported(run, "detector_Nx", after.get("detector_Nx"), tol=0, name="reported detector_Nx"),
+        chk.reported(run, "detector_Ny", after.get("detector_Ny"), tol=0, name="reported detector_Ny"),
     ]

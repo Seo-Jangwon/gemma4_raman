@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="N15",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="PROC(order and args EXACT)",
     prompt=(
         "Turn the camera auto exposure on, then turn it off and set a manual exposure of 20 "
         "ms. "

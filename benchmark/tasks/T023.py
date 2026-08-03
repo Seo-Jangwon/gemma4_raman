@@ -16,8 +16,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T023",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="STATE(exposure EXACT ×3) + EXACT(filenames 3 items)",
     prompt=(
         "At the same position, measure once at CCD exposure 0.5 s, 1.0 s and 2.0 s. The "
         "results are auto-saved; report the three saved file names. "
@@ -31,5 +32,5 @@ def evaluate(b, run):
     return [
         chk.called(run, "acquire_spectrum", times=3),
         chk.arg_set(run, "acquire_spectrum", "exposure", [0.5, 1.0, 2.0]),
-        chk.unchanged("건드리지 않았는가", before, after, ['x', 'y']),
+        chk.unchanged("left untouched", before, after, ['x', 'y']),
     ]

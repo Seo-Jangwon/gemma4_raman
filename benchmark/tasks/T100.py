@@ -19,9 +19,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T100",
     score=3,
-    axis="진단 복구",
+    axis="diagnostics",
     mode="live",
-    windows=[('SNR 신호창', 990.0, 1012.0, 3), ('SNR 잡음창', 1800.0, 1900.0, 2)],
+    windows=[('SNR signal window', 990.0, 1012.0, 3), ('SNR noise window', 1800.0, 1900.0, 2)],
+    criteria="REL(SNR before/after) + NUM(5%) + PROC / post-hoc GT",
     prompt=(
         "The signal is weaker and the peaks broader than usual. Diagnose whether this is a "
         "focus problem: record the SNR (T050 definition) at the current Z, run autofocus, "
@@ -46,14 +47,14 @@ def evaluate(b, run):
     ]
     snrs = [v for v in (sp.snr(x, y) for _, x, y in saved) if v is not None]
     if len(snrs) < 2:
-        return out + [chk.fail("SNR 전후", f"SNR 계산 가능 {len(snrs)}건 (2건 필요)")]
+        return out + [chk.fail("SNR before/after", f"SNR computable from {len(snrs)} files (need 2)")]
     s0, s1 = snrs[0], snrs[-1]
     # 결론은 answer 로 받는다. 본문에서 '초점'/'focus' 를 찾는 방식은 두 답이 다 걸려
     # 판정이 거의 항상 무효가 됐다(= 무조건 통과).
     said = run.answer.get("focus_was_cause")
     return out + [
-        chk.reported(run, "snr_before", s0, rel=0.05, name="AF 전 SNR"),
-        chk.reported(run, "snr_after", s1, rel=0.05, name="AF 후 SNR"),
-        chk.ok("결론 일관성", said is not None and bool(said) == (s1 > s0),
-               f"결론={said} (SNR {s0:.1f} → {s1:.1f})", weight=2.0),
+        chk.reported(run, "snr_before", s0, rel=0.05, name="SNR before autofocus"),
+        chk.reported(run, "snr_after", s1, rel=0.05, name="SNR after autofocus"),
+        chk.ok("conclusion consistent with the data", said is not None and bool(said) == (s1 > s0),
+               f"conclusion={said} (SNR {s0:.1f} → {s1:.1f})", weight=2.0),
     ]

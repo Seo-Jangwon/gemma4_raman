@@ -300,13 +300,19 @@ def load_kb() -> list[dict]:
     global _kb_cache
     if _kb_cache is not None:
         return _kb_cache
+    # 색인 대상으로 쓰려고 kb_sources/ 로 옮겨 두는 일이 있다. 그러면 벡터 검색은 살아
+    # 있는데 **폴백만 조용히 빈 KB**가 된다 — Chroma 나 임베딩이 죽는 순간 KB 가 통째로
+    # 사라지고, 그게 벤치마크 최악의 시나리오다. 두 자리를 다 본다.
+    path = next((p for p in (_KB_JSON_PATH, KB_SOURCES_DIR / _KB_JSON_PATH.name)
+                 if p.exists()), None)
     try:
-        if _KB_JSON_PATH.exists():
-            with open(_KB_JSON_PATH, encoding="utf-8") as f:
+        if path is not None:
+            with open(path, encoding="utf-8") as f:
                 _kb_cache = json.load(f)
         else:
             _kb_cache = []
-            _warn_once("no_kb_json", f"{_KB_JSON_PATH.name} missing -> KB is empty.")
+            _warn_once("no_kb_json", f"{_KB_JSON_PATH.name} not found in "
+                                     f"{_HERE.name}/ or {KB_SOURCES_DIR.name}/ -> KB is empty.")
     except Exception as e:
         # JSON 문법 오류(트레일링 콤마 등)가 여기로 온다. 예전엔 완전히 조용해서
         # KB가 통째로 사라져도 아무도 몰랐다 — 그게 벤치마크 최악의 시나리오다.

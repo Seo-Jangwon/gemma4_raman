@@ -17,9 +17,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T129",
     score=2,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
-    inputs=['reference_library.csv'],
+    inputs=['T129.csv', 'reference_library.csv'],
+    criteria="NUM(delta ±0.2 cm-1, sign included) + EXACT(material)",
     prompt=(
         "All peaks of T129.csv are shifted by the same unknown amount. Estimate the shift by "
         "cross-correlation against reference_library.csv, correct it, identify the material, "
@@ -32,6 +33,6 @@ def evaluate(b, run):
     """이 목록이 그대로 T129 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported(run, "shift_cm1", 2.7, tol=0.2, name="시프트"),
-        chk.reported_label(run, "material", "polystyrene", ['polystyrene'], name="물질명"),
+        chk.reported(run, "shift_cm1", 2.7, tol=0.2, name="shift"),
+        chk.reported_label(run, "material", "polystyrene", ['polystyrene'], name="material"),
     ]

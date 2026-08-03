@@ -16,8 +16,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T008",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="STATE(power_armed False)",
     prompt=(
         "Instead of the measurement laser, switch to guide-beam mode that checks the sample "
         "position. "
@@ -29,5 +30,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T008 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.state("실행 후 power_armed", after, "power_armed", False),
+        chk.state("final power_armed", after, "power_armed", False),
     ]

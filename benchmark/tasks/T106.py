@@ -17,9 +17,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T106",
     score=3,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
     inputs=['T106.csv'],
+    criteria="EXACT(labels) + NUM(FWHM 10%)",
     prompt=(
         "Classify the sample of T106.csv as amorphous, crystalline, or undecidable. Use this "
         "rule: if the strongest peak has FWHM below 15 cm-1 it is crystalline; above 50 cm-1 "
@@ -33,5 +34,5 @@ def evaluate(b, run):
     before, after = run.state_before, run.state_after
     return [
         chk.reported(run, "fwhm_cm1", 51.787707659444436, rel=0.05, name="FWHM"),
-        chk.reported_label(run, "label", "amorphous", ["crystalline", "amorphous", "undecidable"], name="분류"),
+        chk.reported_label(run, "label", "amorphous", ["crystalline", "amorphous", "undecidable"], name="classification"),
     ]

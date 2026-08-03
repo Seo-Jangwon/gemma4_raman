@@ -18,9 +18,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T062",
     score=3,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
-    windows=[('SNR 신호창', 990.0, 1012.0, 3), ('SNR 잡음창', 1800.0, 1900.0, 2)],
+    windows=[('SNR signal window', 990.0, 1012.0, 3), ('SNR noise window', 1800.0, 1900.0, 2)],
+    criteria="PROC(power EXACT) + NUM(5%) + REL(monotonic increase) / post-hoc GT",
     prompt=(
         "At the same position measure once at laser power 20%, 40% and 60%. Compute the SNR "
         "of each with the T050 definition (signal = max in 990-1012, noise = std ddof=1 in "
@@ -40,13 +41,13 @@ def evaluate(b, run):
     ]
     snrs = [v for v in (sp.snr(x, y) for _, x, y in saved) if v is not None]
     if len(snrs) < 3:
-        return out + [chk.fail("SNR 3값",
-                               f"SNR 을 계산할 수 있는 저장 파일 {len(snrs)}건 (3건 필요)")]
+        return out + [chk.fail("3 SNR values",
+                               f"saved files with computable SNR: {len(snrs)} files (need 3)")]
     s = snrs[:3]
     got = run.answer.get("snr")
     return out + [
         # 파워를 올리면 SNR 이 커진다 — 어떤 시료에서도 성립하는 관계다.
-        chk.increasing("SNR 단조 증가", s, weight=2.0),
-        chk.set_match("보고한 SNR 3값", [float(v) for v in got] if isinstance(got, list) else None,
+        chk.increasing("SNR increases monotonically", s, weight=2.0),
+        chk.set_match("reported 3 SNR values", [float(v) for v in got] if isinstance(got, list) else None,
                       s, tol=max(s) * 0.05, ordered=True, weight=2.0),
     ]

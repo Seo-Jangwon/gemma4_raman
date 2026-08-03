@@ -12,14 +12,16 @@
 """
 from bench import Task, chk
 from bench.check import MM, MM_GRID, TOL_PEAK_CM1        # noqa: F401
+from bench import answer as A
 from bench import spectra as sp                          # noqa: F401
 
 TASK = Task(
     id="T114",
     score=2,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
     inputs=['T114.csv', 'reference_library.csv'],
+    criteria="NUM(±0.01) + EXACT(threshold verdict)",
     prompt=(
         "Compute the highest cosine similarity between T114.csv and the references in "
         "reference_library.csv (interpolate onto the reference axis, L2 normalize) and state "
@@ -31,6 +33,14 @@ TASK = Task(
 def evaluate(b, run):
     """이 목록이 그대로 T114 의 점수가 된다."""
     before, after = run.state_before, run.state_after
+    best = 0.9958523269835462
+    said = A.flag(run, "above_threshold", "is_match", "above", "match")
+    if said is None:
+        said = run.last_mention(["below", "above"]) == "above"
     return [
-        chk.fail("채점 항목 없음", "이 문항의 정답 기준이 아직 옮겨지지 않았습니다"),
+        chk.reported(run, "best_score", best, tol=0.01, name="highest similarity",
+                     weight=2.0),
+        chk.ok("threshold verdict", said is True,
+               f"reported={said} (expected True, "
+               f"best={best:.4f} vs 0.85)", weight=2.0, kind="EXACT"),
     ]

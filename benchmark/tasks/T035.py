@@ -19,8 +19,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T035",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="PROC(args EXACT) + STATE(frame_index set {0,1,2})",
     prompt=(
         "Acquire a kinetic time series of 3 frames at the current position with a 5 s frame "
         "interval. "
@@ -46,7 +47,7 @@ def evaluate(b, run):
             if "mode" in r:
                 mode = r["mode"]
     return out + [
-        chk.ok("kinetic 모드", mode == "kinetic", f"mode={mode}"),
-        chk.ok("프레임 3개", frames is not None and len(frames) == 3,
-               f"{len(frames) if frames else 0}개", weight=2.0),
+        chk.ok("kinetic mode", mode == "kinetic", f"mode={mode}"),
+        chk.ok("3 frames", frames is not None and len(frames) == 3,
+               f"{len(frames) if frames else 0} items", weight=2.0),
     ]

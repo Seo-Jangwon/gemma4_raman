@@ -18,8 +18,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T027",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="SET(coords ±0.001) + STATE(missing none)",
     prompt=(
         "Move the stage to X=38, Y=26, Z=0 mm, perform autofocus, then capture the view with "
         "capture_scene, acquire a Raman spectrum, and record them as one measurement point "
@@ -35,15 +36,15 @@ def evaluate(b, run):
     return [
         chk.called(run, "save_measurement_point", times=1),
         chk.called(run, "capture_scene", times=1),
-        chk.state("실행 후 x", after, "x", 38.0, tol=MM_GRID),
-        chk.state("실행 후 y", after, "y", 26.0, tol=MM_GRID),
+        chk.state("final x", after, "x", 38.0, tol=MM_GRID),
+        chk.state("final y", after, "y", 26.0, tol=MM_GRID),
     ] + _point_complete(run)
 
 
 def _point_complete(run):
     results = run.results("save_measurement_point")
     if not results:
-        return [chk.fail("측정점 완전", "save_measurement_point 를 부르지 않았습니다",
+        return [chk.fail("measurement point complete", "save_measurement_point was never called",
                          weight=2.0)]
     missing = [r.get("missing") for r in results if r.get("missing")]
-    return [chk.ok("측정점 완전", not missing, f"missing={missing or '없음'}", weight=2.0)]
+    return [chk.ok("measurement point complete", not missing, f"missing={missing or 'none'}", weight=2.0)]

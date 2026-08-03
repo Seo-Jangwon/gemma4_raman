@@ -18,9 +18,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="N05",
     score=3,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
     inputs=['N05.csv'],
+    criteria="PROC(args EXACT, repeats<3) + KEYWORD(basis for the choice)",
     prompt=(
         "Apply IPBSA baseline correction to N05.csv at polynomial orders 3, 5 and 7, label "
         "the versions v_o3, v_o5 and v_o7, compare them, and say which order you keep and "
@@ -36,5 +37,5 @@ def evaluate(b, run):
         chk.called(run, "apply_background_subtraction", times=3),
         chk.called(run, "get_bg_version", at_least=0, at_most=2),
         chk.arg_set(run, "apply_background_subtraction", "poly_order", [3, 5, 7]),
-        chk.keywords(run, ['유지', 'keep', '선택', 'choose', '택']),
+        chk.keywords(run, ['keep', 'choose']),
     ]

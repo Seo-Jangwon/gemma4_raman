@@ -16,10 +16,11 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T050",
     score=2,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
-    windows=[('SNR 신호창', 990.0, 1012.0, 3), ('SNR 잡음창', 1800.0, 1900.0, 2)],
+    windows=[('SNR signal window', 990.0, 1012.0, 3), ('SNR noise window', 1800.0, 1900.0, 2)],
     inputs=['T050.csv'],
+    criteria="NUM(5%)",
     prompt=(
         "From T050.csv compute the signal-to-noise ratio as max(intensity in 990-1012 cm-1) "
         "divided by the sample standard deviation (ddof=1) of 1800-1900 cm-1. Both intervals "

@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T007",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="STATE(power EXACT, is_on unchanged)",
     prompt=(
         "Set the laser power to 13%. "
     ),
@@ -28,7 +29,7 @@ def evaluate(b, run):
     before, after = run.state_before, run.state_after
     return [
         chk.called(run, "acquire_spectrum", times=0),   # 부르면 오답 — 되물음/거부가 정답인 문항
-        chk.state("실행 후 power_percent", after, "power_percent", 13.0, tol=1e-06),
-        chk.state("실행 후 power_armed", after, "power_armed", True),
-        chk.unchanged("건드리지 않았는가", before, after, ['is_on']),
+        chk.state("final power_percent", after, "power_percent", 13.0, tol=1e-06),
+        chk.state("final power_armed", after, "power_armed", True),
+        chk.unchanged("left untouched", before, after, ['is_on']),
     ]

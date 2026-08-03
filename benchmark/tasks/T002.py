@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T002",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="STATE(delta ±1e-4)",
     prompt=(
         "Move relatively by only +0.1 mm along the X axis from the current position. "
     ),
@@ -27,7 +28,7 @@ def evaluate(b, run):
     """이 목록이 그대로 T002 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.delta("x 변화", before, after, "x", 0.1, tol=MM),
-        chk.delta("y 변화", before, after, "y", 0.0, tol=MM),
-        chk.delta("z 변화", before, after, "z", 0.0, tol=MM),
+        chk.delta("delta x", before, after, "x", 0.1, tol=MM),
+        chk.delta("delta y", before, after, "y", 0.0, tol=MM),
+        chk.delta("delta z", before, after, "z", 0.0, tol=MM),
     ]

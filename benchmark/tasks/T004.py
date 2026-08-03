@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T004",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="STATE(speed EXACT)",
     prompt=(
         "Set the stage movement speed to 2.0 mm/s. "
     ),
@@ -27,6 +28,6 @@ def evaluate(b, run):
     """이 목록이 그대로 T004 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.state("실행 후 x_speed_mm_s", after, "x_speed_mm_s", 2.0, tol=1e-06),
-        chk.state("실행 후 y_speed_mm_s", after, "y_speed_mm_s", 2.0, tol=1e-06),
+        chk.state("final x_speed_mm_s", after, "x_speed_mm_s", 2.0, tol=1e-06),
+        chk.state("final y_speed_mm_s", after, "y_speed_mm_s", 2.0, tol=1e-06),
     ]

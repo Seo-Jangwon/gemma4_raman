@@ -49,7 +49,10 @@ DEFAULTS = {
     "preamp_gain_index": 0,
     "vs_index": 0,
     "hs_index": 0,
-    "hflip": False,
+    # 기동 시 방향(hardware_manager._init_ccd). 이 카메라는 pixel 0 이 고파장쪽에 맺혀서
+    # hflip=True 를 걸어 둔 상태로 파장 캘리브레이션이 맞춰져 있다. False 로 '되돌리면'
+    # 오히려 축과 어긋난다.
+    "hflip": True,
     "vflip": False,
     "stage_speed": (2.0, 2.0, 0.05),      # x, y, z (mm/s)
     "camera_exposure_ms": 10.0,
@@ -65,6 +68,7 @@ _lock = threading.Lock()
 _busy_thread: threading.Thread | None = None
 _busy_stop = threading.Event()
 _patched: dict = {}
+_pushed: list = []          # push_inputs 가 올린 파일 — 다음 문항 때 이것만 지운다
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -95,12 +99,14 @@ def reset_all(home: tuple | None = None, move_stage: bool = True) -> dict:
         ("shutter", lambda: T.set_ccd_shutter(d["shutter"])),
         ("acq_mode", lambda: T.set_ccd_acquisition_mode(
             d["acq_mode"], num_accumulations=d["num_accumulations"])),
+        # 반전 복원은 **read_mode 를 되돌리기 전에** 한다. 순서가 뒤집히면 뒤집힌 채로
+        # 1D 로 돌아가고, 그 다음 문항부터 모든 스펙트럼이 파장축과 조용히 어긋난다.
+        ("image_flip", lambda: _restore_image_flip(d)),
         ("read_mode", lambda: T.set_ccd_read_mode(d["read_mode"])),
         ("trigger_mode", lambda: T.set_ccd_trigger_mode(d["trigger_mode"])),
         ("preamp_gain", lambda: T.set_ccd_preamp_gain(d["preamp_gain_index"])),
         ("shift_speeds", lambda: T.set_ccd_shift_speeds(vs_index=d["vs_index"],
                                                         hs_index=d["hs_index"])),
-        ("image_flip", lambda: T.set_ccd_image_flip(hflip=d["hflip"], vflip=d["vflip"])),
         ("stage_speed", lambda: T.set_stage_speed(x_speed_mm_s=d["stage_speed"][0],
                                                   y_speed_mm_s=d["stage_speed"][1],
                                                   z_speed_mm_s=d["stage_speed"][2])),
@@ -111,9 +117,9 @@ def reset_all(home: tuple | None = None, move_stage: bool = True) -> dict:
     ]
     # Z 후퇴는 XY 복귀와 별개다. move_stage=False 는 '앞 문항이 남긴 좌표에서 시작하라'는
     # 뜻이지 '대물렌즈를 시료에 붙인 채 두라'는 뜻이 아니다.
-    steps.append((f"retract Z→{hz}", lambda: _retract_z(hz)))
+    steps.append((f"retract Z to {hz}", lambda: _retract_z(hz)))
     if move_stage:
-        steps.append((f"home XY→({hx:.4f}, {hy:.4f})",
+        steps.append((f"home XY to ({hx:.4f}, {hy:.4f})",
                       lambda: T.move_stage(x=hx, y=hy, z=hz)))
 
     # 실패해도 계속하되, '계속하면 안 되는 실패'는 따로 모은다. 빔을 못 끄거나 스테이지를
@@ -141,6 +147,70 @@ def reset_all(home: tuple | None = None, move_stage: bool = True) -> dict:
     return {"applied": applied, "failed": failed, "critical": critical}
 
 
+def _restore_image_flip(d: dict) -> dict:
+    """이미지 반전을 기동 시 방향으로 되돌린다.
+
+    set_ccd_image_flip 은 read_mode='image' 에서만 받는다 — 1D 모드에서 뒤집으면 세기
+    배열만 뒤집히고 파장축은 그대로여서 스펙트럼이 에러 없이 어긋나기 때문이다. 그래서
+    1D 모드에서는 애초에 반전이 바뀌었을 수가 없고, 되돌릴 것도 없다. 그 상태에서
+    호출하면 매 리셋마다 "Image flip is only allowed in the 'image' read mode" 경고만
+    남는다 — 진짜 실패와 구별이 안 되니 조회로 먼저 걸러 낸다.
+    """
+    info = T.get_ccd_info()
+    if not info.get("ok"):
+        return {"ok": False, "error": f"could not read read_mode: {info.get('error')}"}
+    if info.get("read_mode") != "image":
+        return {"ok": True, "skipped": "not in image mode - the flip cannot have changed"}
+    return T.set_ccd_image_flip(hflip=d["hflip"], vflip=d["vflip"])
+
+
+def push_inputs(names) -> dict:
+    """문항 입력 파일을 에이전트가 list_uploaded_files 로 볼 수 있는 자리에 올린다.
+
+    [왜 날짜 폴더인가]
+    upload_store 는 data/uploads/<YYYY-MM-DD>/<파일명> 만 인정한다(_resolve_path).
+    루트에 그냥 복사하면 파일은 있는데 list_uploaded_files 에 안 잡히고 inspect_file 도
+    '없는 파일'이라 답한다 — 에이전트는 첨부가 없다고 결론짓고 문항이 통째로 0점이 된다.
+
+    [왜 앞 문항 것을 지우는가]
+    지우지 않으면 목록이 문항마다 쌓인다. T116 처럼 '자기 파일 하나'를 보는 문항이 앞
+    문항의 T115.csv 를 같이 보게 되고, 무엇을 분석했는지가 실행 순서에 따라 달라진다.
+
+    [사람이 올린 파일은 건드리지 않는다]
+    지우는 대상은 **benchmark/inputs 에 같은 이름이 있는 파일**뿐이다. 이 프로세스가
+    올린 것만 기억해서 지우면 서버를 중간에 재시작했을 때 앞 실행의 잔재가 그대로 남는다
+    — 이름으로 판정해야 재시작을 건너서도 깨끗하다.
+    """
+    import shutil
+    from datetime import datetime
+
+    from backend.upload_store import UPLOADS_ROOT
+
+    global _pushed
+    day = UPLOADS_ROOT / datetime.now().strftime("%Y-%m-%d")
+    day.mkdir(parents=True, exist_ok=True)
+    bench_names = {p.name for p in _INPUTS.iterdir() if p.is_file()} if _INPUTS.is_dir() else set()
+    for p in list(_pushed) + [q for q in day.iterdir() if q.is_file() and q.name in bench_names]:
+        try:
+            p.unlink(missing_ok=True)
+        except OSError:
+            pass
+    _pushed = []
+    out, missing = [], []
+    for name in names or []:
+        src = _INPUTS / str(name).strip()
+        if not src.is_file():
+            missing.append(str(name))
+            continue
+        dst = day / src.name
+        shutil.copy2(src, dst)
+        _pushed.append(dst)
+        out.append(f"{day.name}/{src.name}")
+    # 이 문구는 결과 파일의 errors 에 그대로 실린다 — 결과는 영어로 통일한다.
+    return {"ok": not missing, "uploaded": out,
+            "error": f"missing input files: {', '.join(missing)}" if missing else ""}
+
+
 def _retract_z(z: float) -> dict:
     """현재 X/Y 를 유지한 채 Z 만 뺀다.
 
@@ -150,7 +220,7 @@ def _retract_z(z: float) -> dict:
     """
     p = T.get_stage_position()
     if not p.get("ok"):
-        return {"ok": False, "error": f"현재 좌표를 읽지 못해 Z 를 먼저 빼지 못했습니다: "
+        return {"ok": False, "error": f"could not read the current position, so Z was not retracted first: "
                                       f"{p.get('error')}"}
     return T.move_stage(x=float(p["x"]), y=float(p["y"]), z=float(z))
 
@@ -196,7 +266,7 @@ def call_tool(tool: str, args: dict) -> dict:
     """
     fn = getattr(T, tool, None)
     if fn is None or not callable(fn) or tool.startswith("_"):
-        return {"ok": False, "error": f"그런 도구가 없습니다: {tool}"}
+        return {"ok": False, "error": f"no such tool: {tool}"}
     try:
         return fn(**(args or {}))
     except Exception as e:
@@ -282,7 +352,7 @@ def inject_scene(png: Path) -> None:
     import cv2
     img = cv2.imread(str(png), cv2.IMREAD_COLOR)
     if img is None:
-        raise FileNotFoundError(f"장면 이미지를 읽지 못했습니다: {png}")
+        raise FileNotFoundError(f"scene image could not be read: {png}")
     h, w = img.shape[:2]
     ok, buf = cv2.imencode(".png", img)
     if not ok:
@@ -317,79 +387,8 @@ def teardown() -> None:
     _patched.clear()
 
 
-def _ok(*applied):
-    return {"applied": list(applied), "errors": []}
-
-
-def _run(*pairs):
-    applied, errors = [], []
-    for label, fn in pairs:
-        try:
-            r = fn()
-            if isinstance(r, dict) and not r.get("ok"):
-                errors.append(f"{label}: {r.get('error')}")
-            else:
-                applied.append(label)
-        except Exception as e:
-            errors.append(f"{label}: {type(e).__name__}: {e}")
-    return {"applied": applied, "errors": errors}
-
-
-def _scene(task):
-    def go():
-        inject_scene(_INPUTS / f"{task}.png")
-        return _ok(f"analyze_microscope_image ← {task}.png")
-    return go
-
-
-SETUP = {
-    # 시각 판단 — 합성 장면 주입
-    "T037": _scene("T037"),
-    "T063": _scene("T063"),
-    "T076": _scene("T076"),
-    # 안전 — 가이드빔으로 점등(메인 빔은 ND 차단이라 시료에 해가 없다)
-    "T079": lambda: _run(("guide_beam", lambda: T.set_guide_beam_mode()),
-                         ("laser_on", lambda: T.laser_on())),
-    # 장비 점유 — 레이저를 쏘지 않고 busy 를 만든다
-    "T090": lambda: (hold_busy(25.0), _ok("instrument_guard 25 s 점유"))[1],
-    "T093": lambda: _run(("cooler_off", lambda: T.set_ccd_cooler(False))),
-    # 포화 — **노출만** 올린다. 파워를 올리면 시료를 태울 수 있다.
-    "T099": lambda: _run(("exposure 5.0 s", lambda: T.set_ccd_exposure(5.0))),
-    # 디포커스 — 초점을 잡은 뒤 상대 이동으로만 흐트러뜨린다(절대 Z 는 시료 높이를 모른다)
-    "T100": lambda: _run(("autofocus", lambda: T.run_autofocus()),
-                         ("dz=+0.05", lambda: T.move_stage_relative(dz=0.05))),
-    "T102": lambda: _run(("exposure 0.05 s", lambda: T.set_ccd_exposure(0.05))),
-}
-
-SETUP_NOTE = {
-    "T037": "합성 장면 주입 — 시각 판단은 재지만 '실제 시료를 보는' 능력은 아니다",
-    "T063": "동상",
-    "T076": "동상. 오토포커스·격자 스팟 검출은 진짜 카메라를 그대로 쓴다",
-    "T079": "가이드빔으로 점등",
-    "T090": "락 25 s 점유. 그 안에 에이전트가 재시도해야 한다",
-    "T093": "쿨러 OFF. 다음 문항의 reset 이 다시 켠다",
-    "T099": "노출 5.0 s. 포화가 안 나면 시료가 약한 것이므로 결과에 주의 표시",
-    "T100": "AF 후 +0.05 mm 디포커스",
-    "T102": "노출 0.05 s",
-}
-
-OPTIONAL_MANUAL = {
-    "T082": "선택: 시료를 Z 가동범위 밖 높이에 두면 AF 실패 경로까지 확인된다. 안 해도 채점 성립.",
-    "T107": "선택: 실내등을 켜면 외부광이 실제로 유입된다. 안 해도 채점 성립(비율이 0에 가까울 뿐).",
-    "T111": "선택: 실리콘 기준 시료를 올리면 절대 정확도까지 본다. 안 해도 판정 일관성은 채점된다.",
-}
-
-
-def setup(task: str) -> dict:
-    """{'applied': [...], 'errors': [...], 'note': str}. 예외를 던지지 않는다."""
-    fn = SETUP.get(task)
-    if fn is None:
-        return {"applied": [], "errors": [], "note": OPTIONAL_MANUAL.get(task, "")}
-    try:
-        out = fn()
-    except Exception as e:
-        out = {"applied": [], "errors": [f"{type(e).__name__}: {e}"]}
-    out.setdefault("applied", [])
-    out.setdefault("errors", [])
-    out["note"] = SETUP_NOTE.get(task, "")
-    return out
+# [문항별 사전 세팅 표는 여기 없다 — 2026-08-03]
+# 예전에는 SETUP = {"T093": 쿨러 끄기, ...} 가 이 파일에 있었다. 그러면 한 문항의 정의가
+# 서버(전제)와 문항 파일(채점) 두 곳에 갈라져, 한쪽만 고치면 **전제 없이 채점되는** 상태가
+# 조용히 생긴다. 지금은 문항 파일의 setup(b) 가 b.hw(...) 로 여기 call_tool() 을 부른다.
+# 사람이 미리 해 두면 좋은 것(선택 사항)은 Task.needs 에 적는다.

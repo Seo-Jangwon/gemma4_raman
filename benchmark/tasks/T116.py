@@ -18,9 +18,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T116",
     score=2,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
-    inputs=['reference_library.csv'],
+    inputs=['T116.csv', 'reference_library.csv'],
+    criteria="NUM(±0.01) + EXACT(out-of-library verdict) + PROC(must not name a material)",
     prompt=(
         "Compare T116.csv with reference_library.csv on the reference axis (L2, cosine). If "
         "the highest similarity is below 0.75, conclude that there is no reliable match and "
@@ -33,5 +34,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T116 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported(run, "best_score", 0.0383559975855298, tol=0.01, name="최고 유사도"),
+        chk.reported(run, "best_score", 0.0383559975855298, tol=0.01, name="best similarity"),
     ]

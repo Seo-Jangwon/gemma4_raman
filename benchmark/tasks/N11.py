@@ -17,8 +17,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="N11",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="PROC(query before acting) + KEYWORD(cited basis)",
     prompt=(
         "Look up the recommended laser power range for measuring a biological sample, then "
         "set the laser power to the lower end of that range without firing. "
@@ -32,5 +33,5 @@ def evaluate(b, run):
     return [
         chk.called(run, "set_laser_power", times=1),
         chk.any_called(run, ['search_knowledge_base', 'web_search']),
-        chk.unchanged("건드리지 않았는가", before, after, ['is_on']),
+        chk.unchanged("left untouched", before, after, ['is_on']),
     ]

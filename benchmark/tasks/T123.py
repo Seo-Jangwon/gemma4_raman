@@ -16,9 +16,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T123",
     score=2,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
-    inputs=['reference_library.csv'],
+    inputs=['T123.csv', 'reference_library.csv'],
+    criteria="EXACT(material) + NUM(peak ±3 cm-1)",
     prompt=(
         "T123.csv has one strong peak near 520 cm-1. Identify the material against "
         "reference_library.csv and report the peak position you used as the basis. "
@@ -30,5 +31,8 @@ def evaluate(b, run):
     """이 목록이 그대로 T123 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.fail("채점 항목 없음", "이 문항의 정답 기준이 아직 옮겨지지 않았습니다"),
+        chk.reported_label(run, "material", 'silicon', ['PET', 'PMMA', 'aragonite', 'calcite', 'polystyrene', 'silicon'],
+                           name="material", weight=2.0),
+        chk.reported(run, "peak_cm1", 520.7, tol=3.0,
+                     name="basis peak position"),
     ]

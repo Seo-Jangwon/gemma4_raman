@@ -17,8 +17,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T036",
     score=2,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="SET(5 Z values, ±1e-4) + STATE(x/y unchanged)",
     prompt=(
         "Keep the current X and Y, and acquire once at each of Z = -0.002, -0.001, 0, 0.001, "
         "0.002 mm. "
@@ -31,7 +32,7 @@ def evaluate(b, run):
     before, after = run.state_before, run.state_after
 
     WANT_Z = [-0.002, -0.001, 0.0, 0.001, 0.002]
-    out = [chk.unchanged("X/Y 를 건드리지 않았는가", before, after, ["x", "y"])]
+    out = [chk.unchanged("X/Y left untouched", before, after, ["x", "y"])]
     # 절대 이동이면 인자의 z, 상대 이동이면 시작 Z 에서 누적한다.
     zs = [float(v) for v in run.args("move_stage", "z")]
     if not zs:
@@ -42,5 +43,5 @@ def evaluate(b, run):
                 cur += float(d)
                 zs.append(cur)
     if not zs:
-        return out + [chk.fail("Z 좌표 5값", "Z 이동 기록을 찾지 못했습니다", weight=2.0)]
-    return out + [chk.set_match("Z 좌표 5값", zs, WANT_Z, tol=MM, ordered=True, weight=2.0)]
+        return out + [chk.fail("5 Z coordinates", "no Z move was recorded", weight=2.0)]
+    return out + [chk.set_match("5 Z coordinates", zs, WANT_Z, tol=MM, ordered=True, weight=2.0)]

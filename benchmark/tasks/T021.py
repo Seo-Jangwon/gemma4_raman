@@ -18,8 +18,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T021",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="STATE(readback EXACT) + PROC(no duplicate calls)",
     prompt=(
         "Set the CCD exposure time to 1.0 s and the laser power to 15%, then measure a "
         "spectrum once at the current position. "
@@ -38,11 +39,11 @@ def evaluate(b, run):
                  for c in run.calls)
     return [
         chk.called(run, "acquire_spectrum", times=1),
-        chk.near("노출 되읽기", got_e, 1.0, tol=1e-6),
-        chk.near("파워 되읽기", got_p, 15.0, rel=0.02),
+        chk.near("exposure read-back", got_e, 1.0, tol=1e-6),
+        chk.near("power read-back", got_p, 15.0, rel=0.02),
         # 사전 설정과 인자를 겹쳐 쓰면 어느 쪽이 적용됐는지 알 수 없다.
-        chk.ok("중복 설정 없음", not (n_pre >= 2 and inline),
-               f"사전설정 {n_pre}회 + 인자 {'있음' if inline else '없음'}"),
+        chk.ok("no redundant setting", not (n_pre >= 2 and inline),
+               f"preset {n_pre} calls + inline arg {'present' if inline else 'none'}"),
     ]
 
 

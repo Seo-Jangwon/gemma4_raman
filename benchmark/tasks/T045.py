@@ -16,9 +16,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T045",
     score=2,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
     inputs=['T045.csv'],
+    criteria="NUM(5%)",
     prompt=(
         "Compute the FWHM of the strongest peak inside 980-1020 cm-1 of T045.csv. Take the "
         "half height as (peak intensity - interval minimum)/2 and find the crossings by "

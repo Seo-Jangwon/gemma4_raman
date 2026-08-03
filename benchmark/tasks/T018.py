@@ -14,8 +14,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T018",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="NUM(±0.1)",
     prompt=(
         "Tell me the current CCD temperature. "
     ),
@@ -26,5 +27,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T018 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported(run, "temperature_C", after.get("temperature_C"), tol=0.1, name="보고한 temperature_C"),
+        chk.reported(run, "temperature_C", after.get("temperature_C"), tol=0.1, name="reported temperature_C"),
     ]

@@ -20,8 +20,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T031",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="PROC(args exact match) + SET(coords 25 items, ±0.001mm)",
     prompt=(
         "Measure a 5x5 grid with 0.1 mm spacing whose points span +0.0 to +0.4 mm in both X "
         "and Y relative to the current position. Autofocus at every point, then acquire one "
@@ -45,10 +46,10 @@ def evaluate(b, run):
     cx = (run.args("run_grid_scan", "center_x") or [None])[0]
     cy = (run.args("run_grid_scan", "center_y") or [None])[0]
     if cx is None or "x" not in before:
-        return out + [chk.fail("격자 중심", "center 인자 또는 시작 좌표가 없습니다",
+        return out + [chk.fail("grid center", "no center argument and no starting coordinate",
                                weight=2.0)]
     # 중심을 시작 좌표 그대로 주면 격자 전체가 한 칸씩 어긋난다.
     return out + [
-        chk.near("격자 중심 X", cx, float(before["x"]) + DX, tol=1e-3, weight=2.0),
-        chk.near("격자 중심 Y", cy, float(before["y"]) + DY, tol=1e-3, weight=2.0),
+        chk.near("grid center X", cx, float(before["x"]) + DX, tol=1e-3, weight=2.0),
+        chk.near("grid center Y", cy, float(before["y"]) + DY, tol=1e-3, weight=2.0),
     ]

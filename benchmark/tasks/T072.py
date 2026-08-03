@@ -12,14 +12,16 @@
 """
 from bench import Task, chk
 from bench.check import MM, MM_GRID, TOL_PEAK_CM1        # noqa: F401
+from bench import answer as A
 from bench import spectra as sp                          # noqa: F401
 
 TASK = Task(
     id="T072",
     score=3,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
     inputs=['T072.csv'],
+    criteria="NUM(±0.01) ×3",
     prompt=(
         "Apply IPBSA baseline order 5 and L2 normalization to each spectrum of the map "
         "T072.csv, mean-center the resulting matrix, run PCA with 3 components and report "
@@ -31,6 +33,16 @@ TASK = Task(
 def evaluate(b, run):
     """이 목록이 그대로 T072 의 점수가 된다."""
     before, after = run.state_before, run.state_after
+    want = [0.984376, 0.000917, 0.000912]
+    got = A.seq(run, "explained_variance_ratio", "evr", "explained_variance",
+                "variance_ratio", cast=float)
+    if not got:
+        return [chk.fail("3 explained variance ratios",
+                         "the answer carries no explained_variance_ratio", weight=2.0)]
     return [
-        chk.fail("채점 항목 없음", "이 문항의 정답 기준이 아직 옮겨지지 않았습니다"),
+        chk.set_match("3 explained variance ratios", got, want, tol=0.01, ordered=True,
+                      weight=2.0),
+        chk.ok("descending and sums to <= 1",
+               all(a >= b - 1e-9 for a, b in zip(got, got[1:])) and sum(got) <= 1.0 + 1e-6,
+               f"{[round(v, 4) for v in got]} sum={sum(got):.4f}", kind="REL"),
     ]

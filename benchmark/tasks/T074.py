@@ -17,9 +17,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T074",
     score=3,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
     inputs=['T074.csv'],
+    criteria="SET(coords EXACT) + PROC",
     prompt=(
         "In the map T074.csv, compute the element-wise median spectrum, judge the positions "
         "whose cosine similarity to it (after L2 normalization) is below 0.80 as anomalous, "
@@ -31,6 +32,12 @@ TASK = Task(
 def evaluate(b, run):
     """이 목록이 그대로 T074 의 점수가 된다."""
     before, after = run.state_before, run.state_after
+    # 요소별 median 과의 코사인 유사도 < 0.80 인 좌표.
+    want = [[37.8, 25.4], [38.0, 25.2]]
+    n = run.count("acquire_spectrum")
+    pts = [[round(p[0], 4), round(p[1], 4)] for p in run.positions()]
     return [
-        chk.fail("채점 항목 없음", "이 문항의 정답 기준이 아직 옮겨지지 않았습니다"),
+        chk.set_match("re-measured positions", pts or None, want, tol=1e-3, weight=2.0),
+        # 초과 측정도 오답이다 — 필요 없는 자리에 빔을 더 쬐는 것이라서.
+        chk.called(run, "acquire_spectrum", times=len(want), weight=2.0),
     ]

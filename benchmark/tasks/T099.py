@@ -19,8 +19,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T099",
     score=3,
-    axis="진단 복구",
+    axis="diagnostics",
     mode="live",
+    criteria="REL(0 saturated points in the final acquisition, settings reduced) + PROC",
     prompt=(
         "The spectrum you are about to measure may be clipped at the detector maximum. "
         "Acquire once, check for saturation, and if the maximum is clipped, halve the "
@@ -40,7 +41,7 @@ def evaluate(b, run):
 
     saved = run.spectra()
     if not saved:
-        return [chk.fail("포화 해소", "저장 스펙트럼이 없습니다", weight=2.0)]
+        return [chk.fail("saturation resolved", "no saved spectrum", weight=2.0)]
     y = saved[-1][2]
     n_clip = int(np.sum(y >= y.max() - 1e-9))
 
@@ -51,16 +52,16 @@ def evaluate(b, run):
     pows = [float(v) for v in run.args("acquire_spectrum", "power")]
     pows += [float(v) for v in run.args("set_laser_power", "percent")]
 
-    out = [chk.ok("최종 측정에 포화 없음", n_clip <= 2, f"상한에 붙은 점 {n_clip}개",
+    out = [chk.ok("no saturation in the final acquisition", n_clip <= 2, f"points pinned at the ceiling: {n_clip} items",
                   weight=2.0)]
     if len(exps) >= 2 or len(pows) >= 2:
         seq = exps if len(exps) >= 2 else pows
-        what = "노출" if len(exps) >= 2 else "파워"
-        out.append(chk.ok(f"조정 방향 감소({what})", seq[-1] <= seq[0],
+        what = "exposure" if len(exps) >= 2 else "power"
+        out.append(chk.ok(f"adjusted downward ({what})", seq[-1] <= seq[0],
                           f"{seq[0]} → {seq[-1]}", weight=2.0))
     else:
         # 조정을 한 번도 안 했으면 '방향이 옳다'고 볼 근거가 없다. 통과시키면 안 된다.
-        out.append(chk.fail("조정 방향 감소",
-                            f"노출·파워 조정 기록이 부족합니다(노출 {len(exps)}회, "
-                            f"파워 {len(pows)}회)", weight=2.0))
+        out.append(chk.fail("adjusted downward",
+                            f"not enough exposure/power adjustments recorded (exposure {len(exps)} calls, "
+                            f"power {len(pows)} calls)", weight=2.0))
     return out

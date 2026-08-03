@@ -14,7 +14,8 @@
     state()          채점용 종료 상태
     evaluate(b, run) 문항 파일이 판정 목록을 돌려준다
     teardown()·reset()  락·패치를 풀고 다시 기본값으로
-결과는 results/<run_id>/<문항>.평가.json, 취합은 같은 폴더의 성적.json.
+결과는 results/<run_id>/<문항>.json, 취합은 같은 폴더의 summary.json.
+결과 파일은 전부 영어다 — 표·스크립트·외부 협업자를 거치기 때문.
 """
 from __future__ import annotations
 
@@ -104,14 +105,19 @@ def check_only(pairs) -> int:
                 if key not in TOOL_PARAMS.get(tool, set()):
                     unknown.append(f"{task.id}: setup {tool}({key}=…) — 실제 인자는 "
                                    f"{sorted(TOOL_PARAMS.get(tool, []))}")
+    # 입력 파일이 없으면 그 문항은 '데이터 없이' 돌아 낮은 점수를 받는다. 에이전트가
+    # 아니라 준비가 틀린 것이므로 실행 전에 잡는다.
+    missing_inputs = [f"{t.id}: {n}" for _, t in pairs for n in t.inputs
+                      if not (HERE / "inputs" / n).is_file()]
     todo = [t.id for m, t in pairs if "[남은 일]" in inspect.getsource(m)]
 
     for label, items in (("판정 항목 없음", empty), ("도구 이름 오류", unknown),
+                         ("입력 파일 없음", missing_inputs),
                          ("재계산 이식 대기", todo)):
         if items:
             print(f"  [{label}] {len(items)}개: {', '.join(map(str, items[:20]))}"
                   f"{' ...' if len(items) > 20 else ''}")
-    return 1 if (empty or unknown) else 0
+    return 1 if (empty or unknown or missing_inputs) else 0
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -125,26 +131,30 @@ def run_one(b: Bench, mod, task, run_id: str, axis=None) -> tuple:
     if rs.get("critical"):
         return None, "리셋 실패(치명적): " + "; ".join(rs["critical"])
     if rs.get("failed"):
-        infra.append("리셋 경고: " + "; ".join(rs["failed"][:3]))
+        infra.append("reset warning: " + "; ".join(rs["failed"][:3]))
 
     if task.inputs:
         up = b.upload(task.inputs)
         if not up.get("ok", True):
-            infra.append(f"입력 파일 업로드 실패: {up.get('error')}")
+            infra.append(f"input upload failed: {up.get('error')}")
 
     setup = getattr(mod, "setup", None)
     if setup and task.mode == "live":
         # 가정형은 '장비를 건드리지 말고 답만 하라'는 문항이라 사전 세팅을 걸면 전제가 무너진다.
+        b.setup_errors = []
         try:
             setup(b)
         except Exception as e:
-            infra.append(f"사전 세팅 실패: {type(e).__name__}: {e}")
+            infra.append(f"setup failed: {type(e).__name__}: {e}")
+        # 예외가 안 나도 도구가 ok=false 를 돌려줄 수 있다. 그러면 전제 없이 돌게 되므로
+        # 낮은 점수의 원인을 나중에 구별할 수 있게 결과에 남긴다.
+        infra += [f"setup did not take effect - {e}" for e in b.setup_errors]
 
     # 시작 상태는 **사전 세팅을 마친 뒤**의 상태다. 그래야 '문항이 시작한 자리에서
     # 무엇이 달라졌는가'가 에이전트의 몫이 된다.
     before = b.state()
     if not before:
-        infra.append("시작 상태를 읽지 못했습니다 — 상태 판정이 전부 실패로 남습니다")
+        infra.append("could not read the starting state - every state check will fail")
     run = b.run(task, run_id)
     run.state_before = before
     run.state_after = b.state()
@@ -156,13 +166,8 @@ def _finish(b, mod, task, run, infra) -> dict:
     try:
         checks = mod.evaluate(b, run)
     except Exception:
-        checks = [chk.fail("채점 예외", traceback.format_exc(limit=4))]
-    payload = R.score_task(task, checks)
-    payload["errors"] = run.errors
-    payload["elapsed_s"] = round(run.elapsed_s, 2)
-    payload["session_id"] = run.session_id
-    payload["tool_calls"] = [c.get("name") for c in run.calls]
-    return payload
+        checks = [chk.fail("grading raised", traceback.format_exc(limit=4))]
+    return R.score_task(task, checks, run)
 
 
 def main() -> int:
@@ -222,7 +227,7 @@ def main() -> int:
             break
         for name in blocked.get(task.id, []):
             payload["checks"].append(
-                chk.blocked(name, "장비 파수축이 이 구간을 덮지 않습니다").as_dict())
+                chk.blocked(name, "the instrument axis does not cover this window").as_dict())
         b.teardown()
         b.reset()
         R.write_eval(out, task.id, payload)
@@ -236,11 +241,11 @@ def main() -> int:
                                 "server": args.server,
                                 "config": pf.get("config", {}),
                                 "memory_scope": pf.get("memory_scope", "?")})
-    (out / "성적.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2),
-                                  encoding="utf-8")
+    (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2),
+                                      encoding="utf-8")
     print()
     R.print_summary(summary)
-    print(f"→ {out / '성적.json'}")
+    print(f"→ {out / 'summary.json'}")
     return 0
 
 

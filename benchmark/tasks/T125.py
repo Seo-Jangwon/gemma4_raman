@@ -17,9 +17,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T125",
     score=2,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
     inputs=['T125.csv', 'reference_library.csv'],
+    criteria="EXACT(material) + SET(basis peaks >=2 items, ±3 cm-1)",
     prompt=(
         "Report the material in reference_library.csv most similar to T125.csv, and present "
         "at least two basis peaks that distinguish it from the second-ranked candidate. "
@@ -31,5 +32,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T125 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported_label(run, "material", "PET", ['PET'], name="물질명"),
+        chk.reported_label(run, "material", "PET", ['PET'], name="material"),
     ]

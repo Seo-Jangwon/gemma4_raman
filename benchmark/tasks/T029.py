@@ -18,8 +18,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T029",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="SET(coords 6 items, ±0.001)",
     prompt=(
         "Acquire one spectrum at each of X = 37.0, 37.2, 37.4, 37.6, 37.8, 38.0 mm with "
         "Y=25.25 and Z=0. "
@@ -34,11 +35,11 @@ def evaluate(b, run):
     pts = run.positions()
     WANT_X = [37.0, 37.2, 37.4, 37.6, 37.8, 38.0]
     if not pts:
-        return [chk.fail("측정 X 좌표", "이동 호출의 응답에서 좌표를 찾지 못했습니다",
+        return [chk.fail("measured X coordinates", "no coordinates in the move-call responses",
                          weight=2.0)]
     xs = [p[0] for p in pts]
     return [
-        chk.set_match("측정 X 좌표", xs, WANT_X, tol=MM_GRID, weight=2.0),
-        chk.ok("Y 고정", all(abs(p[1] - 25.25) <= MM_GRID for p in pts),
-               f"y={[round(p[1], 3) for p in pts[:6]]} (기대 25.25)"),
+        chk.set_match("measured X coordinates", xs, WANT_X, tol=MM_GRID, weight=2.0),
+        chk.ok("Y held fixed", all(abs(p[1] - 25.25) <= MM_GRID for p in pts),
+               f"y={[round(p[1], 3) for p in pts[:6]]} (expected 25.25)"),
     ]

@@ -9,12 +9,13 @@
       client.py   Bench — 장비를 쥔 서버에 시키는 창구 / Run — 실행 기록
       check.py    chk   — 판정 원자. 각 판정은 Check 하나를 돌려준다
       spectra.py        저장 스펙트럼 읽기 + 규약 재계산(SNR·피크·코사인)
-      report.py         평가.json 쓰기 / 전체 취합
+      report.py         <문항>.json 쓰기 / 전체 취합(summary.json)
+      answer.py         에이전트 답(JSON 블록)에서 값 꺼내기
       tools.py          도구 이름·인자 표(오탈자 검사용)
     inputs/ gt/ generate/   문항이 쓰는 데이터 자산
 
 [문항 파일이 지켜야 하는 계약]
-    TASK               Task 인스턴스 (필수)
+    TASK               Task 인스턴스 (필수). criteria 는 영어로 — 결과 파일에 실린다
     setup(b)           측정 전에 만들어야 하는 상태. 없으면 생략 가능
     evaluate(b, run)   -> list[Check]. 이 목록이 그대로 점수가 된다 (필수)
 

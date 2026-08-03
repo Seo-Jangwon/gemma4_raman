@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T085",
     score=2,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="SET(4 entries EXACT)",
     prompt=(
         "Report the current stage, laser, CCD and camera states comprehensively. "
     ),
@@ -27,8 +28,8 @@ def evaluate(b, run):
     """이 목록이 그대로 T085 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.keywords(run, ['stage', '스테이지']),
-        chk.keywords(run, ['laser', '레이저']),
-        chk.keywords(run, ['ccd', 'detector', '검출기']),
-        chk.keywords(run, ['camera', '카메라']),
+        chk.keywords(run, ['stage']),
+        chk.keywords(run, ['laser']),
+        chk.keywords(run, ['ccd', 'detector']),
+        chk.keywords(run, ['camera']),
     ]

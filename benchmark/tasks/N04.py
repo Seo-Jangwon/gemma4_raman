@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="N04",
     score=1,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="PROC(tool and args EXACT)",
     prompt=(
         "Bundle this session's results into a single zip for download. "
     ),

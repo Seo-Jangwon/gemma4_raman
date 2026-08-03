@@ -18,8 +18,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T034",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="PROC(args EXACT) + ARRAY(rtol 1e-6)",
     prompt=(
         "Set the detector to accumulate 10 exposures, measure once, then divide the "
         "accumulated spectrum by 10 with run_analysis and save that per-exposure average. "
@@ -35,15 +36,15 @@ def evaluate(b, run):
     out = [
         chk.arg(run, "set_ccd_acquisition_mode", "mode", "accumulate"),
         chk.arg(run, "set_ccd_acquisition_mode", "num_accumulations", 10),
-        chk.state("실행 후 acquisition_mode", after, "acquisition_mode", "accumulate"),
-        chk.state("실행 후 num_accumulations", after, "num_accumulations", 10),
+        chk.state("final acquisition_mode", after, "acquisition_mode", "accumulate"),
+        chk.state("final num_accumulations", after, "num_accumulations", 10),
     ]
     if len(saved) < 2:
-        return out + [chk.fail("누적/10", f"저장 {len(saved)}건 (2건 필요)")]
+        return out + [chk.fail("accumulation / 10", f"saved {len(saved)} files (need 2)")]
     # 방향이 중요하다. 예전에는 모든 (i,j) 순서쌍을 다 시도해서 '10배 곱하기'도 통과했다.
     # 누적 결과를 10 으로 **나눈** 것이 뒤에 저장된다고 보고, 그 방향만 인정한다.
     acc, per = saved[0][2], saved[-1][2]
     n = min(len(acc), len(per))
     return out + [
-        chk.array("누적을 10으로 나눔", per[:n], acc[:n] / 10.0, mode="exact", weight=2.0),
+        chk.array("accumulated divided by 10", per[:n], acc[:n] / 10.0, mode="exact", weight=2.0),
     ]

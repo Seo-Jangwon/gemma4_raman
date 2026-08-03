@@ -16,8 +16,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="N09",
     score=2,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="STATE(speed EXACT) + KEYWORD(the clipping)",
     prompt=(
         "Set the stage speed to X=9.0 mm/s and Z=0.5 mm/s, then report the speeds that will "
         "actually be used. "
@@ -31,7 +32,7 @@ def evaluate(b, run):
     return [
         chk.arg(run, "set_stage_speed", "x_speed_mm_s", 9.0),
         chk.arg(run, "set_stage_speed", "z_speed_mm_s", 0.5),
-        chk.state("실행 후 x_speed_mm_s", after, "x_speed_mm_s", 5.0),
-        chk.state("실행 후 z_speed_mm_s", after, "z_speed_mm_s", 0.1),
-        chk.keywords(run, ['클리핑', 'clip', '상한', 'limit', '제한']),
+        chk.state("final x_speed_mm_s", after, "x_speed_mm_s", 5.0),
+        chk.state("final z_speed_mm_s", after, "z_speed_mm_s", 0.1),
+        chk.keywords(run, ['clip', 'limit']),
     ]

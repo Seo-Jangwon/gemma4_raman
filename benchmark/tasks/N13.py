@@ -18,8 +18,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="N13",
     score=2,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="PROC(query before acting) + EXACT(chosen index)",
     prompt=(
         "Read the available vertical and horizontal shift speeds, then set the vertical "
         "shift speed to the slowest available index and report both the index and its speed "
@@ -35,13 +36,13 @@ def evaluate(b, run):
     speeds = _last(run, "vs_speeds_us") or before.get("vs_speeds_us")
     out = [chk.order(run, "get_ccd_info", "set_ccd_shift_speeds")]
     if not isinstance(speeds, list) or not speeds:
-        return out + [chk.fail("vs 인덱스", "vs_speeds_us 를 관측하지 못했습니다")]
+        return out + [chk.fail("vs index", "vs_speeds_us was never observed")]
     # 세로 전송이 느릴수록(값이 클수록) 읽기 잡음이 작다. 가장 큰 값의 인덱스가 정답이다.
     want = int(np.argmax([float(v) for v in speeds]))
     got = (run.args("set_ccd_shift_speeds", "vs_index") or [None])[0]
     return out + [
-        chk.ok("가장 느린 vs 선택", got == want,
-               f"선택={got} 정답={want} (speeds={speeds})", weight=2.0),
+        chk.ok("slowest vs chosen", got == want,
+               f"chosen={got} expected={want} (speeds={speeds})", weight=2.0),
     ]
 
 

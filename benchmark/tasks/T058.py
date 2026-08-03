@@ -20,9 +20,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T058",
     score=3,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
-    windows=[('1602 cm-1 밴드', 1596.0, 1608.0, 2)],
+    windows=[('1602 cm-1 band', 1596.0, 1608.0, 2)],
+    criteria="PROC + SET(3 items, ±3 cm-1, order) / post-hoc GT",
     prompt=(
         "Measure a spectrum once at the current position and save it. Then apply to the "
         "SAVED file, in order: spike removal (5-point moving median, 5x MAD), IPBSA baseline "
@@ -38,20 +39,20 @@ def evaluate(b, run):
 
     saved = run.spectra()
     if not saved:
-        return [chk.fail("상위 3피크", "저장 스펙트럼이 없습니다", weight=2.0)]
+        return [chk.fail("top 3 peaks", "no saved spectrum", weight=2.0)]
     _, x, y = saved[-1]
     pk = sp.peaks(x, y)
     if not pk:
-        return [chk.ok("최종 min/max 정규화",
+        return [chk.ok("final min/max normalization",
                        abs(y.min()) < 1e-6 and abs(y.max() - 1) < 1e-6,
                        f"min={y.min():.3g} max={y.max():.3g}"),
-                chk.fail("상위 3피크", "피크가 검출되지 않았습니다", weight=2.0)]
+                chk.fail("top 3 peaks", "no peak was detected", weight=2.0)]
     # 세기 순 상위 3개
     order = sorted(pk, key=lambda p: -float(y[int(np.argmin(abs(x - p)))]))[:3]
     got = run.answer.get("peaks")
     return [
-        chk.ok("최종 min/max 정규화", abs(y.min()) < 1e-6 and abs(y.max() - 1) < 1e-6,
+        chk.ok("final min/max normalization", abs(y.min()) < 1e-6 and abs(y.max() - 1) < 1e-6,
                f"min={y.min():.3g} max={y.max():.3g}"),
-        chk.set_match("상위 3피크", [float(v) for v in got] if isinstance(got, list) else None,
+        chk.set_match("top 3 peaks", [float(v) for v in got] if isinstance(got, list) else None,
                       order, tol=TOL_PEAK_CM1, ordered=True, partial=True, weight=2.0),
     ]

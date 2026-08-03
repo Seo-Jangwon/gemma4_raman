@@ -16,8 +16,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T019",
     score=1,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
+    criteria="PROC(tool choice EXACT) + KEYWORD(cited statistics)",
     prompt=(
         "Capture the current camera view, look at it, and describe what you see. "
     ),
@@ -30,5 +31,5 @@ def evaluate(b, run):
     return [
         chk.called(run, "analyze_microscope_image", at_least=1, at_most=2),
         chk.called(run, "capture_scene", times=0),
-        chk.keywords(run, ['밝기', 'intensity', 'bright', 'mean']),
+        chk.keywords(run, ['intensity', 'bright', 'mean']),
     ]

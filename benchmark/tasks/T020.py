@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T020",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="STATE(coords ±1e-4, z unchanged)",
     prompt=(
         "Return the stage to the minimum-coordinate origin, X=0, Y=0, keeping the current Z. "
     ),
@@ -27,7 +28,7 @@ def evaluate(b, run):
     """이 목록이 그대로 T020 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.state("실행 후 x", after, "x", 0.0, tol=MM),
-        chk.state("실행 후 y", after, "y", 0.0, tol=MM),
-        chk.unchanged("건드리지 않았는가", before, after, ['z']),
+        chk.state("final x", after, "x", 0.0, tol=MM),
+        chk.state("final y", after, "y", 0.0, tol=MM),
+        chk.unchanged("left untouched", before, after, ['z']),
     ]

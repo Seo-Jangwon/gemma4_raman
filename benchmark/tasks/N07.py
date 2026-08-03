@@ -19,8 +19,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="N07",
     score=3,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
+    criteria="PROC(args EXACT) + ARRAY(rtol 1e-6) / post-hoc GT",
     prompt=(
         "Acquire a kinetic series of 5 frames (1 s interval) at the current position, then "
         "plot how the total intensity of each frame changes over the series. "
@@ -39,12 +40,12 @@ def evaluate(b, run):
     ]
     frames = _frames(run)
     if frames is None:
-        return out + [chk.fail("프레임 합", "도구 응답에서 frames 를 찾지 못했습니다")]
+        return out + [chk.fail("frame sums", "no frames in the tool response")]
     sums = [float(np.sum(f)) for f in frames]
     got = run.answer.get("frame_sums")
     return out + [
-        chk.ok("프레임 5개", len(frames) == 5, f"{len(frames)}개"),
-        chk.set_match("프레임별 합", [float(v) for v in got] if isinstance(got, list) else None,
+        chk.ok("5 frames", len(frames) == 5, f"{len(frames)} items"),
+        chk.set_match("per-frame sums", [float(v) for v in got] if isinstance(got, list) else None,
                       sums, tol=max(abs(max(sums)) * 1e-6, 1e-9), ordered=True, weight=2.0),
     ]
 

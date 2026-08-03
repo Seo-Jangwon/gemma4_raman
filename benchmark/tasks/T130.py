@@ -19,9 +19,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T130",
     score=2,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
-    inputs=['reference_library_8.csv'],
+    inputs=['T130_1.csv', 'T130_2.csv', 'T130_3.csv', 'T130_4.csv', 'T130_5.csv', 'reference_library_8.csv'],
+    criteria="EXACT(5 hit rates) + NUM(mean ±0.01)",
     prompt=(
         "For each of T130_1.csv through T130_5.csv, find the 3 most similar references in "
         "reference_library_8.csv, compute the fraction of the top 3 that are the same "
@@ -34,5 +35,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T130 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported(run, "mean_hit_rate", 0.5333333333333333, tol=0.01, name="평균 적중률"),
+        chk.reported(run, "mean_hit_rate", 0.5333333333333333, tol=0.01, name="mean hit rate"),
     ]

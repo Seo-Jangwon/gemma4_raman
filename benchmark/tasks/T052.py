@@ -18,9 +18,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T052",
     score=2,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
     inputs=['T052_a.csv', 'T052_b.csv'],
+    criteria="SET(pairs EXACT, position ±1 cm-1)",
     prompt=(
         "Pair the peaks of T052_a.csv and T052_b.csv (prominence 5% of range, "
         "nearest-neighbour 1:1 within 10 cm-1) and report only the pairs whose position "
@@ -36,7 +37,7 @@ def evaluate(b, run):
     PAIR_MAX, MIN_DIFF = 10.0, 5.0
     a, bb = _input(b, "T052_a.csv"), _input(b, "T052_b.csv")
     if a is None or bb is None:
-        return [chk.fail("피크 쌍", "입력 T052_a/b.csv 를 읽지 못했습니다", weight=2.0)]
+        return [chk.fail("peak pairs", "could not read the inputs T052_a/b.csv", weight=2.0)]
     pa, pb = sp.peaks(*a), sp.peaks(*bb)
     pairs, diffs = [], []
     for p in pa:
@@ -50,15 +51,15 @@ def evaluate(b, run):
     if not pairs:
         # '해당 쌍 없음'도 정답일 수 있다. 그때는 없다고 답해야 맞다.
         got = run.answer.get("pairs")
-        return [chk.ok("해당 쌍 없음을 보고", not got,
-                       f"보고={got}", weight=2.0)]
+        return [chk.ok("reported that no pair qualifies", not got,
+                       f"reported={got}", weight=2.0)]
     got_pairs = run.answer.get("pairs")
     got_diff = run.answer.get("differences")
     return [
         # 차이값만 맞으면 통과하던 자리 — 어느 피크끼리 짝지었는지가 본질이다.
-        chk.set_match("피크 쌍", got_pairs if isinstance(got_pairs, list) else None,
+        chk.set_match("peak pairs", got_pairs if isinstance(got_pairs, list) else None,
                       pairs, tol=1.0, weight=2.0),
-        chk.set_match("쌍의 차이", [float(v) for v in got_diff] if isinstance(got_diff, list) else None,
+        chk.set_match("pair differences", [float(v) for v in got_diff] if isinstance(got_diff, list) else None,
                       diffs, tol=1.0),
     ]
 

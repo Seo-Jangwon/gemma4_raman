@@ -18,8 +18,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T105",
     score=3,
-    axis="진단 복구",
+    axis="diagnostics",
     mode="live",
+    inputs=['T105.csv'],
+    criteria="KEYWORD(photobleaching) + NUM(slope 10%) + REL(sign)",
     prompt=(
         "T105.csv holds 10 consecutive measurements of the same spot (column frame_index "
         "0-9). Determine whether the Raman signal decreases and the background increases "
@@ -32,6 +34,6 @@ def evaluate(b, run):
     """이 목록이 그대로 T105 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported(run, "signal_slope", -49.28848874219068, rel=0.1, name="신호 기울기"),
-        chk.reported(run, "background_slope", 24.855960678628154, rel=0.1, name="배경 기울기"),
+        chk.reported(run, "signal_slope", -49.28848874219068, rel=0.1, name="signal slope"),
+        chk.reported(run, "background_slope", 24.855960678628154, rel=0.1, name="background slope"),
     ]

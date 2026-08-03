@@ -16,8 +16,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T025",
     score=2,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="NUM(z ±1e-4 ×2) + PROC(1 autofocus call)",
     prompt=(
         "Perform autofocus once, then measure a spectrum once at the focus position it "
         "found. Report the Z before and after the autofocus. "
@@ -31,5 +32,5 @@ def evaluate(b, run):
     return [
         chk.called(run, "run_autofocus", times=1),
         chk.called(run, "acquire_spectrum", times=1),
-        chk.reported(run, "z_after", after.get("z"), tol=0.0001, name="보고한 z_after"),
+        chk.reported(run, "z_after", after.get("z"), tol=0.0001, name="reported z_after"),
     ]

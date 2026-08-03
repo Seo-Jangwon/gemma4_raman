@@ -21,8 +21,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T065",
     score=3,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="SET(coords 5 items, ±0.001mm) + STATE(missing none)",
     prompt=(
         "At X = 37.0, 37.25, 37.5, 37.75, 38.0 mm (Y=25.25, Z=0), perform autofocus, capture "
         "the microscope view with capture_scene, acquire a Raman spectrum, and record all "
@@ -45,10 +46,10 @@ def evaluate(b, run):
     xs = [float(p["x"]) for p in pos if p.get("x") is not None]
     ys = [float(p["y"]) for p in pos if p.get("y") is not None]
     if not xs:
-        return out + [chk.fail("측정점 좌표", "저장된 측정점에 좌표가 없습니다", weight=2.0)]
+        return out + [chk.fail("measurement-point coordinates", "the saved measurement points carry no coordinates", weight=2.0)]
     return out + [
         # 이동한 뒤에 저장했는지를 본다 — 저장 시점의 좌표가 곧 그 점의 자리다.
-        chk.set_match("측정점 X 5값", xs, WANT_X, tol=1e-3, ordered=True, weight=2.0),
-        chk.ok("Y 고정", bool(ys) and all(abs(v - 25.25) < 1e-3 for v in ys),
-               f"y={[round(v, 3) for v in ys]} (기대 25.25)"),
+        chk.set_match("5 measurement-point X values", xs, WANT_X, tol=1e-3, ordered=True, weight=2.0),
+        chk.ok("Y held fixed", bool(ys) and all(abs(v - 25.25) < 1e-3 for v in ys),
+               f"y={[round(v, 3) for v in ys]} (expected 25.25)"),
     ]

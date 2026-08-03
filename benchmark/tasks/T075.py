@@ -17,9 +17,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T075",
     score=3,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
     inputs=['T075_a.csv', 'T075_b.csv'],
+    criteria="NUM ×4 (position difference ±1 cm-1 / RSD 5% / similarity ±0.01)",
     prompt=(
         "Compare the two sessions in T075_a.csv and T075_b.csv and report in one summary: "
         "the 1001 cm-1 peak position difference, the RSD (ddof=1, %) of the peak intensity "
@@ -35,6 +36,6 @@ def evaluate(b, run):
     return [
         chk.reported(run, "rsd_a_pct", 3.2781799854102798, rel=0.05, name="RSD(a)"),
         chk.reported(run, "rsd_b_pct", 3.1057700697693074, rel=0.05, name="RSD(b)"),
-        chk.reported(run, "cosine_of_means", 0.9570680913993472, tol=0.01, name="평균 유사도"),
-        chk.reported(run, "peak_position_diff", 1.0, tol=1.0, name="피크 위치차"),
+        chk.reported(run, "cosine_of_means", 0.9570680913993472, tol=0.01, name="similarity of the means"),
+        chk.reported(run, "peak_position_diff", 1.0, tol=1.0, name="peak position difference"),
     ]

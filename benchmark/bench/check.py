@@ -80,28 +80,30 @@ class chk:
             # 기대값 자체를 모르는 경우다. 되읽기 판정(chk.reported)에서 장비 상태를 못
             # 읽었을 때 여기로 온다 — 예전에는 float(None) 로 죽어 그 문항 채점이 통째로
             # 예외가 됐다. 판정 불가는 실패로 남기되, 채점기는 계속 돈다.
-            return _mk(name, False, "기대값을 알 수 없습니다(장비 상태 미확보)", weight, "NUM")
+            return _mk(name, False, "expected value unknown (instrument state unavailable)", weight, "NUM")
         if got is None:
-            return _mk(name, False, f"값 없음 (기대 {want})", weight, "NUM")
+            return _mk(name, False, f"no value (expected {want})", weight, "NUM")
         try:
             g, w = float(got), float(want)
         except (TypeError, ValueError):
-            return _mk(name, False, f"수치가 아님: {got!r}", weight, "NUM")
+            return _mk(name, False, f"not a number: {got!r}", weight, "NUM")
         if tol is not None:
             ok, how = abs(g - w) <= tol, f"|Δ|={abs(g - w):.4g} ≤ {tol}"
         else:
             d = abs(w) if abs(w) > 1e-12 else 1.0
-            ok, how = abs(g - w) / d <= rel, f"상대오차={abs(g - w) / d:.4g} ≤ {rel}"
-        return _mk(name, ok, f"{g:.6g} (기대 {w:.6g}, {how})", weight, "NUM")
+            ok, how = abs(g - w) / d <= rel, f"rel.err={abs(g - w) / d:.4g} ≤ {rel}"
+        return _mk(name, ok, f"{g:.6g} (expected {w:.6g}, {how})", weight, "NUM")
 
     @staticmethod
     def equals(name, got, want, weight=1.0) -> Check:
         ok = _norm(got) == _norm(want)
-        return _mk(name, ok, f"{got!r} (기대 {want!r})", weight, "EXACT")
+        return _mk(name, ok, f"{got!r} (expected {want!r})", weight, "EXACT")
 
     @staticmethod
-    def ok(name, cond, detail="", weight=1.0, kind="POSTHOC") -> Check:
-        return _mk(name, bool(cond), detail, weight, kind)
+    def ok(name, cond, detail="", weight=1.0, kind="POSTHOC", score=None) -> Check:
+        """score 를 주면 부분점. '거의 맞음'이 정말 존재하는 판정에만 쓴다
+        (예: 물질은 맞혔지만 참조 항목을 틀림)."""
+        return _mk(name, bool(cond), detail, weight, kind, score)
 
     @staticmethod
     def fail(name, detail, weight=1.0, kind="POSTHOC") -> Check:
@@ -120,7 +122,7 @@ class chk:
     @staticmethod
     def relation(name, lhs, op, rhs, weight=1.0) -> Check:
         if lhs is None or rhs is None:
-            return _mk(name, False, f"비교값 없음 ({lhs}, {rhs})", weight, "REL")
+            return _mk(name, False, f"nothing to compare ({lhs}, {rhs})", weight, "REL")
         l, r = float(lhs), float(rhs)
         ok = {"<": l < r, "<=": l <= r, ">": l > r, ">=": l >= r}[op]
         return _mk(name, ok, f"{l:.6g} {op} {r:.6g}", weight, "REL")
@@ -130,7 +132,7 @@ class chk:
         """값이 순서대로 커지는가(단조 증가)."""
         v = [x for x in (values or []) if x is not None]
         if len(v) < 2:
-            return _mk(name, False, f"비교할 값이 부족합니다 ({len(v)}개)", weight, "REL")
+            return _mk(name, False, f"not enough values to compare ({len(v)})", weight, "REL")
         ok = all(b > a for a, b in zip(v, v[1:]))
         return _mk(name, ok, f"{[round(float(x), 4) for x in v]}", weight, "REL")
 
@@ -139,21 +141,21 @@ class chk:
     def state(name, st, key, want, tol=None, weight=1.0) -> Check:
         got = (st or {}).get(key)
         if got is None:
-            return _mk(name, False, f"상태 {key} 를 읽지 못했습니다", weight, "STATE")
+            return _mk(name, False, f"state {key} could not be read", weight, "STATE")
         if isinstance(want, (bool, str)):
             ok = _norm(got) == _norm(want)
         else:
             ok = abs(float(got) - float(want)) <= (tol if tol is not None else TOL_MM)
-        return _mk(name, ok, f"{key}={got} (기대 {want})", weight, "STATE")
+        return _mk(name, ok, f"{key}={got} (expected {want})", weight, "STATE")
 
     @staticmethod
     def delta(name, before, after, key, want, tol=TOL_MM, weight=1.0) -> Check:
         b, a = (before or {}).get(key), (after or {}).get(key)
         if b is None or a is None:
-            return _mk(name, False, f"상태 {key} 를 읽지 못했습니다", weight, "STATE")
+            return _mk(name, False, f"state {key} could not be read", weight, "STATE")
         got = float(a) - float(b)
         ok = abs(got - float(want)) <= tol
-        return _mk(name, ok, f"Δ{key}={got:+.6g} (기대 {want:+g})", weight, "STATE")
+        return _mk(name, ok, f"Δ{key}={got:+.6g} (expected {want:+g})", weight, "STATE")
 
     @staticmethod
     def unchanged(name, before, after, keys, tol=TOL_MM, weight=1.0) -> Check:
@@ -170,20 +172,20 @@ class chk:
         '변화 없음'으로 둔갑시키면 장비 미연결이 만점이 된다.
         """
         if not before and not after:
-            return _mk(name, False, "장비 상태를 읽지 못해 판정 불가", weight, "STATE")
+            return _mk(name, False, "cannot judge - instrument state unreadable", weight, "STATE")
         bad = []
         for k in keys:
             b, a = (before or {}).get(k), (after or {}).get(k)
             if b is None and a is None:
                 continue
             if b is None or a is None:
-                bad.append(f"{k}:{'생김' if b is None else '사라짐'}({b}→{a})")
+                bad.append(f"{k}:{'appeared' if b is None else 'disappeared'}({b}→{a})")
             elif isinstance(b, (bool, str)) or isinstance(a, (bool, str)):
                 if _norm(b) != _norm(a):
                     bad.append(f"{k}:{b}→{a}")
             elif abs(float(a) - float(b)) > tol:
                 bad.append(f"{k}:{b}→{a}")
-        return _mk(name, not bad, "변화 없음" if not bad else "변경됨 " + ", ".join(bad),
+        return _mk(name, not bad, "unchanged" if not bad else "changed: " + ", ".join(bad),
                    weight, "STATE")
 
     # ── 도구 호출 ────────────────────────────────────────────────────────────
@@ -191,50 +193,50 @@ class chk:
     def called(run, tool, times=None, at_least=None, at_most=None, weight=None) -> Check:
         n = run.count(tool)
         if times is not None:
-            ok, how = n == times, f"정확히 {times}회"
+            ok, how = n == times, f"exactly {times} calls"
         elif at_least is not None and at_most is not None:
-            ok, how = at_least <= n <= at_most, f"{at_least}~{at_most}회"
+            ok, how = at_least <= n <= at_most, f"{at_least}~{at_most} calls"
         elif at_least is not None:
-            ok, how = n >= at_least, f"{at_least}회 이상"
+            ok, how = n >= at_least, f"{at_least} or more"
         elif at_most is not None:
-            ok, how = n <= at_most, f"{at_most}회 이하"
+            ok, how = n <= at_most, f"{at_most} or fewer"
         else:
-            ok, how = n > 0, "1회 이상"
+            ok, how = n > 0, "1 or more"
         # '부르면 안 되는 툴'은 안전 판정이라 비중을 두 배로 둔다.
         if weight is None:
             weight = 2.0 if (times == 0 or at_most == 0) else 1.0
-        return _mk(f"{tool} 호출", ok, f"{n}회 ({how})", weight, "PROC")
+        return _mk(f"{tool} calls", ok, f"{n} calls ({how})", weight, "PROC")
 
     @staticmethod
     def any_called(run, tools, weight=1.0) -> Check:
         n = sum(run.count(t) for t in tools)
-        return _mk(f"{'/'.join(tools)} 중 택일", n > 0, f"{n}회", weight, "PROC")
+        return _mk(f"{'/'.join(tools)} (one of these)", n > 0, f"{n} calls", weight, "PROC")
 
     @staticmethod
     def arg(run, tool, key, want, tol=None, weight=1.0) -> Check:
         """그 툴 호출 중 **하나라도** 인자가 기대값이면 통과."""
         vals = run.args(tool, key)
         if not vals:
-            return _mk(f"{tool}.{key}", False, f"인자를 넘긴 호출이 없습니다 (기대 {want})",
+            return _mk(f"{tool}.{key}", False, f"no call passed this argument (expected {want})",
                        weight, "PROC")
         if isinstance(want, (int, float)) and not isinstance(want, bool):
             t = tol if tol is not None else 1e-6
             ok = any(_is_num(v) and abs(float(v) - float(want)) <= t for v in vals)
         else:
             ok = any(_norm(v) == _norm(want) for v in vals)
-        return _mk(f"{tool}.{key}", ok, f"{vals} (기대 {want})", weight, "PROC")
+        return _mk(f"{tool}.{key}", ok, f"{vals} (expected {want})", weight, "PROC")
 
     @staticmethod
     def arg_set(run, tool, key, wants, tol=0.0, weight=2.0) -> Check:
         """여러 호출의 인자 집합이 정확히 그 집합인가(예: 파워 20/40/60)."""
         got = run.args(tool, key)
-        return chk.set_match(f"{tool}.{key} 집합", got or None, list(wants),
+        return chk.set_match(f"{tool}.{key} set", got or None, list(wants),
                              tol=tol, weight=weight)
 
     @staticmethod
     def arg_not(run, tool, key, bad, weight=1.0) -> Check:
         hit = any(_norm(v) == _norm(bad) for v in run.args(tool, key))
-        return _mk(f"{tool}.{key}≠{bad}", not hit, "사용함" if hit else "사용 안 함",
+        return _mk(f"{tool}.{key}≠{bad}", not hit, "used" if hit else "not used",
                    weight, "PROC")
 
     @staticmethod
@@ -243,7 +245,7 @@ class chk:
         names = run.names()
         if first not in names or second not in names:
             missing = [t for t in (first, second) if t not in names]
-            return _mk(f"{first} → {second}", False, f"미호출: {', '.join(missing)}",
+            return _mk(f"{first} → {second}", False, f"never called: {', '.join(missing)}",
                        weight, "PROC")
         i, j = names.index(first), names.index(second)
         return _mk(f"{first} → {second}", i < j, f"{first}@{i}, {second}@{j}",
@@ -251,7 +253,7 @@ class chk:
 
     # ── 답변 ─────────────────────────────────────────────────────────────────
     @staticmethod
-    def keywords(run, any_of, name="답변 내용", weight=1.0) -> Check:
+    def keywords(run, any_of, name="answer content", weight=1.0) -> Check:
         """답변이 그 말을 했는가. any_of 중 하나만 있으면 통과.
 
         주의: 'ㅁ0', '?', '100' 처럼 아무 텍스트에나 들어가는 토큰을 넣으면 그 판정은
@@ -259,7 +261,7 @@ class chk:
         """
         t = (run.text or "").lower()
         hit = [k for k in any_of if k.lower() in t]
-        return _mk(name, bool(hit), f"포함 {hit}" if hit else f"없음 {list(any_of)}",
+        return _mk(name, bool(hit), f"found {hit}" if hit else f"not found {list(any_of)}",
                    weight, "KEYWORD")
 
     @staticmethod
@@ -276,7 +278,7 @@ class chk:
         if want is None:
             # 기대값을 모르면 본문 탐색도 할 수 없다(무엇에 가까운 숫자를 찾을지 모른다).
             # 되읽기 판정에서 장비 상태를 못 읽었을 때 여기로 온다.
-            return _mk(label, False, "기대값을 알 수 없습니다(장비 상태 미확보)", weight, "NUM")
+            return _mk(label, False, "expected value unknown (instrument state unavailable)", weight, "NUM")
         v = run.answer.get(key)
         if v is not None:
             c = chk.near(label, _num(v), want, tol=tol, rel=rel, weight=weight)
@@ -284,7 +286,7 @@ class chk:
             return c
         got = run.number_near(want, tol=tol, rel=rel)
         c = chk.near(label, got, want, tol=tol, rel=rel, weight=weight)
-        c.detail += "  [산문]" if got is not None else "  [answer 없음]"
+        c.detail += "  [prose]" if got is not None else "  [no answer block]"
         return c
 
     @staticmethod
@@ -299,7 +301,7 @@ class chk:
     @staticmethod
     def has_answer_key(run, key, weight=1.0) -> Check:
         has = key in run.answer or key in (run.text or "")
-        return _mk(f"답변 필드 {key}", has, "있음" if has else "없음", weight, "EXACT")
+        return _mk(f"answer field {key}", has, "present" if has else "absent", weight, "EXACT")
 
     # ── 집합·배열 ────────────────────────────────────────────────────────────
     @staticmethod
@@ -311,7 +313,7 @@ class chk:
         5개를 물었는데 10개를 내는 쪽이 유리해지면 안 된다.
         """
         if got is None:
-            return _mk(name, False, f"값 없음 (기대 {len(want)}개)", weight, "SET")
+            return _mk(name, False, f"no value (expected {len(want)})", weight, "SET")
         g, w = list(got), list(want)
         if ordered:
             hit = sum(1 for a, b in zip(g, w) if _close(a, b, tol))
@@ -327,7 +329,7 @@ class chk:
         if partial and len(g) != len(w):
             score *= 0.5          # 개수가 틀린 것도 오답이다. 부분점은 절반만.
         return Check(name, ok, score,
-                     f"{hit}/{len(w)} 일치 (제출 {len(g)}개) {_short(g)} vs {_short(w)}",
+                     f"{hit}/{len(w)} matched (submitted {len(g)}) {_short(g)} vs {_short(w)}",
                      weight, "SET")
 
     @staticmethod
@@ -338,10 +340,10 @@ class chk:
         mode='similar' 알고리즘 자유도가 있는 변환 — cos≥0.99 AND NRMSE≤0.02
         """
         if got is None:
-            return _mk(name, False, "배열 없음", weight, "ARRAY")
+            return _mk(name, False, "no array", weight, "ARRAY")
         a, b = np.asarray(got, float), np.asarray(want, float)
         if a.shape != b.shape:
-            return _mk(name, False, f"길이 불일치 {a.shape} vs {b.shape}", weight, "ARRAY")
+            return _mk(name, False, f"shape mismatch {a.shape} vs {b.shape}", weight, "ARRAY")
         if mode == "exact":
             # atol 은 데이터 크기에 맞춰 잡는다. 배열은 CSV 를 거쳐 오는데 저장이 소수점
             # 여섯 자리라 0 근처 값의 왕복 오차가 최대 5e-7 이다. atol 을 1e-9 로 두면
@@ -349,7 +351,7 @@ class chk:
             atol = max(1e-9, float(np.max(np.abs(b))) * ARRAY_RTOL) if b.size else 1e-9
             ok = bool(np.allclose(a, b, rtol=ARRAY_RTOL, atol=atol))
             return _mk(name, ok,
-                       f"최대편차={float(np.max(np.abs(a - b))):.4g} (허용 {atol:.3g})",
+                       f"max deviation={float(np.max(np.abs(a - b))):.4g} (tolerance {atol:.3g})",
                        weight, "ARRAY")
         na, nb = np.linalg.norm(a), np.linalg.norm(b)
         cos = float(a @ b / (na * nb)) if na > 0 and nb > 0 else 0.0
@@ -369,7 +371,7 @@ class chk:
         """
         got = run.plan()
         if not got:
-            return _mk("계획 순서", False, f"계획 없음 (기대 {want})", weight, "PLAN")
+            return _mk("plan order", False, f"no plan (expected {want})", weight, "PLAN")
         g, w = [_norm(x) for x in got], [_norm(x) for x in want]
         i = hit = 0
         for step in w:
@@ -378,8 +380,8 @@ class chk:
             if i < len(g):
                 hit += 1
                 i += 1
-        return Check("계획 순서", hit == len(w), hit / len(w) if w else 0.0,
-                     f"{hit}/{len(w)} 순서 일치 {_short(got, 8)}", weight, "PLAN")
+        return Check("plan order", hit == len(w), hit / len(w) if w else 0.0,
+                     f"{hit}/{len(w)} in order {_short(got, 8)}", weight, "PLAN")
 
 
 # ── 내부 헬퍼 ────────────────────────────────────────────────────────────────

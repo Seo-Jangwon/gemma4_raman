@@ -15,9 +15,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T053",
     score=2,
-    axis="데이터 처리",
+    axis="data processing",
     mode="live",
     inputs=['T053.csv'],
+    criteria="NUM(2%)",
     prompt=(
         "Compute the area of 990-1012 cm-1 (inclusive) of the already baseline-corrected "
         "T053.csv by trapezoidal integration, with no further baseline correction. "
@@ -29,5 +30,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T053 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported(run, "area", 7951.014983208794, rel=0.02, name="면적"),
+        chk.reported(run, "area", 7951.014983208794, rel=0.02, name="area"),
     ]

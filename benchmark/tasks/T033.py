@@ -17,8 +17,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T033",
     score=2,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="SET(coords 2 items, ±0.001mm) + PROC",
     prompt=(
         "Measure a spectrum once each at (X=37, Y=25) and (X=38, Y=26) mm, and save them so "
         "the two positions can be told apart. "
@@ -34,9 +35,9 @@ def evaluate(b, run):
     out = [chk.called(run, "acquire_spectrum", times=2)]
     pts = run.positions()
     if not pts:
-        return out + [chk.fail("측정 좌표", "이동 호출의 응답에서 좌표를 찾지 못했습니다",
+        return out + [chk.fail("measured coordinates", "no coordinates in the move-call responses",
                                weight=2.0)]
     return out + [
-        chk.set_match("측정 좌표", [[p[0], p[1]] for p in pts],
+        chk.set_match("measured coordinates", [[p[0], p[1]] for p in pts],
                       [list(w) for w in WANT], tol=MM_GRID, ordered=True, weight=2.0),
     ]

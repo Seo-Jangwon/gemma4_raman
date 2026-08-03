@@ -17,9 +17,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T118",
     score=2,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
-    inputs=['reference_library.csv'],
+    inputs=['T118.csv', 'reference_library.csv'],
+    criteria="EXACT(material) + NUM(similarity ±0.01 ×2)",
     prompt=(
         "T118.csv is a mixture synthesised from two library materials. Compare it with "
         "reference_library.csv and report which component dominates the signal, together "
@@ -32,5 +33,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T118 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported_label(run, "dominant", "polystyrene", ['polystyrene', 'PMMA'], name="우세 성분"),
+        chk.reported_label(run, "dominant", "polystyrene", ['polystyrene', 'PMMA'], name="dominant component"),
     ]

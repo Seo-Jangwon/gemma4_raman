@@ -19,9 +19,10 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T070",
     score=3,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
     inputs=['T070_ref.csv'],
+    criteria="SET(coords 25 items) + NUM(±0.01) + EXACT(mask) / post-hoc GT",
     prompt=(
         "Measure a 5x5 grid spanning +0.0 to +0.4 mm in X and Y from the current position "
         "(0.1 mm spacing). Compare each spectrum with the polystyrene reference T070_ref.csv "
@@ -39,8 +40,8 @@ def evaluate(b, run):
     ref = _input(b, "T070_ref.csv")
     saved = run.spectra()
     if ref is None or len(saved) < 25:
-        return [chk.fail("유사도 맵",
-                         f"참조 {'있음' if ref else '없음'} / 저장 {len(saved)}건 (25건 필요)",
+        return [chk.fail("similarity map",
+                         f"reference {'present' if ref else 'none'} / saved {len(saved)} files (need 25)",
                          weight=2.0)]
     xr, yr = ref
     sims = []
@@ -54,12 +55,12 @@ def evaluate(b, run):
     # 예전에는 '25점 측정'과 '통과 개수'가 무조건 통과라, 아무 값도 보고하지 않아도
     # 2차 만점이었다. 보고한 값으로만 채점한다.
     return [
-        chk.set_match("유사도 25값",
+        chk.set_match("25 similarity values",
                       [float(v) for v in got] if isinstance(got, list) else None,
                       sims, tol=0.01, ordered=True, partial=True, weight=2.0),
         chk.reported(run, "n_above_threshold", float(n_pass), tol=0,
-                     name=f"{THRESHOLD} 이상 개수") if got_n is not None else
-        chk.fail(f"{THRESHOLD} 이상 개수", f"보고 없음 (정답 {n_pass}/25)"),
+                     name=f"{THRESHOLD} count at or above") if got_n is not None else
+        chk.fail(f"{THRESHOLD} count at or above", f"not reported (expected {n_pass}/25)"),
     ]
 
 

@@ -19,8 +19,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T110",
     score=3,
-    axis="절차 구성",
+    axis="procedure",
     mode="live",
+    criteria="SET(coords 5 items, order EXACT) + EXACT(max-distance index) / post-hoc GT",
     prompt=(
         "Measure at the current position and then at +0.1 mm in X, -0.1 mm in X, +0.1 mm in "
         "Y and -0.1 mm in Y, in that order. Report at which of the five positions the "
@@ -38,7 +39,7 @@ def evaluate(b, run):
     saved = run.spectra()
     out = [chk.called(run, "acquire_spectrum", times=5)]
     if len(saved) < 5:
-        return out + [chk.fail("최대 거리 위치", f"저장 {len(saved)}건 (5건 필요)")]
+        return out + [chk.fail("position of maximum distance", f"saved {len(saved)} files (need 5)")]
     _, x0, y0 = saved[0]
     base = sp.l2(y0)
     dist = []
@@ -54,6 +55,6 @@ def evaluate(b, run):
         lab = run.last_mention(LABELS)
         got = LABELS.index(lab) if lab else None
     return out + [
-        chk.ok("가장 다른 위치", got is not None and int(got) == want,
-               f"선택={got} 정답={want} (거리={[round(v, 4) for v in dist]})", weight=2.0),
+        chk.ok("most different position", got is not None and int(got) == want,
+               f"chosen={got} expected={want} (distance={[round(v, 4) for v in dist]})", weight=2.0),
     ]

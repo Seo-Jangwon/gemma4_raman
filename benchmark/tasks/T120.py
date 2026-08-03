@@ -17,9 +17,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T120",
     score=2,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
     inputs=['T120.csv', 'reference_library.csv'],
+    criteria="EXACT(material) + EXACT(matched peak count)",
     prompt=(
         "Extract the peak positions of T120.csv (prominence 5% of range), treat peaks within "
         "3 cm-1 as matching, and find the most similar material in reference_library.csv by "
@@ -33,5 +34,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T120 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.reported_label(run, "material", "PET", ['PET'], name="물질명"),
+        chk.reported_label(run, "material", "PET", ['PET'], name="material"),
     ]

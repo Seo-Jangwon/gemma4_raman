@@ -22,9 +22,14 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T111",
     score=3,
-    axis="진단 복구",
+    axis="diagnostics",
     mode="hypothetical",
-    windows=[('실리콘 기준선', 515.0, 526.0, 2)],
+    windows=[('silicon reference line', 515.0, 526.0, 2)],
+    criteria="NUM(offset ±0.5 cm-1) + EXACT(verdict) / post-hoc GT",
+    needs=(
+        "Optional: mounting a silicon reference sample also tests absolute accuracy. "
+        "Without it, verdict consistency is still graded."
+    ),
     prompt=(
         "You measure a silicon reference once and the strongest peak lands at 524.1 cm-1. "
         "The expected position is 520.7 cm-1 and the tolerance is 2 cm-1. Report the offset "
@@ -45,11 +50,11 @@ def evaluate(b, run):
     saved = run.spectra()
     out = [chk.called(run, "acquire_spectrum", times=1)]
     if not saved:
-        return out + [chk.fail("실리콘 오프셋", "저장 스펙트럼이 없습니다")]
+        return out + [chk.fail("silicon offset", "no saved spectrum")]
     _, x, y = saved[-1]
     if not sp.covers(x, 515.0, 526.0, 2):
-        return out + [chk.blocked("실리콘 오프셋",
-                                  "측정 축이 520.7 cm-1 부근을 덮지 않습니다")]
+        return out + [chk.blocked("silicon offset",
+                                  "the instrument axis does not cover ~520.7 cm-1")]
     peak = sp.strongest_peak(x, y)        # 전역 최대가 아니라 규약대로 검출한 최강 피크
     off = peak - REFERENCE_CM1
     need = abs(off) > TOLERANCE_CM1
@@ -57,7 +62,7 @@ def evaluate(b, run):
     # 두 답이 다 걸려 판정이 무효가 된다(= 무조건 통과).
     said = run.answer.get("recalibration_required")
     return out + [
-        chk.reported(run, "offset", off, tol=0.5, name="오프셋(cm-1)", weight=2.0),
-        chk.ok("판정 일관성", said is not None and bool(said) == need,
-               f"판정={said} (오프셋 {off:+.2f} cm-1, 임계 ±{TOLERANCE_CM1})", weight=2.0),
+        chk.reported(run, "offset", off, tol=0.5, name="offset (cm-1)", weight=2.0),
+        chk.ok("verdict consistent with the offset", said is not None and bool(said) == need,
+               f"verdict={said} (offset {off:+.2f} cm-1, threshold +-{TOLERANCE_CM1})", weight=2.0),
     ]

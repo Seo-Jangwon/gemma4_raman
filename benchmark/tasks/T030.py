@@ -18,8 +18,9 @@ import numpy as np                                       # noqa: F401
 TASK = Task(
     id="T030",
     score=2,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="STATE(coords ±0.001)",
     prompt=(
         "Compute the stage coordinates corresponding to pixel (320, 240) in the camera image "
         "and move there. "
@@ -38,16 +39,16 @@ def evaluate(b, run):
         chk.arg(run, "move_to_pixel", "pixel_y", PIXEL[1]),
     ]
     if "x" not in before or "x" not in after:
-        return out + [chk.fail("픽셀→스테이지", "장비 상태를 읽지 못했습니다")]
+        return out + [chk.fail("pixel to stage", "could not read the instrument state")]
     try:
         from backend.hw_tools import optics_map
         wx, wy = optics_map.pixel_to_stage(PIXEL[0], PIXEL[1],
                                            float(before["x"]), float(before["y"]))
     except Exception as e:
-        return out + [chk.fail("픽셀→스테이지", f"변환을 못 했습니다: {type(e).__name__}: {e}")]
+        return out + [chk.fail("pixel to stage", f"conversion failed: {type(e).__name__}: {e}")]
     # 판별점은 부호다. 화면 좌표계와 스테이지 좌표계의 방향이 반대라, 부호를 뒤집으면
     # 정확히 반대편으로 간다.
     return out + [
-        chk.near("이동 후 X", after.get("x"), wx, tol=1e-3, weight=2.0),
-        chk.near("이동 후 Y", after.get("y"), wy, tol=1e-3, weight=2.0),
+        chk.near("X after the move", after.get("x"), wx, tol=1e-3, weight=2.0),
+        chk.near("Y after the move", after.get("y"), wy, tol=1e-3, weight=2.0),
     ]

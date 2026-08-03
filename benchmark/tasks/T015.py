@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T015",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="STATE(trigger_mode EXACT)",
     prompt=(
         "Set the CCD to internal trigger mode so it starts measurement on the instrument's "
         "internal signal. "
@@ -28,5 +29,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T015 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.state("실행 후 trigger_mode", after, "trigger_mode", "internal"),
+        chk.state("final trigger_mode", after, "trigger_mode", "internal"),
     ]

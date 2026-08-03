@@ -15,8 +15,9 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T003",
     score=1,
-    axis="계측 제어",
+    axis="instrument control",
     mode="live",
+    criteria="NUM(±1e-4 ×3)",
     prompt=(
         "Tell me the current stage X, Y, Z coordinates. "
     ),
@@ -28,7 +29,7 @@ def evaluate(b, run):
     before, after = run.state_before, run.state_after
     return [
         chk.called(run, "get_stage_position", at_least=1, at_most=3),
-        chk.reported(run, "x", after.get("x"), tol=0.0001, name="보고한 x"),
-        chk.reported(run, "y", after.get("y"), tol=0.0001, name="보고한 y"),
-        chk.reported(run, "z", after.get("z"), tol=0.0001, name="보고한 z"),
+        chk.reported(run, "x", after.get("x"), tol=0.0001, name="reported x"),
+        chk.reported(run, "y", after.get("y"), tol=0.0001, name="reported y"),
+        chk.reported(run, "z", after.get("z"), tol=0.0001, name="reported z"),
     ]

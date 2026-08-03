@@ -16,9 +16,10 @@ from bench import spectra as sp                          # noqa: F401
 TASK = Task(
     id="T126",
     score=2,
-    axis="신호 판별",
+    axis="identification",
     mode="live",
-    inputs=['reference_library.csv'],
+    inputs=['T126_1.csv', 'T126_2.csv', 'T126_3.csv', 'T126_4.csv', 'T126_5.csv', 'reference_library.csv'],
+    criteria="EXACT(5 materials, in order) / partial credit = correct count / 5",
     prompt=(
         "Identify the material of each of T126_1.csv through T126_5.csv against "
         "reference_library.csv, and report them in that order. "
@@ -30,5 +31,5 @@ def evaluate(b, run):
     """이 목록이 그대로 T126 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.set_match("물질 5개", run.answer.get("materials"), ['polystyrene', 'silicon', 'PET', 'calcite', 'PMMA'], tol=0, ordered=True, partial=True, weight=2.0),
+        chk.set_match("5 materials", run.answer.get("materials"), ['polystyrene', 'silicon', 'PET', 'calcite', 'PMMA'], tol=0, ordered=True, partial=True, weight=2.0),
     ]
