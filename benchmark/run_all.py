@@ -35,7 +35,7 @@ for _p in (str(HERE), str(PROJ)):
 from bench import Bench, chk                      # noqa: E402
 from bench import report as R                     # noqa: E402
 from bench import spectra as SPX                  # noqa: E402
-from bench.tools import TOOL_NAMES                # noqa: E402
+from bench.tools import TOOL_NAMES, TOOL_PARAMS  # noqa: E402
 
 TASKS_DIR = HERE / "tasks"
 RESULTS = PROJ / "results"
@@ -91,6 +91,19 @@ def check_only(pairs) -> int:
                                            r'run,\s*"([a-z_]+)"', src):
             if m.group(1) not in TOOL_NAMES:
                 unknown.append(f"{task.id}: 존재하지 않는 도구 {m.group(1)!r}")
+        # setup() 이 장비에 직접 거는 명령은 인자 이름까지 맞춰 본다.
+        # 여기가 틀리면 실행 시 TypeError 로 잡히긴 하지만, 그때는 '사전 세팅 실패'로
+        # 기록될 뿐이라 그 문항이 **전제 없이 돌아 낮은 점수를 받는다**. 실행 전에 잡는다.
+        for m in __import__("re").finditer(r'b\.hw\(\s*"([a-z_]+)"((?:\s*,\s*\w+\s*=[^)]*)?)\)',
+                                           src):
+            tool, argtext = m.group(1), m.group(2)
+            if tool not in TOOL_NAMES:
+                unknown.append(f"{task.id}: setup 이 없는 도구를 부릅니다 {tool!r}")
+                continue
+            for key in __import__("re").findall(r'(\w+)\s*=', argtext):
+                if key not in TOOL_PARAMS.get(tool, set()):
+                    unknown.append(f"{task.id}: setup {tool}({key}=…) — 실제 인자는 "
+                                   f"{sorted(TOOL_PARAMS.get(tool, []))}")
     todo = [t.id for m, t in pairs if "[남은 일]" in inspect.getsource(m)]
 
     for label, items in (("판정 항목 없음", empty), ("도구 이름 오류", unknown),

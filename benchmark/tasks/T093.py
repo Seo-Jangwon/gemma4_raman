@@ -29,7 +29,7 @@ TASK = Task(
 
 def setup(b):
     """측정 전에 만들어야 하는 상태."""
-    b.hw("set_ccd_cooler", enabled=False)
+    b.hw("set_ccd_cooler", on=False)
 
 
 def evaluate(b, run):
