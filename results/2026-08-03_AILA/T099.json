@@ -1,0 +1,122 @@
+{
+  "task": "T099",
+  "axis": "diagnostics",
+  "mode": "live",
+  "score": 1.5,
+  "score_max": 3,
+  "fraction": 0.5,
+  "passed": 1,
+  "checks_total": 2,
+  "question": "The spectrum you are about to measure may be clipped at the detector maximum. Acquire once, check for saturation, and if the maximum is clipped, halve the exposure (or the power) and re-acquire until no pixel is saturated. Report the final settings.",
+  "criteria": "REL(0 saturated points in the final acquisition, settings reduced) + PROC",
+  "checks": [
+    {
+      "name": "no saturation in the final acquisition",
+      "passed": true,
+      "score": 1.0,
+      "detail": "points pinned at the ceiling: 1 items",
+      "weight": 2.0,
+      "kind": "POSTHOC",
+      "points_lost": 0.0
+    },
+    {
+      "name": "adjusted downward",
+      "passed": false,
+      "score": 0.0,
+      "detail": "not enough exposure/power adjustments recorded (exposure 1 calls, power 1 calls)",
+      "weight": 2.0,
+      "kind": "POSTHOC",
+      "points_lost": 1.5
+    }
+  ],
+  "why_wrong": [
+    {
+      "check": "adjusted downward",
+      "reason": "not enough exposure/power adjustments recorded (exposure 1 calls, power 1 calls)",
+      "points_lost": 1.5
+    }
+  ],
+  "blocked": [],
+  "no_checks": false,
+  "input_files": [],
+  "answer_text": "The spectrum was acquired using an exposure time of 5.0 seconds and a laser power of 1%. Analysis of the resulting data shows a maximum intensity of 184.0 with only one pixel reaching this value, indicating that no saturation or clipping occurred at the detector.\n\n```json\n{\"exposure\": 5.0, \"power\": 1}\n```",
+  "answer_json": {
+    "exposure": 5.0,
+    "power": 1
+  },
+  "tool_calls": [
+    {
+      "name": "get_hardware_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "get_ccd_info",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "get_laser_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "get_stage_position",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "start_camera_stream",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "analyze_microscope_image",
+      "args": {
+        "question": "Is there a sample on the stage? If so, where is it and what does it look like?"
+      },
+      "ok": true
+    },
+    {
+      "name": "move_to_pixel",
+      "args": {
+        "pixel_x": 790,
+        "pixel_y": 120
+      },
+      "ok": true
+    },
+    {
+      "name": "run_autofocus",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 5,
+        "power": 1
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nfrom spectra import spectra # This is not how it works, spectra are injected\n\n# Since I have one spectrum, let's use the 'spectra' list provided by the environment.\nfor s in spectra:\n    intensity = s['intensity']\n    max_val = np.max(intensity)\n    num_at_max = np.sum(intensity == max_val)\n    print(f\"Spectrum: {s['title']}\")\n    print(f\"Max Intensity: {max_val}\")\n    print(f\"Number of pixels at Max: {num_at_max}\")\n    # Check for clipping: if many pixels are exactly at the same max value, it's likely clipped.\n    if num_at_max > 5: \n        print(\"Potential saturation detected.\")\n    else:\n        print(\"No obvious saturation.\")\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nfor s in spectra:\n    intensity = s['intensity']\n    max_val = np.max(intensity)\n    num_at_max = np.sum(intensity == max_val)\n    print(f\"Title: {s['title']}\")\n    print(f\"Max Value: {max_val}\")\n    print(f\"Count at Max: {num_at_max}\")\n"
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-03/bench_2026-08-03_AILA_AILA_T099_8b2f7a/170219_270_x37.771_y25.145.csv"
+  ],
+  "session_id": "bench_2026-08-03_AILA_AILA_T099_8b2f7a",
+  "elapsed_s": 94.08,
+  "errors": []
+}

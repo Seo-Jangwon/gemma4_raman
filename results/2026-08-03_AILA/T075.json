@@ -1,0 +1,122 @@
+{
+  "task": "T075",
+  "axis": "data processing",
+  "mode": "live",
+  "score": 3.0,
+  "score_max": 3,
+  "fraction": 1.0,
+  "passed": 4,
+  "checks_total": 4,
+  "question": "Compare the two sessions in T075_a.csv and T075_b.csv and report in one summary: the 1001 cm-1 peak position difference, the RSD (ddof=1, %) of the peak intensity in each session, and the cosine similarity between the two mean spectra (common axis, L2).",
+  "criteria": "NUM ×4 (position difference ±1 cm-1 / RSD 5% / similarity ±0.01)",
+  "checks": [
+    {
+      "name": "RSD(a)",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3.27818 (expected 3.27818, rel.err=4.439e-09 ≤ 0.05)  [prose]",
+      "weight": 1.0,
+      "kind": "NUM",
+      "points_lost": 0.0
+    },
+    {
+      "name": "RSD(b)",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3.15 (expected 3.10577, rel.err=0.01424 ≤ 0.05)  [prose]",
+      "weight": 1.0,
+      "kind": "NUM",
+      "points_lost": 0.0
+    },
+    {
+      "name": "similarity of the means",
+      "passed": true,
+      "score": 1.0,
+      "detail": "0.957068 (expected 0.957068, |Δ|=6.214e-12 ≤ 0.01)  [prose]",
+      "weight": 1.0,
+      "kind": "NUM",
+      "points_lost": 0.0
+    },
+    {
+      "name": "peak position difference",
+      "passed": true,
+      "score": 1.0,
+      "detail": "1 (expected 1, |Δ|=0 ≤ 1.0)  [prose]",
+      "weight": 1.0,
+      "kind": "NUM",
+      "points_lost": 0.0
+    }
+  ],
+  "why_wrong": [],
+  "blocked": [],
+  "no_checks": false,
+  "input_files": [
+    "T075_a.csv",
+    "T075_b.csv"
+  ],
+  "answer_text": "Based on the analysis of the provided datasets `T075_a.csv` and `T075_b.csv`, here is the summary comparison:\n\n1.  **Peak Position Difference**: The peak near 1001 cm⁻¹ was located at **1001.0 cm⁻¹** for Session A and **1002.0 cm⁻¹** for Session B, resulting in a difference of **1.0 cm⁻¹**.\n2.  **Peak Intensity RSD**: The relative standard deviation (RSD, ddof=1) of the peak intensity within each session is:\n    *   Session A: **3.28%**\n    *   Session B: **3.15%**\n3.  **Spectral Similarity**: The cosine similarity between the mean spectra of the two sessions (calculated using the L2 norm on a common axis) is **0.957**, indicating very high spectral consistency between the two measurement sessions.\n\n```json\n{\"1001 cm-1 peak position difference\": 1.0, \"RSD of the peak intensity in Session A\": 3.278179970859584, \"RSD of the peak intensity in Session B\": 3.154399150224014, \"cosine similarity between the two mean spectra\": 0.9570680914055615}\n```",
+  "answer_json": {
+    "1001 cm-1 peak position difference": 1.0,
+    "RSD of the peak intensity in Session A": 3.278179970859584,
+    "RSD of the peak intensity in Session B": 3.154399150224014,
+    "cosine similarity between the two mean spectra": 0.9570680914055615
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-03/T075_a.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-03/T075_b.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import stats\n\ndef process_session(file_id):\n    data = files[file_id][\"table\"]\n    shifts = data[\"raman_shift_cm-1\"]\n    intensities = data[\"intensity\"]\n    ids = data[\"spectrum_id\"]\n    \n    unique_ids = np.unique(ids)\n    n_spectra = len(unique_ids)\n    # Assume all spectra have the same shift axis and length\n    shift_axis = shifts[np.where(ids == unique_ids[0])][0]\n    n_points = len(shift_axis)\n    \n    spec_matrix = np.zeros((n_spectra, n_points))\n    for i, uid in enumerate(unique_ids):\n        spec_matrix[i, :] = intensities[np.where(ids == uid)]\n        \n    mean_spectrum = np.mean(spec_matrix, axis=0)\n    return shift_axis, spec_matrix, mean_spectrum\n\n# Process both files\nshift_a, matrix_a, mean_a = process_session('2026-08-03/T075_a.csv')\nshift_b, matrix_b, mean_b = process_session('2026-08-03/T075_b.csv')\n\n# 1. Peak positions near 1001 cm-1\ndef get_peak_pos(shifts, intensity):\n    window = (shifts > 990) & (shifts < 1012)\n    idx = np.argmax(intensity[window])\n    actual_idx = np.where(window)[0][idx]\n    return shifts[actual_idx], actual_idx\n\npos_a, idx_a = get_peak_pos(shift_a, mean_a)\npos_b, idx_b = get_peak_pos(shift_b, mean_b)\ndiff_pos = abs(pos_a - pos_b)\n\n# 2. RSD of peak intensity\ndef calc_rsd(matrix, window_start=990, window_end=1012):\n    # we use the shift axis from a known source (here it's common for all in session)\n    # For each spectrum, find the max within the window\n    peak_intensities = []\n    # Since indices are fixed across spectra in the matrix:\n    window_mask = (shift_a > window_start) & (shift_a < window_end)\n    for spec in matrix:\n        peak_intensities.append(np.max(spec[window_mask]))\n    \n    p_array = np.array(peak_intensities)\n    rsd = (np.std(p_array, ddof=1) / np.mean(p_array)) * 100\n    return rsd\n\nrsd_a = calc_rsd(matrix_a)\nrsd_b = calc_rsd(matrix_b)\n\n# 3. Cosine similarity between mean spectra\ndef cosine_sim(v1, v2):\n    return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))\n\nsim = cosine_sim(mean_a, mean_b)\n\nprint(f\"Session A: peak={pos_a}, rsd={rsd_a}\")\nprint(f\"Session B: peak={pos_b}, rsd={rsd_b}\")\nprint(f\"Position diff: {diff_pos}\")\nprint(f\"Cosine similarity: {sim}\")\n",
+        "file_ids": [
+          "2026-08-03/T075_a.csv",
+          "2026-08-03/T075_b.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\ndef process_session(file_idx):\n    data = files[file_idx][\"table\"]\n    shifts = data[\"raman_shift_cm-1\"]\n    intensities = data[\"intensity\"]\n    ids = data[\"spectrum_id\"]\n    \n    unique_ids = np.unique(ids)\n    n_spectra = len(unique_ids)\n    # Find indices for the first spectrum to get shift axis\n    first_mask = (ids == unique_ids[0])\n    shift_axis = shifts[first_mask]\n    n_points = len(shift_axis)\n    \n    spec_matrix = np.zeros((n_spectra, n_points))\n    for i, uid in enumerate(unique_ids):\n        spec_matrix[i, :] = intensities[ids == uid]\n        \n    mean_spectrum = np.mean(spec_matrix, axis=0)\n    return shift_axis, spec_matrix, mean_spectrum\n\n# Process both files by index (since they are in the order of file_ids provided)\nshift_a, matrix_a, mean_a = process_session(0)\nshift_b, matrix_b, mean_b = process_session(1)\n\n# 1. Peak positions near 1001 cm-1\ndef get_peak_pos(shifts, intensity):\n    window = (shifts > 990) & (shifts < 1012)\n    subset_intensity = intensity[window]\n    idx_in_window = np.argmax(subset_intensity)\n    actual_shift = shifts[window][idx_in_window]\n    return actual_shift\n\npos_a = get_peak_pos(shift_a, mean_a)\npos_b = get_peak_pos(shift_b, mean_b)\ndiff_pos = abs(pos_a - pos_b)\n\n# 2. RSD of peak intensity\ndef calc_rsd(matrix, shifts):\n    window_mask = (shifts > 990) & (shifts < 1012)\n    peak_intensities = []\n    for spec in matrix:\n        peak_intensities.append(np.max(spec[window_mask]))\n    \n    p_array = np.array(peak_intensities)\n    rsd = (np.std(p_array, ddof=1) / np.mean(p_array)) * 100\n    return rsd\n\nrsd_a = calc_rsd(matrix_a, shift_a)\nrsd_b = calc_rsd(matrix_b, shift_b)\n\n# 3. Cosine similarity between mean spectra\ndef cosine_sim(v1, v2):\n    return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))\n\nsim = cosine_sim(mean_a, mean_b)\n\nprint(f\"Session A: peak={pos_a}, rsd={rsd_a}\")\nprint(f\"Session B: peak={pos_b}, rsd={rsd_b}\")\nprint(f\"Position difference: {diff_pos}\")\nprint(f\"Cosine similarity: {sim}\")\n",
+        "file_ids": [
+          "2026-08-03/T075_a.csv",
+          "2026-08-03/T075_b.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\ndef get_session_data(file_idx):\n    table = files[file_idx][\"table\"]\n    ids = np.array(table[\"spectrum_id\"])\n    shifts = np.array(table[\"raman_shift_cm-1\"])\n    intensities = np.array(table[\"intensity\"])\n    \n    u_ids = np.unique(ids)\n    n_specs = len(u_ids)\n    \n    # Get shift axis from the first one\n    mask0 = (ids == u_ids[0])\n    axis = shifts[mask0]\n    n_pts = len(axis)\n    \n    matrix = np.zeros((n_specs, n_pts))\n    for i in range(n_specs):\n        uid = u_ids[i]\n        spec_vals = intensities[ids == uid]\n        if len(spec_vals) != n_pts:\n            # This would be weird but let's handle it or print it\n            print(f\"Warning: Spectrum {uid} has length {len(spec_vals)} vs expected {n_pts}\")\n            # Truncate or pad if necessary, though not ideal\n            spec_vals = np.resize(spec_vals, n_pts)\n        matrix[i, :] = spec_vals\n        \n    mean_spec = np.mean(matrix, axis=0)\n    return axis, matrix, mean_spec\n\n# Indices for the two files based on file_ids order\naxis_a, mat_a, mean_a = get_session_data(0)\naxis_b, mat_b, mean_b = get_session_data(1)\n\nprint(f\"Session A: {mat_a.shape}, Session B: {mat_b.shape}\")\n\n# 1. Peak pos near 1001\ndef find_peak(axis, intensity):\n    mask = (axis >= 995) & (axis <= 1005)\n    sub_axis = axis[mask]\n    sub_int = intensity[mask]\n    return sub_axis[np.argmax(sub_int)]\n\npk_a = find_peak(axis_a, mean_a)\npk_b = find_peak(axis_b, mean_b)\npos_diff = abs(pk_a - pk_b)\n\n# 2. RSD of peak intensity (ddof=1)\ndef compute_rsd(matrix, axis):\n    mask = (axis >= 995) & (axis <= 1005)\n    pks = []\n    for spec in matrix:\n        pks.append(np.max(spec[mask]))\n    pks = np.array(pks)\n    rsd = (np.std(pks, ddof=1) / np.mean(pks)) * 100\n    return rsd\n\nrsd_a = compute_rsd(mat_a, axis_a)\nrsd_b = compute_rsd(mat_b, axis_b)\n\n# 3. Cosine Similarity (Common axis assumed since both are 200-2000 with same length)\ndef cosine_sim(v1, v2):\n    return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))\n\nsimilarity = cosine_sim(mean_a, mean_b)\n\nprint(f\"Peak A: {pk_a}, Peak B: {pk_b}, Diff: {pos_diff}\")\nprint(f\"RSD A: {rsd_a}, RSD B: {rsd_b}\")\nprint(f\"Cosine Similarity: {similarity}\")\n",
+        "file_ids": [
+          "2026-08-03/T075_a.csv",
+          "2026-08-03/T075_b.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "session_id": "bench_2026-08-03_AILA_AILA_T075_d15c89",
+  "elapsed_s": 91.36,
+  "errors": []
+}

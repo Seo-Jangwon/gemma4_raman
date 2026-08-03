@@ -1,0 +1,63 @@
+{
+  "task": "T040",
+  "axis": "data processing",
+  "mode": "live",
+  "score": 2.0,
+  "score_max": 2,
+  "fraction": 1.0,
+  "passed": 1,
+  "checks_total": 1,
+  "question": "Remove the narrow spikes from T040.csv and save the corrected spectrum. Treat a point as a spike when it deviates from the 5-point moving median by more than 5x the MAD, and replace it by linear interpolation from its neighbours.",
+  "criteria": "SET(index EXACT) + ARRAY(cos>=0.99 AND NRMSE<=0.02)",
+  "checks": [
+    {
+      "name": "result array",
+      "passed": true,
+      "score": 1.0,
+      "detail": "cos=0.99847 NRMSE=0.00422",
+      "weight": 2.0,
+      "kind": "ARRAY",
+      "points_lost": 0.0
+    }
+  ],
+  "why_wrong": [],
+  "blocked": [],
+  "no_checks": false,
+  "input_files": [
+    "T040.csv"
+  ],
+  "answer_text": "The spectrum in `T040.csv` was processed to remove narrow spikes using a 5-point moving median filter. Points deviating from the median by more than 5 times the Median Absolute Deviation (MAD) of the residuals were identified as spikes and replaced via linear interpolation from neighboring points.\n\nAnalysis results:\n- **Number of spikes removed**: 54\n- **Calculated MAD**: 2.6926\n- **Spike threshold ($5 \\times \\text{MAD}$)**: 13.4628\n\nThe corrected spectrum has been saved.\n\n```json\n{\"saved_path\": \"runs/bench_2026-08-03_AILA_AILA_T040_6e7b83/spectra/01_T040_despiked.csv\"}\n```",
+  "answer_json": {
+    "saved_path": "runs/bench_2026-08-03_AILA_AILA_T040_6e7b83/spectra/01_T040_despiked.csv"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-03/T040.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nfrom scipy.ndimage import median_filter\n\n# Load the file\nfile_id = '2026-08-03/T040.csv'\ndata = files[0] # Only one file passed in file_ids\nx = data['table']['raman_shift_cm-1']\ny = data['table']['intensity']\n\n# 5-point moving median\n# median_filter uses a window centered at the point. size=5 means 2 on each side.\ny_median = median_filter(y, size=5)\n\n# Calculate residuals\nresiduals = y - y_median\n\n# Global MAD of the residuals\nmad = np.median(np.abs(residuals - np.median(residuals)))\nthreshold = 5 * mad\n\n# Identify spikes\nspikes_mask = np.abs(residuals) > threshold\nnum_spikes = np.sum(spikes_mask)\n\n# Linear interpolation for spikes\ny_corrected = y.copy()\nx_indices = np.arange(len(y))\nvalid_indices = x_indices[~spikes_mask]\nspike_indices = x_indices[spikes_mask]\n\ny_corrected[spikes_mask] = np.interp(spike_indices, valid_indices, y[~spikes_mask])\n\n# Save the result\nsaved_path = save_result('T040_despiked', y_corrected, raman_shift=x)\n\nprint(f\"Number of spikes removed: {num_spikes}\")\nprint(f\"MAD used for thresholding: {mad:.4f}\")\nprint(f\"Threshold (5*MAD): {threshold:.4f}\")\nprint(f\"Saved to: {saved_path}\")\n",
+        "file_ids": [
+          "2026-08-03/T040.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-03_AILA_AILA_T040_6e7b83/spectra/01_T040_despiked.csv"
+  ],
+  "session_id": "bench_2026-08-03_AILA_AILA_T040_6e7b83",
+  "elapsed_s": 43.66,
+  "errors": []
+}

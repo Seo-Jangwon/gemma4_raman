@@ -1,0 +1,102 @@
+{
+  "task": "T129",
+  "axis": "identification",
+  "mode": "live",
+  "score": 1.3333,
+  "score_max": 2,
+  "fraction": 0.6667,
+  "passed": 1,
+  "checks_total": 2,
+  "question": "All peaks of T129.csv are shifted by the same unknown amount. Estimate the shift by cross-correlation against reference_library.csv, correct it, identify the material, and report the estimated shift.",
+  "criteria": "NUM(delta ±0.2 cm-1, sign included) + EXACT(material)",
+  "checks": [
+    {
+      "name": "shift",
+      "passed": false,
+      "score": 0.0,
+      "detail": "no value (expected 2.7)  [no answer block]",
+      "weight": 1.0,
+      "kind": "NUM",
+      "points_lost": 0.667
+    },
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'polystyrene' (expected 'polystyrene')",
+      "weight": 2.0,
+      "kind": "EXACT",
+      "points_lost": 0.0
+    }
+  ],
+  "why_wrong": [
+    {
+      "check": "shift",
+      "reason": "no value (expected 2.7)  [no answer block]",
+      "points_lost": 0.667
+    }
+  ],
+  "blocked": [],
+  "no_checks": false,
+  "input_files": [
+    "T129.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "The spectrum in `T129.csv` was analyzed and compared against the `reference_library.csv` using cross-correlation of normalized intensities. This process identified the most similar reference spectral profile and determined the relative offset (shift) between the target peaks and the library peaks.\n\n**Analysis Results:**\n*   **Estimated Shift:** The peaks are shifted by **3.0 cm⁻¹**.\n*   **Material Identification:** Based on the highest correlation value, the material is identified as **polystyrene**.\n*   **Correction:** The x-axis was corrected by subtracting the estimated shift from the original Raman shifts. The resulting spectrum has been saved as `T129_corrected.csv`.\n\n```json\n{\"estimated_shift\": 3.0, \"material\": \"polystyrene\"}\n```",
+  "answer_json": {
+    "estimated_shift": 3.0,
+    "material": "polystyrene"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-03/T129.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-03/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\nimport matplotlib.pyplot as plt\n\n# Load target\ntarget_x = files[0]['table']['raman_shift_cm-1'] # T129.csv is likely the first or I should use file_id\n# Let's be explicit with IDs\nt129_id = '2026-08-03/T129.csv'\nlib_id = '2026-08-03/reference_library.csv'\n\n# Re-map files to specific variables since I don't know the order in `files`\ntarget_data = None\nlib_data = None\nfor f in files:\n    if f['file_id'] == t129_id: target_data = f\n    if f['file_id'] == lib_id: lib_data = f\n\ny_target = target_data['table']['intensity']\nx_target = target_data['table']['raman_shift_cm-1']\n\n# Library processing\nlib_table = lib_data['table']\nspec_ids = np.unique(lib_table['spectrum_id'])\nmaterials = lib_table['material'] # This is a list or array\n\n# Map spectrum_id to material\nid_to_mat = {}\nfor i in range(len(lib_table['spectrum_id'])):\n    id_to_mat[lib_table['spectrum_id'][i]] = lib_table['material'][i]\n\nbest_corr = -1\nbest_shift = 0\nbest_mat = \"\"\n\n# Normalization function\ndef norm(y):\n    return (y - np.min(y)) / (np.max(y) - np.min(y))\n\ny_target_norm = norm(y_target)\n\nfor sid in spec_ids:\n    mask = lib_table['spectrum_id'] == sid\n    y_ref = lib_table['intensity'][mask]\n    x_ref = lib_table['raman_shift_cm-1'][mask]\n    \n    y_ref_norm = norm(y_ref)\n    \n    # Cross correlation\n    corr = signal.correlate(y_target_norm, y_ref_norm, mode='full')\n    lags = signal.correlation_lags(len(y_target_norm), len(y_ref_norm), mode='full')\n    \n    idx = np.argmax(corr)\n    shift = lags[idx]\n    curr_corr = corr[idx]\n    \n    if curr_corr > best_corr:\n        best_corr = curr_corr\n        best_shift = shift\n        best_mat = id_to_mat[sid]\n\nprint(f\"Best Match Material: {best_mat}\")\nprint(f\"Estimated Shift (cm-1): {best_shift}\")\nprint(f\"Correlation Value: {best_corr}\")\n\n# Correct the target x-axis\nx_corrected = x_target - best_shift\n\n# Save corrected spectrum\nsave_result('T129_corrected', y_target, raman_shift=x_corrected)\n\n# Plot for visual confirmation (though I can't see it, it's good for report/verification if needed by user later)\nplt.figure(figsize=(10, 5))\nplt.plot(x_target, y_target, label='Original', alpha=0.5)\nplt.plot(x_corrected, y_target, label='Corrected', color='red')\nplt.title(f\"Correction for {best_mat} (Shift: {best_shift})\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Intensity\")\nplt.legend()\nplt.savefig('correction_plot.png')\n",
+        "file_ids": [
+          "2026-08-03/T129.csv",
+          "2026-08-03/reference_library.csv"
+        ],
+        "title": "Raman Shift Estimation and Correction"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\nimport matplotlib.pyplot as plt\n\n# Identify files\nt129_id = '2026-08-03/T129.csv'\nlib_id = '2026-08-03/reference_library.csv'\n\ntarget_data = None\nlib_data = None\nfor f in files:\n    if f['file_id'] == t129_id: target_data = f\n    if f['file_id'] == lib_id: lib_data = f\n\n# Target arrays\ny_target = np.array(target_data['table']['intensity'])\nx_target = np.array(target_data['table']['raman_shift_cm-1'])\ndx_target = x_target[1] - x_target[0] # Should be 1.0\n\n# Library arrays - convert to numpy for boolean masking\nlib_ids = np.array(lib_data['table']['spectrum_id'])\nlib_mats = np.array(lib_data['table']['material'])\nlib_x = np.array(lib_data['table']['raman_shift_cm-1'])\nlib_y = np.array(lib_data['table']['intensity'])\n\ndef norm(y):\n    ymin, ymax = np.min(y), np.max(y)\n    if ymax == ymin: return y - ymin\n    return (y - ymin) / (ymax - ymin)\n\ny_target_norm = norm(y_target)\nunique_ids = np.unique(lib_ids)\n\nbest_corr = -1\nbest_shift_px = 0\nbest_mat = \"\"\n\nfor sid in unique_ids:\n    mask = (lib_ids == sid)\n    y_ref = lib_y[mask]\n    x_ref = lib_x[mask]\n    \n    if len(y_ref) == 0: continue\n    \n    # Check if sampling matches target\n    dx_ref = x_ref[1] - x_ref[0] if len(x_ref) > 1 else 0\n    if abs(dx_ref - dx_target) > 0.1:\n        continue # Skip mismatched resolution for now, or interpolate\n    \n    y_ref_norm = norm(y_ref)\n    \n    # Cross correlation\n    corr = signal.correlate(y_target_norm, y_ref_norm, mode='full')\n    lags = signal.correlation_lags(len(y_target_norm), len(y_ref_norm), mode='full')\n    \n    idx = np.argmax(corr)\n    shift_px = lags[idx]\n    curr_corr = corr[idx]\n    \n    if curr_corr > best_corr:\n        best_corr = curr_corr\n        best_shift_px = shift_px\n        # Find material for this sid\n        mat_idx = np.where(lib_ids == sid)[0][0]\n        best_mat = lib_mats[mat_idx]\n\nestimated_shift_cm = best_shift_px * dx_target\nprint(f\"Best Match Material: {best_mat}\")\nprint(f\"Estimated Shift (cm-1): {estimated_shift_cm}\")\nprint(f\"Correlation Value: {best_corr}\")\n\n# Corrected X axis\nx_corrected = x_target - estimated_shift_cm\nsave_result('T129_corrected', y_target, raman_shift=x_corrected)\n\n# Plotting for documentation (internal verification via print is key)\nplt.figure(figsize=(8, 4))\nplt.plot(x_target, y_target, label='Original')\nplt.plot(x_corrected, y_target, label='Corrected', color='red')\nplt.title(f\"Material: {best_mat}, Shift: {estimated_shift_cm} cm-1\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Intensity\")\nplt.legend()\nplt.savefig('T129_correction.png')\n\n# Numerical proof of correction for the report\nprint(f\"Target range: {x_target[0]} to {x_target[-1]}\")\nprint(f\"Corrected range: {x_corrected[0]} to {x_corrected[-1]}\")\n",
+        "file_ids": [
+          "2026-08-03/T129.csv",
+          "2026-08-03/reference_library.csv"
+        ],
+        "title": "Shift Estimation for T129"
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-03_AILA_AILA_T129_a07da2/spectra/01_T129_corrected.csv",
+    "/api/results/2026-08-03/bench_2026-08-03_AILA_AILA_T129_a07da2/fig180302_221_0.png"
+  ],
+  "session_id": "bench_2026-08-03_AILA_AILA_T129_a07da2",
+  "elapsed_s": 82.58,
+  "errors": []
+}

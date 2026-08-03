@@ -1,0 +1,100 @@
+{
+  "task": "T098",
+  "axis": "diagnostics",
+  "mode": "live",
+  "score": 2.0,
+  "score_max": 3,
+  "fraction": 0.6667,
+  "passed": 1,
+  "checks_total": 2,
+  "question": "In T098.csv the background rises steeply with wavenumber and buries the Raman peaks. Name the cause, apply IPBSA baseline correction with order 5, and report the peaks recovered (prominence 5% of range).",
+  "criteria": "KEYWORD(fluorescence) + ARRAY(cos>=0.99, NRMSE<=0.02) + SET(peak ±3 cm-1)",
+  "checks": [
+    {
+      "name": "peak positions",
+      "passed": false,
+      "score": 0.0,
+      "detail": "no value (expected 9)",
+      "weight": 1.0,
+      "kind": "SET",
+      "points_lost": 1.0
+    },
+    {
+      "name": "result array",
+      "passed": true,
+      "score": 1.0,
+      "detail": "cos=0.99786 NRMSE=0.00484",
+      "weight": 2.0,
+      "kind": "ARRAY",
+      "points_lost": 0.0
+    }
+  ],
+  "why_wrong": [
+    {
+      "check": "peak positions",
+      "reason": "no value (expected 9)",
+      "points_lost": 1.0
+    }
+  ],
+  "blocked": [],
+  "no_checks": false,
+  "input_files": [
+    "T098.csv"
+  ],
+  "answer_text": "The steep rise in background intensity with increasing wavenumber is caused by **fluorescence**, which often creates a broad, sloping baseline that can bury the relatively weak Raman signals.\n\nFollowing the requested procedure, I applied an IPBSA (Iterative Polynomial Background Subtraction Algorithm) correction using a polynomial of order 5. Based on a prominence threshold of 5% of the corrected intensity range (~50.95), the following peaks were recovered:\n\n- **620 cm⁻¹**\n- **794 cm⁻¹**\n- **1001 cm⁻¹**\n- **1031 cm⁻¹**\n- **1155 cm⁻¹**\n- **1183 cm⁻¹**\n- **1451 cm⁻¹**\n- **1583 cm⁻¹**\n- **1602 cm⁻¹**\n\n```json\n{\"cause\": \"fluorescence\", \"recovered_peaks\": [620, 794, 1001, 1031, 1155, 1183, 1451, 1583, 1602]}\n```",
+  "answer_json": {
+    "cause": "fluorescence",
+    "recovered_peaks": [
+      620,
+      794,
+      1001,
+      1031,
+      1155,
+      1183,
+      1451,
+      1583,
+      1602
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-03/T098.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "apply_background_subtraction",
+      "args": {
+        "poly_order": 5,
+        "save_result": true,
+        "source": "2026-08-03/T098.csv",
+        "version_label": "v1_poly5"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\nimport matplotlib.pyplot as plt\n\n# Load the uploaded file\nfile_id = '2026-08-03/T098.csv'\ndata = files[0]['table']\nx = data['raman_shift_cm-1']\ny = data['intensity']\n\n# IPBSA (Iterative Polynomial Background Subtraction Algorithm) simplified implementation\n# Since we are asked for order 5, we will iteratively fit a polynomial to the background.\ndef ipbsa(x, y, order=5, iterations=10):\n    current_y = y.copy()\n    mask = np.ones_like(y, dtype=bool)\n    \n    for i in range(iterations):\n        # Fit polynomial only to the masked (background) points\n        coeffs = np.polyfit(x[mask], current_y[mask], order)\n        baseline = np.polyval(coeffs, x)\n        \n        # Update mask: exclude points that are significantly above the baseline (peaks)\n        # We use a simple threshold based on the residual's standard deviation or a fixed value\n        residual = current_y - baseline\n        threshold = 2 * np.std(residual[mask]) # This is a heuristic to identify peaks\n        mask = residual < threshold\n        \n    return np.polyval(np.polyfit(x[mask], current_y[mask], order), x)\n\nbaseline = ipbsa(x, y, order=5)\ny_corr = y - baseline\n\n# Report stats\ny_min = y_corr.min()\ny_max = y_corr.max()\ny_range = y_max - y_min\nprominence_thresh = 0.05 * y_range\n\npeaks, props = find_peaks(y_corr, prominence=prominence_thresh)\npeak_shifts = x[peaks]\npeak_ints = y_corr[peaks]\npeak_proms = props['prominences']\n\nprint(f\"Intensity range of corrected spectrum: {y_min:.2f} to {y_max:.2f} (range={y_range:.2f})\")\nprint(f\"Prominence threshold: {prominence_thresh:.2f}\")\nprint(f\"Found peaks at: {peak_shifts}\")\nprint(f\"Peak intensities: {peak_ints}\")\nprint(f\"Peak prominences: {peak_proms}\")\n\n# Plotting for verification (even though I can't see it, it's good practice)\nplt.figure(figsize=(10, 6))\nplt.plot(x, y, label='Original')\nplt.plot(x, baseline, label='Baseline', linestyle='--')\nplt.plot(x, y_corr, label='Corrected', color='green')\nplt.scatter(peak_shifts, peak_ints, color='red', marker='x', label='Peaks')\nplt.legend()\nplt.title('IPBSA Baseline Correction - T098.csv')\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Intensity')\nplt.savefig('T098_corrected.png')\n\nsave_result('T098_corrected', y_corr, raman_shift=x)\n",
+        "file_ids": [
+          "2026-08-03/T098.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-03_AILA_AILA_T098_38c0d6/spectra/01_T098_corrected.csv",
+    "/api/results/2026-08-03/bench_2026-08-03_AILA_AILA_T098_38c0d6/fig170044_520_0.png"
+  ],
+  "session_id": "bench_2026-08-03_AILA_AILA_T098_38c0d6",
+  "elapsed_s": 88.27,
+  "errors": []
+}

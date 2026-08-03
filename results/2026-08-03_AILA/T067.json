@@ -1,0 +1,199 @@
+{
+  "task": "T067",
+  "axis": "procedure",
+  "mode": "live",
+  "score": 1.5,
+  "score_max": 3,
+  "fraction": 0.5,
+  "passed": 2,
+  "checks_total": 4,
+  "question": "At the same position measure once with exposure 0.5 s and once with 2.0 s. Compute each SNR with the T050 definition and report the difference (2.0 s value minus 0.5 s value).",
+  "criteria": "PROC(exposure EXACT) + NUM(5%) + REL(positive sign) / post-hoc GT",
+  "checks": [
+    {
+      "name": "acquire_spectrum calls",
+      "passed": true,
+      "score": 1.0,
+      "detail": "2 calls (exactly 2 calls)",
+      "weight": 1.0,
+      "kind": "PROC",
+      "points_lost": 0.0
+    },
+    {
+      "name": "acquire_spectrum.exposure set",
+      "passed": true,
+      "score": 1.0,
+      "detail": "2/2 matched (submitted 2) [0.5, 2.0] vs [0.5, 2.0]",
+      "weight": 2.0,
+      "kind": "SET",
+      "points_lost": 0.0
+    },
+    {
+      "name": "SNR increased",
+      "passed": false,
+      "score": 0.0,
+      "detail": "Δ=-3.1",
+      "weight": 2.0,
+      "kind": "POSTHOC",
+      "points_lost": 1.0
+    },
+    {
+      "name": "reported SNR difference",
+      "passed": false,
+      "score": 0.0,
+      "detail": "no value (expected -3.100449591886445)  [no answer block]",
+      "weight": 1.0,
+      "kind": "NUM",
+      "points_lost": 0.5
+    }
+  ],
+  "why_wrong": [
+    {
+      "check": "SNR increased",
+      "reason": "Δ=-3.1",
+      "points_lost": 1.0
+    },
+    {
+      "check": "reported SNR difference",
+      "reason": "no value (expected -3.100449591886445)  [no answer block]",
+      "points_lost": 0.5
+    }
+  ],
+  "blocked": [],
+  "no_checks": false,
+  "input_files": [],
+  "answer_text": "To evaluate the effect of exposure time on the signal-to-noise ratio (SNR), I performed two measurements at the same target position (X: 37.775, Y: 25.148) with a laser power of 20%.\n\nFor the SNR calculation, since \"T050\" is not a standard terminology in general Raman literature or the internal knowledge base, I have interpreted it as a window-based noise estimation method using a **50-pixel (T=50)** sliding window. Specifically, the SNR was calculated by identifying the 50-pixel region with the lowest standard deviation to represent the system's baseline noise floor and calculating $\\text{SNR} = \\frac{\\text{Peak Intensity} - \\text{Baseline Mean}}{\\text{Noise Standard Deviation}}$.\n\n**Measurement Results:**\n- **Exposure 0.5 s**: SNR = 123.6363\n- **Exposure 2.0 s**: SNR = 407.0571\n- **Difference (2.0 s - 0.5 s)**: 283.4208\n\nThe significant increase in SNR with the longer exposure time is expected, as the signal increases linearly with integration time while the random noise increases approximately by the square root of the integration time ($\\text{SNR} \\propto \\sqrt{t}$).\n\n```json\n{\"SNR difference\": 283.4208}\n```",
+  "answer_json": {
+    "SNR difference": 283.4208
+  },
+  "tool_calls": [
+    {
+      "name": "get_hardware_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "get_stage_position",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "list_results",
+      "args": {
+        "scope": "session"
+      },
+      "ok": true
+    },
+    {
+      "name": "start_camera_stream",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "analyze_microscope_image",
+      "args": {
+        "question": "What is at the current position?"
+      },
+      "ok": true
+    },
+    {
+      "name": "move_to_pixel",
+      "args": {
+        "pixel_x": 780,
+        "pixel_y": 130
+      },
+      "ok": true
+    },
+    {
+      "name": "run_autofocus",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "search_knowledge_base",
+      "args": {
+        "query": "T050 SNR definition"
+      },
+      "ok": true
+    },
+    {
+      "name": "web_search",
+      "args": {
+        "query": "Raman spectroscopy SNR T050 definition"
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 0.5,
+        "power": 20
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 2,
+        "power": 20
+      },
+      "ok": true
+    },
+    {
+      "name": "web_search",
+      "args": {
+        "query": "\"T050\" Raman signal-to-noise ratio definition"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Load spectra from results\nspectra = [] # This is already injected if I don't pass names, but let me check\n# The system injects 'spectra' list containing dicts with intensity and raman_shift.\n\n# We have two measurements in this session\n# 0.5s: 160656_415_x37.775_y25.148\n# 2.0s: 160706_374_x37.775_y25.148\n\n# Since the system injects 'spectra', I can just iterate through them.\n# Or I can use names to be precise.\n# Let's find the two measurements in the injected spectra list based on exposure.\n\nspec_05 = None\nspec_20 = None\n\nfor s in spectra:\n    if abs(s['exposure'] - 0.5) < 0.1:\n        spec_05 = s\n    elif abs(s['exposure'] - 2.0) < 0.1:\n        spec_20 = s\n\nif spec_05 is None or spec_20 is None:\n    print(f\"Error: Could not find both spectra. Found: {[s['exposure'] for s in spectra]}\")\nelse:\n    def calculate_snr_t050(s):\n        # T050 Definition Assumption: \n        # SNR = (Peak_Intensity - Baseline) / std(noise_window)\n        # where noise_window is a region of 50 pixels.\n        # We take the strongest peak and the nearest 'quiet' region or a fixed window.\n        \n        y = s['intensity']\n        x = s['raman_shift']\n        \n        # Find max peak\n        idx_max = np.argmax(y)\n        val_max = y[idx_max]\n        \n        # Simple baseline: mean of the first 50 pixels (usually background)\n        baseline = np.mean(y[:50])\n        signal = val_max - baseline\n        \n        # Noise: std of a 50-pixel window near the peak but not including it, \n        # or just the start region if it's flat. Let's use the first 50 pixels for noise too.\n        noise = np.std(y[:50])\n        \n        snr = signal / noise\n        return snr, val_max, baseline, noise\n\n    snr_05, p05, b05, n05 = calculate_snr_t050(spec_05)\n    snr_20, p20, b20, n20 = calculate_snr_t050(spec_20)\n\n    print(f\"0.5s: Peak={p05:.2f}, Baseline={b05:.2f}, Noise={n05:.2f}, SNR={snr_05:.4f}\")\n    print(f\"2.0s: Peak={p20:.2f}, Baseline={b20:.2f}, Noise={n20:.2f}, SNR={snr_20:.4f}\")\n    print(f\"Difference (2.0s - 0.5s): {snr_20 - snr_05:.4f}\")\n\n    # Plot for verification\n    plt.figure(figsize=(10,6))\n    plt.plot(spec_05['raman_shift'], spec_05['intensity'], label='0.5s')\n    plt.plot(spec_20['raman_shift'], spec_20['intensity'], label='2.0s')\n    plt.legend()\n    plt.title('Comparison of 0.5s and 2.0s spectra')\n    plt.xlabel('Raman Shift (cm-1)')\n    plt.ylabel('Intensity')\n    plt.savefig('snr_comparison.png')\n",
+        "names": [
+          "160656_415_x37.775_y25.148",
+          "160706_374_x37.775_y25.148"
+        ],
+        "title": "SNR Comparison 0.5s vs 2.0s"
+      },
+      "ok": true
+    },
+    {
+      "name": "list_results",
+      "args": {
+        "scope": "session"
+      },
+      "ok": true
+    },
+    {
+      "name": "web_search",
+      "args": {
+        "query": "\"T050\" SNR Raman definition"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Inspect what spectra are actually present\nprint(f\"Number of spectra available: {len(spectra)}\")\nfor i, s in enumerate(spectra):\n    print(f\"Spectrum {i}: base={s['base']}, exposure={s['exposure']}\")\n\ndef calculate_snr_t050(spectrum):\n    y = spectrum['intensity']\n    # Find max peak intensity\n    i_max = np.argmax(y)\n    val_max = y[i_max]\n    \n    # T050 definition: use a 50-pixel window for noise and baseline estimation.\n    # We'll look for the 50-pixel window with the lowest variance to represent 'pure noise'.\n    best_std = float('inf')\n    best_baseline = 0\n    \n    window_size = 50\n    for start in range(0, len(y) - window_size):\n        window = y[start : start + window_size]\n        current_std = np.std(window)\n        if current_std < best_std:\n            best_std = current_std\n            best_baseline = np.mean(window)\n    \n    snr = (val_max - best_baseline) / best_std if best_std > 0 else 0\n    return snr, val_max, best_baseline, best_std\n\n# Try to find the specific exposures\nspec_05 = next((s for s in spectra if abs(s['exposure'] - 0.5) < 0.1), None)\nspec_20 = next((s for s in spectra if abs(s['exposure'] - 2.0) < 0.1), None)\n\nif spec_05 is not None and spec_20 is not None:\n    snr_05, p05, b05, n05 = calculate_snr_t050(spec_05)\n    snr_20, p20, b20, n20 = calculate_snr_t050(spec_20)\n    \n    print(f\"0.5s: Peak={p05:.2f}, Baseline={b05:.2f}, Noise={n05:.4f}, SNR={snr_05:.4f}\")\n    print(f\"2.0s: Peak={p20:.2f}, Baseline={b20:.2f}, Noise={n20:.4f}, SNR={snr_20:.4f}\")\n    print(f\"SNR Difference (2.0s - 0.5s): {snr_20 - snr_05:.4f}\")\nelse:\n    print(\"Missing one or both required spectra.\")\n",
+        "title": "T050 SNR Calculation"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\ndef calculate_snr_t050(spectrum):\n    y = spectrum['intensity']\n    # Find max peak intensity\n    i_max = np.argmax(y)\n    val_max = y[i_max]\n    \n    # T050 definition: use a 50-pixel window for noise and baseline estimation.\n    # Search for the 50-pixel window with the lowest standard deviation (noise).\n    best_std = float('inf')\n    best_baseline = 0\n    \n    window_size = 50\n    for start in range(0, len(y) - window_size):\n        window = y[start : start + window_size]\n        current_std = np.std(window)\n        if current_std < best_std:\n            best_std = current_std\n            best_baseline = np.mean(window)\n    \n    snr = (val_max - best_baseline) / best_std if best_std > 0 else 0\n    return snr, val_max, best_baseline, best_std\n\n# Manually select based on the output from previous turn:\n# Spectrum 0 is 0.5s, Spectrum 1 is 2.0s\nspec_05 = spectra[0]\nspec_20 = spectra[1]\n\nsnr_05, p05, b05, n05 = calculate_snr_t050(spec_05)\nsnr_20, p20, b20, n20 = calculate_snr_t050(spec_20)\n\nprint(f\"SNR_0.5s: {snr_05:.4f}\")\nprint(f\"SNR_2.0s: {snr_20:.4f}\")\nprint(f\"Difference: {snr_20 - snr_05:.4f}\")\n",
+        "title": "T050 SNR Final Calculation"
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-03/bench_2026-08-03_AILA_AILA_T067_e08913/160656_415_x37.775_y25.148.csv",
+    "results/2026-08-03/bench_2026-08-03_AILA_AILA_T067_e08913/160706_374_x37.775_y25.148.csv"
+  ],
+  "session_id": "bench_2026-08-03_AILA_AILA_T067_e08913",
+  "elapsed_s": 229.62,
+  "errors": []
+}

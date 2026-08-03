@@ -1,0 +1,102 @@
+{
+  "task": "T118",
+  "axis": "identification",
+  "mode": "live",
+  "score": 0.0,
+  "score_max": 2,
+  "fraction": 0.0,
+  "passed": 0,
+  "checks_total": 1,
+  "question": "T118.csv is a mixture synthesised from two library materials. Compare it with reference_library.csv and report which component dominates the signal, together with the similarity of both candidates.",
+  "criteria": "EXACT(material) + NUM(similarity ±0.01 ×2)",
+  "checks": [
+    {
+      "name": "dominant component",
+      "passed": false,
+      "score": 0.0,
+      "detail": "'PMMA' (expected 'polystyrene')",
+      "weight": 2.0,
+      "kind": "EXACT",
+      "points_lost": 2.0
+    }
+  ],
+  "why_wrong": [
+    {
+      "check": "dominant component",
+      "reason": "'PMMA' (expected 'polystyrene')",
+      "points_lost": 2.0
+    }
+  ],
+  "blocked": [],
+  "no_checks": false,
+  "input_files": [
+    "T118.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "Based on the comparison between the mixture spectrum `T118.csv` and the materials in `reference_library.csv`, I calculated the Pearson correlation coefficient (similarity) between the mixture and each library entry.\n\nThe analysis identified that the signal in T118 is dominated by **polystyrene**, which shows a very high similarity of approximately **0.9259**. The second most similar material is **PMMA**, with a similarity of **0.4557**, indicating it is likely the second component of the mixture but contributes significantly less to the overall spectral profile than polystyrene. Other library materials (PET, aragonite, silicon, and calcite) showed negligible or negative correlations.\n\n```json\n{\"dominant_component\": \"polystyrene\", \"similarity_polystyrene\": 0.9259, \"similarity_PMMA\": 0.4557}\n```",
+  "answer_json": {
+    "dominant_component": "polystyrene",
+    "similarity_polystyrene": 0.9259,
+    "similarity_PMMA": 0.4557
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-03/T118.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-03/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\n# T118 data\nt118 = files[0][\"table\"] # Assuming indices based on call order, but let's be safe and use filenames if possible? \n# No, I have to use file_ids in the tool call. Let's check which is which by filename.\n\n# Map files by filename for clarity\nf_map = {f[\"filename\"]: f[\"table\"] for f in files}\nt118_data = f_map[\"T118.csv\"]\nlib_data = f_map[\"reference_library.csv\"]\n\nx_t118 = t118_data[\"raman_shift_cm-1\"]\ny_t118 = t118_data[\"intensity\"]\n\n# Identify unique materials in library\nmaterials = np.unique(lib_data[\"material\"])\nresults = []\n\nfor mat in materials:\n    mask = lib_data[\"material\"] == mat\n    # The library might have multiple entries for one material? \n    # Let's check the spectrum_id as well.\n    u_ids = np.unique(lib_data[\"spectrum_id\"][mask])\n    mat_corrs = []\n    for sid in u_ids:\n        sid_mask = (lib_data[\"material\"] == mat) & (lib_data[\"spectrum_id\"] == sid)\n        x_ref = lib_data[\"raman_shift_cm-1\"][sid_mask]\n        y_ref = lib_data[\"intensity\"][sid_mask]\n        \n        # Ensure they are on the same x-axis. T118 is 200-2000 step 1.\n        # Let's assume library is too. If not, we interpolate.\n        if np.array_equal(x_t118, x_ref):\n            corr, _ = pearsonr(y_t118, y_ref)\n        else:\n            # Interpolate reference to T118 axis\n            y_ref_interp = np.interp(x_t118, x_ref, y_ref)\n            corr, _ = pearsonr(y_t118, y_ref_interp)\n        mat_corrs.append(corr)\n    \n    # Use the best correlation for this material\n    results.append({\"material\": mat, \"similarity\": max(mat_corrs)})\n\n# Sort by similarity\nresults.sort(key=lambda x: x[\"similarity\"], reverse=True)\nprint(\"Top similarities:\")\nfor r in results[:5]:\n    print(f\"{r['material']}: {r['similarity']:.4f}\")\n",
+        "file_ids": [
+          "2026-08-03/T118.csv",
+          "2026-08-03/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\nimport matplotlib.pyplot as plt\n\n# Map files by filename for clarity\nf_map = {f[\"filename\"]: f[\"table\"] for f in files}\nt118_data = f_map[\"T118.csv\"]\nlib_data = f_map[\"reference_library.csv\"]\n\nx_t118 = np.array(t118_data[\"raman_shift_cm-1\"], dtype=float)\ny_t118 = np.array(t118_data[\"intensity\"], dtype=float)\n\n# Identify unique materials in library\nmaterials = np.unique(lib_data[\"material\"])\nresults = []\n\nfor mat in materials:\n    mask = lib_data[\"material\"] == mat\n    u_ids = np.unique(lib_data[\"spectrum_id\"][mask])\n    mat_corrs = []\n    for sid in u_ids:\n        sid_mask = (lib_data[\"material\"] == mat) & (lib_data[\"spectrum_id\"] == sid)\n        x_ref = np.array(lib_data[\"raman_shift_cm-1\"][sid_mask], dtype=float)\n        y_ref = np.array(lib_data[\"intensity\"][sid_mask], dtype=float)\n        \n        if len(x_ref) < 2: continue # Skip empty/too short spectra\n\n        # Interpolate reference to T118 axis (flattened and cast just in case)\n        y_ref_interp = np.interp(x_t118, x_ref, y_ref)\n        corr, _ = pearsonr(y_t118, y_ref_interp)\n        mat_corrs.append(corr)\n    \n    if mat_corrs:\n        results.append({\"material\": mat, \"similarity\": max(mat_corrs)})\n\n# Sort by similarity\nresults.sort(key=lambda x: x[\"similarity\"], reverse=True)\n\nprint(\"Top similarities:\")\nfor r in results[:5]:\n    print(f\"{r['material']}: {r['similarity']:.4f}\")\n\n# To confirm the mixture, let's plot T118 and the top 2 components\nplt.figure(figsize=(10, 6))\nplt.plot(x_t118, y_t118, label='T118 (Mixture)', color='black', linewidth=2)\n\ntop_2 = results[:2]\nfor item in top_2:\n    mat = item['material']\n    mask = lib_data[\"material\"] == mat\n    # Take first spectrum of this material for plotting\n    sid = np.unique(lib_data[\"spectrum_id\"][mask])[0]\n    sid_mask = (lib_data[\"material\"] == mat) & (lib_data[\"spectrum_id\"] == sid)\n    plt.plot(lib_data[\"raman_shift_cm-1\"][sid_mask], lib_data[\"intensity\"][sid_mask], \n             label=f\"Ref: {mat} (sim={item['similarity']:.3f})\", alpha=0.7)\n\nplt.title(\"T118 Mixture vs Top Library Components\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Intensity\")\nplt.legend()\nplt.grid(True)\nplt.savefig('comparison_plot.png')\n",
+        "file_ids": [
+          "2026-08-03/T118.csv",
+          "2026-08-03/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\nimport matplotlib.pyplot as plt\n\n# Map files by filename for clarity\nf_map = {f[\"filename\"]: f[\"table\"] for f in files}\nt118_data = f_map[\"T118.csv\"]\nlib_data = f_map[\"reference_library.csv\"]\n\nx_t118 = np.array(t118_data[\"raman_shift_cm-1\"], dtype=float)\ny_t118 = np.array(t118_data[\"intensity\"], dtype=float)\n\n# Convert library columns to numpy arrays explicitly\nlib_materials = np.array(lib_data[\"material\"])\nlib_sids = np.array(lib_data[\"spectrum_id\"])\nlib_x = np.array(lib_data[\"raman_shift_cm-1\"], dtype=float)\nlib_y = np.array(lib_data[\"intensity\"], dtype=float)\n\nmaterials = np.unique(lib_materials)\nprint(f\"Found {len(materials)} unique materials in library.\")\n\nresults = []\n\nfor mat in materials:\n    mask = (lib_materials == mat)\n    u_ids = np.unique(lib_sids[mask])\n    mat_corrs = []\n    for sid in u_ids:\n        sid_mask = (lib_materials == mat) & (lib_sids == sid)\n        x_ref = lib_x[sid_mask]\n        y_ref = lib_y[sid_mask]\n        \n        if len(x_ref) < 2: continue\n\n        # Interpolate reference to T118 axis\n        y_ref_interp = np.interp(x_t118, x_ref, y_ref)\n        corr, _ = pearsonr(y_t118, y_ref_interp)\n        mat_corrs.append(corr)\n    \n    if mat_corrs:\n        results.append({\"material\": mat, \"similarity\": max(mat_corrs)})\n\n# Sort by similarity\nresults.sort(key=lambda x: x[\"similarity\"], reverse=True)\n\nprint(\"Top similarities:\")\nfor r in results[:10]:\n    print(f\"{r['material']}: {r['similarity']:.4f}\")\n",
+        "file_ids": [
+          "2026-08-03/T118.csv",
+          "2026-08-03/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "/api/results/2026-08-03/bench_2026-08-03_AILA_AILA_T118_8f1583/fig173748_207_0.png"
+  ],
+  "session_id": "bench_2026-08-03_AILA_AILA_T118_8f1583",
+  "elapsed_s": 81.27,
+  "errors": []
+}

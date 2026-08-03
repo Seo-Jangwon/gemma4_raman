@@ -1,0 +1,134 @@
+{
+  "task": "T113",
+  "axis": "identification",
+  "mode": "live",
+  "score": 0.0,
+  "score_max": 2,
+  "fraction": 0.0,
+  "passed": 0,
+  "checks_total": 2,
+  "question": "Compare the unknown spectrum T113.csv with the reference spectra in reference_library.csv (interpolate onto the reference axis, L2 normalize, cosine similarity) and report the 3 most similar references with their rank and score.",
+  "criteria": "EXACT(ordered 3 items) + NUM(scores ±0.01)",
+  "checks": [
+    {
+      "name": "top 3 materials in order",
+      "passed": false,
+      "score": 0.0,
+      "detail": "no value (expected 3)",
+      "weight": 2.0,
+      "kind": "SET",
+      "points_lost": 1.333
+    },
+    {
+      "name": "top 3 scores",
+      "passed": false,
+      "score": 0.0,
+      "detail": "no value (expected 3)",
+      "weight": 1.0,
+      "kind": "SET",
+      "points_lost": 0.667
+    }
+  ],
+  "why_wrong": [
+    {
+      "check": "top 3 materials in order",
+      "reason": "no value (expected 3)",
+      "points_lost": 1.333
+    },
+    {
+      "check": "top 3 scores",
+      "reason": "no value (expected 3)",
+      "points_lost": 0.667
+    }
+  ],
+  "blocked": [],
+  "no_checks": false,
+  "input_files": [
+    "T113.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "The unknown spectrum `T113.csv` was compared against the spectra in `reference_library.csv`. The analysis involved interpolating the unknown spectrum onto the Raman shift axis of each reference, L2 normalizing both signals to ensure scale independence, and calculating the cosine similarity (equivalent to the dot product of the L2-normalized vectors).\n\nThe three most similar references are as follows:\n\n1. **Rank 1**: `PS_01` (polystyrene) with a similarity score of **0.9948**.\n2. **Rank 2**: `PS_02` (polystyrene) with a similarity score of **0.9781**.\n3. **Rank 3**: `PET_02` (PET) with a similarity score of **0.2275**.\n\nThe extremely high scores for the polystyrene references indicate that the unknown sample T113 is highly likely to be polystyrene.\n\n```json\n{\"Rank 1\": {\"spectrum_id\": \"PS_01\", \"score\": 0.9948}, \"Rank 2\": {\"spectrum_id\": \"PS_02\", \"score\": 0.9781}, \"Rank 3\": {\"spectrum_id\": \"PET_02\", \"score\": 0.2275}}\n```",
+  "answer_json": {
+    "Rank 1": {
+      "spectrum_id": "PS_01",
+      "score": 0.9948
+    },
+    "Rank 2": {
+      "spectrum_id": "PS_02",
+      "score": 0.9781
+    },
+    "Rank 3": {
+      "spectrum_id": "PET_02",
+      "score": 0.2275
+    }
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-03/T113.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-03/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Load data from files dictionary (provided by system)\n# Unknown spectrum T113\nt113_data = files['2026-08-03/T113.csv']\nx_unk = t113_data['raman_shift_cm-1']\ny_unk = t113_data['intensity']\n\n# Reference library\nref_lib = files['2026-08-03/reference_library.csv']\nids = ref_lib['spectrum_id']\nmaterials = ref_lib['material']\nx_refs = ref_lib['raman_shift_cm-1']\ny_refs = ref_lib['intensity']\n\n# Identify unique spectra in library\nunique_ids = []\nfor sid in ids:\n    if sid not in unique_ids:\n        unique_ids.append(sid)\n\nresults = []\n\nfor sid in unique_ids:\n    mask = (ids == sid)\n    curr_x = x_refs[mask]\n    curr_y = y_refs[mask]\n    material = materials[mask][0]\n    \n    # 1. Interpolate unknown onto reference axis\n    f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value=\"extrapolate\")\n    y_unk_interp = f_unk(curr_x)\n    \n    # 2. L2 Normalization\n    def l2_norm(v):\n        norm = np.linalg.norm(v)\n        return v / norm if norm > 0 else v\n\n    y_ref_norm = l2_norm(curr_y)\n    y_unk_norm = l2_norm(y_unk_interp)\n    \n    # 3. Cosine Similarity (since they are L2 normalized, it is just the dot product)\n    similarity = np.dot(y_ref_norm, y_unk_norm)\n    \n    results.append({\n        'spectrum_id': sid,\n        'material': material,\n        'score': similarity\n    })\n\n# Sort by score descending\nresults.sort(key=lambda x: x['score'], reverse=True)\n\n# Report top 3\ntop_3 = results[:3]\nprint(\"Top 3 similarities:\")\nfor i, res in enumerate(top_3):\n    print(f\"Rank {i+1}: {res['spectrum_id']} ({res['material']}) - Score: {res['score']:.4f}\")\n",
+        "file_ids": [
+          "2026-08-03/T113.csv",
+          "2026-08-03/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Find files in the provided list\nunk_file = next(f for f in files if f['file_id'] == '2026-08-03/T113.csv')\nref_file = next(f for f in files if f['file_id'] == '2026-08-03/reference_library.csv')\n\n# Unknown spectrum T113\nx_unk = unk_file['table']['raman_shift_cm-1']\ny_unk = unk_file['table']['intensity']\n\n# Reference library\nids = ref_file['table']['spectrum_id']\nmaterials = ref_file['table']['material']\nx_refs = ref_file['table']['raman_shift_cm-1']\ny_refs = ref_file['table']['intensity']\n\n# Identify unique spectra in library\nunique_ids = []\nfor sid in ids:\n    if sid not in unique_ids:\n        unique_ids.append(sid)\n\nresults = []\n\nfor sid in unique_ids:\n    mask = (ids == sid)\n    curr_x = x_refs[mask]\n    curr_y = y_refs[mask]\n    material = materials[mask][0]\n    \n    # 1. Interpolate unknown onto reference axis\n    f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value=\"extrapolate\")\n    y_unk_interp = f_unk(curr_x)\n    \n    # 2. L2 Normalization\n    def l2_norm(v):\n        norm = np.linalg.norm(v)\n        return v / norm if norm > 0 else v\n\n    y_ref_norm = l2_norm(curr_y)\n    y_unk_norm = l2_norm(y_unk_interp)\n    \n    # 3. Cosine Similarity (since they are L2 normalized, it is just the dot product)\n    similarity = np.dot(y_ref_norm, y_unk_norm)\n    \n    results.append({\n        'spectrum_id': sid,\n        'material': material,\n        'score': similarity\n    })\n\n# Sort by score descending\nresults.sort(key=lambda x: x['score'], reverse=True)\n\n# Report top 3\ntop_3 = results[:3]\nprint(\"Top 3 similarities:\")\nfor i, res in enumerate(top_3):\n    print(f\"Rank {i+1}: {res['spectrum_id']} ({res['material']}) - Score: {res['score']:.4f}\")\n",
+        "file_ids": [
+          "2026-08-03/T113.csv",
+          "2026-08-03/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# files is a list of dicts injected by the system. \n# I passed file_ids=['2026-08-03/T113.csv', '2026-08-03/reference_library.csv']\n# So index 0 is T113 and index 1 is reference library.\n\nt113 = files[0]\nref_lib = files[1]\n\nx_unk = t113['table']['raman_shift_cm-1']\ny_unk = t113['table']['intensity']\n\nids = ref_lib['table']['spectrum_id']\nmaterials = ref_lib['table']['material']\nx_refs = ref_lib['table']['raman_shift_cm-1']\ny_refs = ref_lib['table']['intensity']\n\n# Identify unique spectra in library\nunique_ids = []\nfor sid in ids:\n    if sid not in unique_ids:\n        unique_ids.append(sid)\n\nresults = []\n\nfor sid in unique_ids:\n    mask = (ids == sid)\n    curr_x = x_refs[mask]\n    curr_y = y_refs[mask]\n    material = materials[mask][0]\n    \n    # 1. Interpolate unknown onto reference axis\n    f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value=\"extrapolate\")\n    y_unk_interp = f_unk(curr_x)\n    \n    # 2. L2 Normalization\n    def l2_norm(v):\n        norm = np.linalg.norm(v)\n        return v / norm if norm > 0 else v\n\n    y_ref_norm = l2_norm(curr_y)\n    y_unk_norm = l2_norm(y_unk_interp)\n    \n    # 3. Cosine Similarity (dot product of L2 normalized vectors)\n    similarity = np.dot(y_ref_norm, y_unk_norm)\n    \n    results.append({\n        'spectrum_id': sid,\n        'material': material,\n        'score': similarity\n    })\n\n# Sort by score descending\nresults.sort(key=lambda x: x['score'], reverse=True)\n\n# Report top 3\ntop_3 = results[:3]\nprint(\"Top 3 similarities:\")\nfor i, res in enumerate(top_3):\n    print(f\"Rank {i+1}: {res['spectrum_id']} ({res['material']}) - Score: {res['score']:.4f}\")\n",
+        "file_ids": [
+          "2026-08-03/T113.csv",
+          "2026-08-03/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Map files by filename or ID for safety\nt113_f = None\nref_lib_f = None\nfor f in files:\n    if 'T113' in f['filename']:\n        t113_f = f\n    elif 'reference_library' in f['filename']:\n        ref_lib_f = f\n\n# Data extraction\nx_unk = np.array(t113_f['table']['raman_shift_cm-1'])\ny_unk = np.array(t113_f['table']['intensity'])\n\nids = np.array(ref_lib_f['table']['spectrum_id'])\nmaterials = np.array(ref_lib_f['table']['material'])\nx_refs = np.array(ref_lib_f['table']['raman_shift_cm-1'])\ny_refs = np.array(ref_lib_f['table']['intensity'])\n\n# Unique IDs in the library\nunique_ids = np.unique(ids)\n\nresults = []\n\nfor sid in unique_ids:\n    mask = (ids == sid)\n    curr_x = x_refs[mask]\n    curr_y = y_refs[mask]\n    material = materials[mask][0]\n    \n    # 1. Interpolate unknown onto reference axis\n    f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value=\"extrapolate\")\n    y_unk_interp = f_unk(curr_x)\n    \n    # 2. L2 Normalization\n    def l2_norm(v):\n        norm = np.linalg.norm(v)\n        return v / norm if norm > 0 else v\n\n    y_ref_norm = l2_norm(curr_y)\n    y_unk_norm = l2_norm(y_unk_interp)\n    \n    # 3. Cosine Similarity (dot product of normalized vectors)\n    similarity = np.dot(y_ref_norm, y_unk_norm)\n    \n    results.append({\n        'spectrum_id': sid,\n        'material': material,\n        'score': similarity\n    })\n\n# Sort by score descending\nresults.sort(key=lambda x: x['score'], reverse=True)\n\n# Report top 3\ntop_3 = results[:3]\nprint(\"Top 3 similarities:\")\nfor i, res in enumerate(top_3):\n    print(f\"Rank {i+1}: {res['spectrum_id']} ({res['material']}) - Score: {res['score']:.4f}\")\n",
+        "file_ids": [
+          "2026-08-03/T113.csv",
+          "2026-08-03/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "session_id": "bench_2026-08-03_AILA_AILA_T113_d6bab8",
+  "elapsed_s": 89.96,
+  "errors": []
+}

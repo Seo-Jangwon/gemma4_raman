@@ -1,0 +1,133 @@
+{
+  "task": "T062",
+  "axis": "procedure",
+  "mode": "live",
+  "score": 1.2857,
+  "score_max": 3,
+  "fraction": 0.4286,
+  "passed": 2,
+  "checks_total": 4,
+  "question": "At the same position measure once at laser power 20%, 40% and 60%. Compute the SNR of each with the T050 definition (signal = max in 990-1012, noise = std ddof=1 in 1800-1900) and plot SNR versus laser power.",
+  "criteria": "PROC(power EXACT) + NUM(5%) + REL(monotonic increase) / post-hoc GT",
+  "checks": [
+    {
+      "name": "acquire_spectrum calls",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3 calls (exactly 3 calls)",
+      "weight": 1.0,
+      "kind": "PROC",
+      "points_lost": 0.0
+    },
+    {
+      "name": "acquire_spectrum.power set",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3/3 matched (submitted 3) [20.0, 40.0, 60.0] vs [20.0, 40.0, 60.0]",
+      "weight": 2.0,
+      "kind": "SET",
+      "points_lost": 0.0
+    },
+    {
+      "name": "SNR increases monotonically",
+      "passed": false,
+      "score": 0.0,
+      "detail": "[91.4518, 86.2479, 88.9274]",
+      "weight": 2.0,
+      "kind": "REL",
+      "points_lost": 0.857
+    },
+    {
+      "name": "reported 3 SNR values",
+      "passed": false,
+      "score": 0.0,
+      "detail": "no value (expected 3)",
+      "weight": 2.0,
+      "kind": "SET",
+      "points_lost": 0.857
+    }
+  ],
+  "why_wrong": [
+    {
+      "check": "SNR increases monotonically",
+      "reason": "[91.4518, 86.2479, 88.9274]",
+      "points_lost": 0.857
+    },
+    {
+      "check": "reported 3 SNR values",
+      "reason": "no value (expected 3)",
+      "points_lost": 0.857
+    }
+  ],
+  "blocked": [],
+  "no_checks": false,
+  "input_files": [],
+  "answer_text": "The Raman measurements were performed at the current stage position (X=37.876, Y=25.248) using an exposure time of 1 second across three different laser power levels: 20%, 40%, and 60%.\n\nFollowing the T050 definition, the signal was calculated as the maximum intensity within the 990–1012 cm⁻¹ range, and the noise was determined as the standard deviation (ddof=1) of the intensity in the 1800–1900 cm⁻¹ range.\n\nThe computed SNR values are as follows:\n- **Laser Power 20%**: SNR = 91.45\n- **Laser Power 40%**: SNR = 86.25\n- **Laser Power 60%**: SNR = 88.93\n\nA plot of the SNR versus laser power has been generated and saved.\n\n```json\n{\"SNR_20\": 91.45, \"SNR_40\": 86.25, \"SNR_60\": 88.93}\n```",
+  "answer_json": {
+    "SNR_20": 91.45,
+    "SNR_40": 86.25,
+    "SNR_60": 88.93
+  },
+  "tool_calls": [
+    {
+      "name": "get_hardware_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "get_stage_position",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "get_ccd_info",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "set_ccd_exposure",
+      "args": {
+        "exposure_time": 1
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "power": 20
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "power": 40
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "power": 60
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nimport matplotlib.pyplot as plt\n\nsnrs = []\npowers = [20, 40, 60]\n\nfor spec in spectra:\n    p = spec['power']\n    if p not in powers: continue\n    \n    x = spec['raman_shift']\n    y = spec['intensity']\n    \n    # Signal: max in 990-1012\n    mask_sig = (x >= 990) & (x <= 1012)\n    signal = np.max(y[mask_sig])\n    \n    # Noise: std ddof=1 in 1800-1900\n    mask_noise = (x >= 1800) & (x <= 1900)\n    noise = np.std(y[mask_noise], ddof=1)\n    \n    snr = signal / noise\n    snrs.append((p, snr))\n\n# Sort by power just in case\nsnrs.sort()\nsorted_powers = [val[0] for val in snrs]\nsorted_snrs = [val[1] for val in snrs]\n\nplt.figure(figsize=(6, 4))\nplt.plot(sorted_powers, sorted_snrs, marker='o', linestyle='-', color='b')\nplt.xlabel('Laser Power (%)')\nplt.ylabel('SNR (T050)')\nplt.title('SNR vs Laser Power')\nplt.grid(True)\nplt.savefig('snr_vs_power.png')\n\nprint(f\"Results: {snrs}\")\n",
+        "title": "SNR versus Laser Power"
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-03/bench_2026-08-03_AILA_AILA_T062_4d1f20/155346_007_x37.876_y25.248.csv",
+    "results/2026-08-03/bench_2026-08-03_AILA_AILA_T062_4d1f20/155354_189_x37.876_y25.248.csv",
+    "results/2026-08-03/bench_2026-08-03_AILA_AILA_T062_4d1f20/155402_686_x37.876_y25.248.csv",
+    "/api/results/2026-08-03/bench_2026-08-03_AILA_AILA_T062_4d1f20/fig155420_781_0.png"
+  ],
+  "session_id": "bench_2026-08-03_AILA_AILA_T062_4d1f20",
+  "elapsed_s": 78.42,
+  "errors": []
+}
