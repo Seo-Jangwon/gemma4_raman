@@ -597,10 +597,22 @@ class LaserController:
         SSPW 0 이면 발진 자체가 멈추므로 빔을 막으려고 ND 를 원위치할 이유가 없다. 파워
         설정(ND 위치)은 유지하고, 가이드빔이 필요한 쪽이 set_guide_beam() 을 명시적으로
         부른다(오토포커스가 그렇게 한다).
+
+        [ACK 를 확인한다 — 2026-08-03]
+        예전에는 _send_command 의 반환(성공 bool)을 버리고 무조건 is_on=False 로 내렸다.
+        RS232 가 끊기거나 ercd 알람이 재시도 후에도 남으면 SSPW 0 이 안 나갔는데도
+        '꺼졌다'가 되어, 위쪽 어디에서도 관측되지 않았다(get_laser_status 는 하드웨어를
+        다시 읽지 않고 이 플래그를 그대로 보고한다). 켜는 쪽(set_power)은 이미 모터 확인을
+        하는데 끄는 쪽만 안 하는 비대칭이었다 — 안전에서 중요한 것은 끄는 쪽이다.
+        확인되지 않으면 is_on 을 내리지 않고 False 를 돌려준다. 호출자가 판단한다.
         """
         print("🛑 레이저 정지 (OFF)")
-        self._send_command("00", "SSPW", "0", timeout=3.0)
-        self.is_on = False
+        ok, _ = self._send_command("00", "SSPW", "0", timeout=3.0)
+        if ok:
+            self.is_on = False
+        else:
+            print("   ⚠️ SSPW 0 이 확인되지 않았습니다 — 빔이 아직 나가고 있을 수 있습니다.")
+        return bool(ok)
 
     # ==============================================================
     # ND 필터 투과율 ↔ 펄스 위치 변환 (config [ND_FILTER] Mode=1 보간)

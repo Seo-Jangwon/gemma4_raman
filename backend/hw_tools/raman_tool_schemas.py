@@ -744,7 +744,10 @@ RAMAN_TOOLS = [
                 "Capture the current view of the TuCam optical microscope camera and pass it to YOU as an image "
                 "to look at. Use it when visual judgment is needed, e.g. checking sample position, identifying "
                 "a target, or detecting debris. Streaming must be active. "
-                "The return also includes pixel coordinates; these are not stage coordinates, so if you need to move to that location, convert and move with the move_to_pixel tool. "
+                "The tool returns the IMAGE ITSELF - it does NOT return any coordinates. YOU must look "
+                "at the image, find the target in it, and read off its pixel coordinates yourself; do "
+                "not search the JSON response for an x/y field, there is none. Those pixel coordinates "
+                "are not stage coordinates, so to move there pass them to move_to_pixel. "
                 "It also returns brightness statistics (min/max/mean_intensity) and a relative "
                 "sharpness_score for the same image - use those to check exposure or compare frames. "
                 "Do NOT use sharpness_score to focus manually: run_autofocus optimises a different "
@@ -755,7 +758,10 @@ RAMAN_TOOLS = [
                 "(returns no image for you to inspect); "
                 "preview_grid_scan = show where a planned grid would land. "
                 "All three return the same pixel coordinate system, so a coordinate read from any of them "
-                "can be passed to move_to_pixel."
+                "can be passed to move_to_pixel. "
+                "This tool saves NOTHING: it does not become 'the image at this point' for "
+                "save_measurement_point. If you want this view bundled into a measurement-point record, "
+                "call capture_scene as well."
             ),
             "parameters": {
                 "type": "object",
@@ -853,9 +859,18 @@ RAMAN_TOOLS = [
                 "MANDATORY HUMAN APPROVAL: always preview FIRST, then STOP - show this preview image to the "
                 "user, end your turn, and WAIT. Do NOT call run_grid_scan in the same turn as this preview; "
                 "only call it in a later turn after the user has explicitly approved this exact layout. "
-                "If center_x/center_y are omitted, the current stage position is used as the grid center. "
-                "Note the camera field of view is small (~0.43 x 0.30 mm), so with wide spacing some points may "
-                "fall outside the frame; they are still measured, and the response reports how many are in view."
+                "If center_x/center_y are omitted, the current stage position is used as the grid center, "
+                "and that resolved center is what gets approved - a later run_grid_scan with the centre "
+                "omitted scans THAT position even if the stage has moved since. "
+                "Whatever you pass here you must pass IDENTICALLY to run_grid_scan: the approval is "
+                "matched on the arguments themselves, so omitting the centre here and spelling it out "
+                "there (or vice versa) is rejected as a mismatch even when both mean the same place. "
+                "SIZE LIMIT: rows * cols must be <= 400 points; a larger grid is refused here, so agree "
+                "a smaller size with the user before promising a map. "
+                "The camera field of view is small, so with wide spacing some points may fall outside "
+                "the frame; they are still measured, and the response reports how many are in view "
+                "(n_in_view) along with the exact view size in fov_mm - plan spacing from that returned "
+                "value rather than from a remembered number."
             ),
             "parameters": {
                 "type": "object",
@@ -880,8 +895,14 @@ RAMAN_TOOLS = [
                 "(counts, intensity min/max/mean, and per-point data when 32 points or fewer) instead of one tool "
                 "message per point - this is the token-efficient way to run a map. "
                 "ORIENTATION: rows = vertical count (height, stage Y), cols = horizontal count (width, stage X); "
-                "rows=3,cols=2 is a tall 3x2 grid, rows=2,cols=3 is a wide 2x3 grid - do not swap them. Use the "
-                "SAME rows/cols/spacing_mm/center that the user approved in the preview. "
+                "rows=3,cols=2 is a tall 3x2 grid, rows=2,cols=3 is a wide 2x3 grid - do not swap them. "
+                "PASS THE APPROVED ARGUMENTS VERBATIM: the approval gate compares the arguments you "
+                "give, not the physical positions they work out to. If you OMITTED center_x/center_y in "
+                "the preview you must omit them here too - filling in the numeric coordinates of that "
+                "same spot is rejected as an 'Approval mismatch'. (An omitted centre runs at the "
+                "position the approved preview was drawn at, so the scan lands where the user saw it "
+                "even if the stage has moved in between.) "
+                "SIZE LIMIT: rows * cols must be <= 400 points. "
                 "REQUIRES PRIOR HUMAN APPROVAL: do NOT call this in the same turn as preview_grid_scan. Call it "
                 "ONLY after (1) you showed the user a preview_grid_scan image, (2) you ended that turn, and "
                 "(3) the user EXPLICITLY approved that exact layout in a later message. If the user has not "
@@ -958,6 +979,10 @@ RAMAN_TOOLS = [
                 "the data/-relative path returned by list_session_artifacts or by save_result can be "
                 "passed here verbatim. Returns the intensity array plus any axis columns "
                 "(raman_shift_cm-1 / wavelength_nm / background_intensity) and the saved metadata. "
+                "1D SPECTRA ONLY (Single / Accumulate). A Kinetic measurement is saved as one row per "
+                "frame per pixel; loading it here is REFUSED rather than silently flattening the frames "
+                "into one wrong array. Analyse kinetic data with run_analysis, which receives it as a "
+                "2D frames array. "
                 "PICK THE RIGHT TOOL: for a file the USER attached to the chat use inspect_file "
                 "(different store, different format); to compute over MANY saved measurements at once "
                 "use run_analysis, which receives them all as `spectra` without any loading; to re-read "
@@ -987,7 +1012,12 @@ RAMAN_TOOLS = [
                 "image, and the current stage coordinates. "
                 "You do NOT pass any arrays - the spectrum and image files are already saved "
                 "automatically, and this tool only links them together under a point id. "
-                "Call it AFTER acquiring the spectrum and capturing the view at that position. "
+                "TIMING IS PART OF THE RECORD: the coordinates are read from the stage AT THE MOMENT "
+                "YOU CALL THIS, not from the spectrum's metadata. So call it immediately after "
+                "acquiring the spectrum and capturing the view at that position, and BEFORE moving the "
+                "stage anywhere else - otherwise the record pairs this point's spectrum with the next "
+                "point's coordinates, and nothing later can detect that. "
+                "The image must come from capture_scene; analyze_microscope_image does not count. "
                 "The response lists anything that was missing (e.g. no image captured yet). "
                 "Use one call per position to build a multi-point dataset."
             ),
@@ -1062,7 +1092,13 @@ RAMAN_TOOLS = [
                         "description": (
                             "Source spectrum to background-subtract. "
                             "'last': use the most recent acquire_spectrum() result (default). "
-                            "Otherwise: a file path (JSON or CSV, a path relative to data/ is allowed)."
+                            "Otherwise: a file path (JSON or CSV, a path relative to data/ is allowed). "
+                            "TWO LIMITS ON 'last'. (1) It only works on Single/Accumulate spectra - a "
+                            "Kinetic measurement has no single intensity array and is REJECTED. "
+                            "(2) run_grid_scan acquires internally at every point, so right after a "
+                            "grid scan 'last' means ONLY the final point of that grid, not the grid. "
+                            "To baseline-correct a whole grid, pass file paths one at a time (get them "
+                            "from list_results), or write the loop yourself in run_analysis."
                         ),
                     },
                     "version_label": {
@@ -1079,7 +1115,12 @@ RAMAN_TOOLS = [
                                         "raman_shift_cm-1, intensity, background_intensity) and return "
                                         "its data/-relative path in saved_path, which load_spectrum "
                                         "accepts. Default false - without it the result exists only in "
-                                        "memory for this conversation."),
+                                        "memory for this conversation. "
+                                        "SET IT TO TRUE IF YOU WILL PLOT OR ANALYSE THE RESULT: "
+                                        "run_analysis reads files, not this conversation's memory, so "
+                                        "an unsaved version is invisible to it and there is no way to "
+                                        "hand the arrays over afterwards. Leave it false only when you "
+                                        "are just comparing poly_order settings via list_bg_versions."),
                     },
                 },
                 # poly_order 만 필수다 — 이 도구에서 '판단'에 해당하는 유일한 인자이고,
@@ -1094,7 +1135,13 @@ RAMAN_TOOLS = [
             "name": "list_bg_versions",
             "description": (
                 "Return the list of all saved background-subtraction result versions with their parameters and key statistics. "
-                "Data arrays are not included. Use get_bg_version() for the full data. "
+                "This summary is what you compare versions with - poly_order, iterations_run, converged "
+                "and max_corrected_intensity are enough to pick an order. "
+                "The spectra themselves are NOT included here, and you cannot read them into the "
+                "conversation at all: long arrays are stripped out of every tool result to protect the "
+                "context window, so get_bg_version() will not hand you the numbers either. If you need "
+                "the actual corrected spectrum, re-run apply_background_subtraction with "
+                "save_result=true and work on the saved file in run_analysis. "
                 "Use it when calling apply_background_subtraction() several times to compare."
             ),
             "parameters": {
@@ -1109,8 +1156,13 @@ RAMAN_TOOLS = [
         "function": {
             "name": "get_bg_version",
             "description": (
-                "Return the full data of a specific background-subtraction result version (corrected spectrum, background curve, Raman shift axis). "
-                "Check version_label with list_bg_versions()."
+                "Re-read the parameters and statistics of one background-subtraction version "
+                "(poly_order, iterations_run, converged, max intensities, saved_path if it was saved). "
+                "It does NOT put the corrected spectrum in front of you: long arrays are stripped from "
+                "tool results, so the corrected_data / background_data arrays never arrive - do not "
+                "call this expecting to read the numbers, and do not retry when they are absent. "
+                "To work with the actual arrays, save the version (save_result=true) and analyse the "
+                "file in run_analysis. Check version_label with list_bg_versions()."
             ),
             "parameters": {
                 "type": "object",
@@ -1278,6 +1330,13 @@ RAMAN_TOOLS = [
                 "spectra (list[dict] - each item has base, title, x, y, power, exposure, mode, "
                 "raman_shift (np.ndarray or None), intensity (np.ndarray)), "
                 "np (numpy), plt (matplotlib.pyplot). "
+                "A Kinetic measurement carries its time series too: frames is a 2D np.ndarray of "
+                "shape (n_frames, n_pixels), so frames.mean(axis=0) is the averaged spectrum and "
+                "frames[:, px] is one pixel's intensity over time. For those items intensity is the "
+                "frame MEAN (flagged by intensity_is_frame_mean) - use frames, not intensity, when the "
+                "question is about change over time. Very long runs are cut to the first 200 frames and "
+                "say so in frames_truncated. This is the ONLY way to analyse a kinetic measurement; "
+                "load_spectrum refuses those files. "
                 "If you pass file_ids, the attached files are parsed and injected as "
                 "files (list[dict] - each item has file_id, filename, sheet, columns (list[str]), n_rows, and "
                 "table (dict mapping column name -> np.ndarray for numeric columns, list[str] for text columns)). "

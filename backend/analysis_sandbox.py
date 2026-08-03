@@ -17,6 +17,11 @@
     spectra : list[dict]  — 저장된 측정들. 각 dict:
         base, title, x, y, power, exposure, mode,
         raman_shift(np.ndarray|None), intensity(np.ndarray)
+        mode=='kinetic' 이면 추가로:
+          frames(np.ndarray, shape (n_frames, n_pixels)), n_frames, n_frames_total,
+          intensity 는 프레임 평균이고 intensity_is_frame_mean=True 가 함께 붙는다,
+          잘렸으면 frames_truncated(str), 프레임 길이가 다르면 frames_ragged=True
+          (이때 frames 는 배열들의 리스트)
     files   : list[dict]  — 사용자가 채팅에 첨부한 파일(file_ids 로 지정된 것만). 각 dict:
         file_id, filename, sheet, columns(list[str]), n_rows,
         table(dict: 컬럼명 → 숫자면 np.ndarray, 문자면 list[str])
@@ -298,6 +303,27 @@ def _main(payload_path: str) -> None:
             d["intensity"] = np.asarray(it.get("intensity") or [], dtype=float)
             rs = it.get("raman_shift")
             d["raman_shift"] = np.asarray(rs, dtype=float) if rs else None
+            wl = it.get("wavelength_nm")
+            if wl:
+                d["wavelength_nm"] = np.asarray(wl, dtype=float)
+            # Kinetic: (n_frames, n_pixels) 2D 배열로 올린다 — frames.mean(axis=0),
+            # frames[:, px] 같은 자연스러운 코드가 바로 되도록. 프레임 길이가 서로 다르면
+            # (frames_ragged) 2D 로 못 쌓으므로 리스트의 리스트 그대로 둔다.
+            if "frames" in d:
+                fr = d["frames"]
+                if it.get("frames_ragged"):
+                    d["frames"] = [np.asarray(f, dtype=float) for f in fr]
+                elif fr:
+                    d["frames"] = np.asarray(fr, dtype=float).reshape(len(fr), -1)
+                    # kinetic 은 단일 intensity 가 없다. 프레임 평균을 채워 두면 '스펙트럼
+                    # 하나'를 기대하는 기존 코드(피크 찾기 등)가 그대로 돌아간다.
+                    # 평균이라는 사실은 플래그로 밝혀 둔다 — 모르고 쓰면 시간 정보가
+                    # 사라진 것을 눈치채지 못한다.
+                    if d["intensity"].size == 0:
+                        d["intensity"] = d["frames"].mean(axis=0)
+                        d["intensity_is_frame_mean"] = True
+                else:
+                    d["frames"] = np.zeros((0, 0), dtype=float)
             spectra.append(d)
 
         # 현미경 이미지(있으면) 주입 — 코드가 피크맵을 이 위에 오버레이할 수 있게.
@@ -393,6 +419,60 @@ def _main(payload_path: str) -> None:
     sys.stdout.write("\n__ANALYSIS_RESULT__" + json.dumps(result))
 
 
+# ── Kinetic 프레임 주입 ───────────────────────────────────────────────────────
+# [왜 필요했는가 — 2026-08-01]
+# 예전에는 주입식이 res['data'] 만 봤다. Kinetic 측정은 'data' 가 없고 'frames' 에
+# 프레임별 배열이 들어가므로, spectra 항목은 mode='kinetic' 에 intensity=[] 인
+# **조용히 빈 항목**이 됐다. 모델은 항목이 멀쩡히 보이니 자기 코드가 틀린 줄 알고
+# ("zero-size array to reduction operation maximum") 고쳐 쓰기를 반복했다.
+# 저장된 kinetic 을 사후 분석할 경로가 이것 말고 없다(load_spectrum 은 1D 전용).
+#
+# [축을 공유하는 이유]
+# acquire_spectrum 은 프레임마다 raman_shift_cm-1 / wavelength_nm 을 각각 복사해 둔다.
+# 두 축은 픽셀→파장 매핑이라 프레임이 달라도 값이 같다 — 실측으로 프레임당 43.7KB 중
+# 약 2/3 가 이 중복이었다(3프레임 저장 파일 131KB). 주입할 때 축 1벌만 싣고 세기만
+# 프레임별로 쌓으면 프레임당 ~14.6KB 로 떨어진다. 저장 포맷은 건드리지 않는다 —
+# render_png / _write_csv 가 프레임별 축을 읽고 있으므로 여기(주입)에서만 정규화한다.
+_MAX_KINETIC_FRAMES = 200          # 측정 1건당 주입 상한(≈3MB). 넘으면 잘라내고 알린다.
+
+
+def _kinetic_payload(res: dict) -> dict:
+    """kinetic 결과에서 샌드박스에 실을 {frames, raman_shift?, ...} 를 만든다.
+
+    kinetic 이 아니면 빈 dict — 호출부가 그대로 update 하면 된다.
+    """
+    if res.get("mode") != "kinetic":
+        return {}
+    frames = res.get("frames") or []
+    if not frames:
+        return {"n_frames": 0, "frames": []}
+
+    total = len(frames)
+    kept = frames[:_MAX_KINETIC_FRAMES]
+    # 축은 첫 프레임 것 1벌만 싣는다(위 주석). 프레임마다 길이가 다르면 2D 로 못 쌓으므로
+    # 그때는 축을 싣지 않고 프레임도 짧은 쪽에 맞추지 않는다 — 판단은 모델에게 넘긴다.
+    lengths = {len(fr.get("intensity") or []) for fr in kept}
+    out: dict = {
+        "n_frames": len(kept),
+        "n_frames_total": total,
+        "frames": [list(fr.get("intensity") or []) for fr in kept],
+    }
+    if len(lengths) == 1:
+        first = kept[0]
+        # 상위 raman_shift 가 비어 있으면(kinetic 결과에는 보통 없다) 프레임 것을 올린다.
+        if not res.get("raman_shift_cm-1") and first.get("raman_shift_cm-1"):
+            out["raman_shift"] = list(first["raman_shift_cm-1"])
+        if first.get("wavelength_nm"):
+            out["wavelength_nm"] = list(first["wavelength_nm"])
+    else:
+        out["frames_ragged"] = True
+    if total > len(kept):
+        out["frames_truncated"] = (
+            f"Only the first {len(kept)} of {total} frames were loaded "
+            f"(limit {_MAX_KINETIC_FRAMES} per measurement).")
+    return out
+
+
 # ── 부모(서버) 쪽 오케스트레이터 ───────────────────────────────────────────────
 def run_analysis(code: str, date: str | None = None, names: list[str] | None = None,
                  title: str | None = None, timeout_sec: int = 60,
@@ -446,14 +526,16 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
     for it in items:
         res = it["result"]
         intensity = res.get("data") or res.get("intensity") or []
-        spectra.append({
+        entry = {
             "base": it["base"], "title": it["title"],
             "x": it["meta"].get("x"), "y": it["meta"].get("y"),
             "power": res.get("laser_power_pct"), "exposure": res.get("exposure_time"),
             "mode": res.get("mode"),
             "raman_shift": res.get("raman_shift_cm-1"),
             "intensity": list(intensity),
-        })
+        }
+        entry.update(_kinetic_payload(res))
+        spectra.append(entry)
 
     # 첨부 파일을 '여기서(신뢰된 부모)' 읽어 둔다 — 샌드박스 코드는 파일을 열 수 없으므로
     # 이 단계에서 파싱된 값만이 생성 코드가 볼 수 있는 전부다.

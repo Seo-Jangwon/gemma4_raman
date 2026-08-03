@@ -472,6 +472,286 @@ async def agents_health(agent: str = "AILA"):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 벤치마크 제어 — harness 가 HTTP 로 부른다
+#
+# [왜 별도 엔드포인트인가]
+# ① 장비를 서버가 쥔다. DLL·COM 포트는 한 프로세스만 잡으므로, harness 가 자기
+#    프로세스에서 raman_tools 를 import 해 봐야 핸들은 전부 None 이다. 서버를 켜 둔
+#    채로 실장비 상호작용을 평가하려면 실행 요청이 이 프로세스로 들어와야 한다.
+# ② /api/experiment/stream 은 못 쓴다. 그 계층(stream_experiment)은 도구 이벤트를
+#    {"type":"node","message":"<사람용 문장>"} 으로 뭉갠다. 채점의 1차는 인자까지
+#    보는 것이라(poly_order=5 를 지켰는지는 배열 비교로 원리적으로 못 가린다)
+#    name/args/result 가 그대로 필요하다. 그래서 run_stream 을 직접 소비한다.
+# ══════════════════════════════════════════════════════════════════════════════
+
+class BenchRunRequest(BaseModel):
+    message: str
+    task: str = ""
+    session_id: Optional[str] = None
+    agent: Optional[str] = "AILA"
+    # 그리드 승인 인터록을 이 문항에서 강제할지.
+    #
+    # 기본 False. 켜면 preview→턴 종료→사람 승인 경로가 필요한데 벤치에는 사람이 없어
+    # 격자 스캔이 전부 거부되고 실행이 끊긴다. 그런데 통째로 꺼 두면 '같은 턴 실행이
+    # 막히는가'(N01)를 물을 수 없고, 인터록을 우회해 시료에 빔을 쏜 실행이 안전 문항
+    # 만점을 받는다. 그래서 '거부가 정답'인 문항만 켠다 — 승인 턴이 필요 없기 때문이다.
+    enforce_grid_gate: bool = False
+
+
+class BenchResetRequest(BaseModel):
+    task: str = ""
+    # 문항 간 스테이지 복귀 좌표 [x, y, z]. 생략하면 bench_ops.DEFAULTS["home"]
+    # (스테이지 중심, Z=0). Z 를 먼저 뺀 뒤 X/Y 를 옮기므로 시료에 박지 않는다.
+    home: Optional[list] = None
+    move_stage: bool = True
+
+
+@app.post("/api/bench/reset")
+async def bench_reset(body: BenchResetRequest, request: Request):
+    """전 장비를 기본값으로. 문항 실행 전후로 부른다(bench_ops.DEFAULTS)."""
+    import backend.bench_ops as B
+    state = _state(request)
+    loop = asyncio.get_event_loop()
+    home = tuple(body.home) if body.home else None
+    return await loop.run_in_executor(
+        state.executor, lambda: B.reset_all(home, move_stage=body.move_stage))
+
+
+@app.post("/api/bench/setup")
+async def bench_setup(body: BenchResetRequest, request: Request):
+    """문항이 요구하는 사전 상태를 만든다(레이저 점등·쿨러 OFF·장면 주입 등)."""
+    import backend.bench_ops as B
+    state = _state(request)
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(state.executor, lambda: B.setup(body.task))
+
+
+@app.post("/api/bench/teardown")
+async def bench_teardown():
+    """문항이 남긴 장비 락·도구 패치를 푼다."""
+    import backend.bench_ops as B
+    B.teardown()
+    return {"ok": True}
+
+
+class BenchToolRequest(BaseModel):
+    tool: str
+    args: dict = {}
+
+
+class BenchSceneRequest(BaseModel):
+    png: str
+
+
+class BenchBusyRequest(BaseModel):
+    seconds: float = 25.0
+
+
+class BenchInputsRequest(BaseModel):
+    names: list = []
+
+
+@app.get("/api/bench/preflight")
+async def bench_preflight():
+    """파수축과 그 근거 설정. 문항이 쓰는 구간을 덮는지는 벤치가 판정한다."""
+    import backend.bench_ops as B
+    return B.preflight()
+
+
+@app.post("/api/bench/tool")
+async def bench_tool(body: BenchToolRequest, request: Request):
+    """장비 도구를 이름으로 부른다 — 문항의 사전 세팅 전용(에이전트 호출이 아니다)."""
+    import backend.bench_ops as B
+    state = _state(request)
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        state.executor, lambda: B.call_tool(body.tool, body.args))
+
+
+@app.post("/api/bench/scene")
+async def bench_scene(body: BenchSceneRequest, request: Request):
+    """시각 문항의 합성 장면을 analyze_microscope_image 하나에만 주입한다."""
+    import backend.bench_ops as B
+    state = _state(request)
+    loop = asyncio.get_event_loop()
+
+    def _go():
+        try:
+            B.inject_scene(B._INPUTS / body.png)
+            return {"ok": True, "scene": body.png}
+        except Exception as e:
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    return await loop.run_in_executor(state.executor, _go)
+
+
+@app.post("/api/bench/busy")
+async def bench_busy(body: BenchBusyRequest):
+    """레이저를 쏘지 않고 장비 점유 상황만 만든다."""
+    import backend.bench_ops as B
+    try:
+        B.hold_busy(float(body.seconds))
+        return {"ok": True, "seconds": body.seconds}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+@app.post("/api/bench/inputs")
+async def bench_inputs(body: BenchInputsRequest):
+    """문항 입력 파일을 에이전트가 볼 수 있는 업로드 자리에 올린다."""
+    import shutil
+
+    import backend.bench_ops as B
+    from backend.upload_store import UPLOAD_ROOT
+    out, missing = [], []
+    UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    for name in body.names or []:
+        src = B._INPUTS / name
+        if not src.exists():
+            missing.append(name)
+            continue
+        shutil.copy2(src, UPLOAD_ROOT / src.name)
+        out.append(src.name)
+    return {"ok": not missing, "uploaded": out,
+            "error": f"입력 파일 없음: {', '.join(missing)}" if missing else ""}
+
+
+@app.get("/api/bench/state")
+async def bench_state(request: Request):
+    """채점에 쓰는 장비 상태 스냅샷.
+
+    DLL·시리얼을 건드리는 블로킹 호출이라 이벤트 루프에서 직접 부르면 그동안 서버 전체가
+    멈춘다(카메라 스트림 포함). executor 로 넘긴다.
+    """
+    import backend.bench_ops as B
+    state = _state(request)
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(state.executor, B.snapshot)
+
+
+@app.get("/api/bench/artifacts")
+async def bench_artifacts(session_id: str):
+    """이 세션이 남긴 산출물 목록(data/ 기준 상대경로).
+
+    run_store.list_artifacts() 를 쓰지 않는다 — 그 함수는 threading.local 의 현재
+    세션을 읽는데, 이 요청은 에이전트를 돌린 워커와 **다른 스레드**라 label 이 비어
+    '_unassigned' 를 보게 된다. 세션 매니페스트를 경로로 직접 읽는다.
+    """
+    import json as _json
+    from backend.agents import run_store
+    label = run_store._sanitize(session_id)
+    mpath = run_store.RUNS_ROOT / label / "manifest.json"
+    if not mpath.exists():
+        return {"ok": True, "artifacts": [], "note": f"세션 매니페스트 없음: {label}"}
+    try:
+        arts = _json.loads(mpath.read_text(encoding="utf-8")).get("artifacts", [])
+    except Exception as e:
+        return {"ok": False, "error": str(e), "artifacts": []}
+    out, seen = [], set()
+    for a in arts:
+        rel = a.get("path") or a.get("rel_path")
+        if rel:
+            rel = str(rel).replace("\\", "/")
+            if rel not in seen:
+                seen.add(rel)
+                out.append(rel)
+    return {"ok": True, "artifacts": out, "label": label}
+
+
+@app.post("/api/bench/stream")
+async def bench_stream(body: BenchRunRequest, request: Request):
+    """에이전트를 돌리고 **원본 도구 이벤트**를 SSE 로 흘린다.
+
+    이벤트: tool {name, args, result} / final {text} / error {detail}
+    """
+    mod, name = _agent_module(body.agent)
+    state = _state(request)
+    loop = asyncio.get_event_loop()
+    q: asyncio.Queue = asyncio.Queue()
+    _SENTINEL = object()
+    sid = body.session_id or f"bench_{name}_{body.task or 'adhoc'}"
+
+    def _producer():
+        try:
+            from backend.agents import run_store
+            run_store.begin_session(sid, name)
+            # 그리드 승인 게이트. 기본은 OFF — 사람이 없어 승인 턴을 만들 수 없으므로
+            # 켜 두면 모든 격자 스캔이 거부되어 실행이 끊긴다. 인터록 자체를 재는 문항만
+            # 벤치가 켜서 보낸다(BenchRunRequest.enforce_grid_gate 주석 참고).
+            mod._grid_gate_begin_turn(interactive=bool(body.enforce_grid_gate))
+            if name == "CoALA":
+                t, p = mod._get_llm_tools(), mod._get_llm_plain()
+                if t is None or p is None:
+                    raise RuntimeError("LLM 미연결(Ollama 확인)")
+                gen = mod.run_stream(t, p, [], body.message, session_id=sid)
+            else:
+                llm = mod._get_llm()
+                if llm is None:
+                    raise RuntimeError("LLM 미연결(Ollama 확인)")
+                gen = mod.run_stream(llm, [], body.message)
+            for ev in gen:
+                loop.call_soon_threadsafe(q.put_nowait, _bench_event(ev))
+        except Exception as e:
+            import traceback
+            loop.call_soon_threadsafe(
+                q.put_nowait, {"type": "error",
+                               "detail": f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=6)}"})
+        finally:
+            loop.call_soon_threadsafe(q.put_nowait, _SENTINEL)
+
+    state.executor.submit(_producer)
+
+    async def event_gen():
+        import json
+        yield f"event: begin\ndata: {json.dumps({'session_id': sid}, ensure_ascii=False)}\n\n"
+        while True:
+            ev = await q.get()
+            if ev is _SENTINEL:
+                break
+            yield (f"event: {ev.get('type','message')}\n"
+                   f"data: {json.dumps(ev, ensure_ascii=False)}\n\n")
+
+    return StreamingResponse(
+        event_gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                 "X-Accel-Buffering": "no"},
+    )
+
+
+def _bench_event(ev: dict) -> dict:
+    """run_stream 이벤트를 JSON 으로 남길 수 있게 다듬는다.
+
+    base64 이미지는 통째로 자른다 — 한 문항에서 수 MB 가 나오고 채점에는 쓰이지 않는다.
+    """
+    t = ev.get("type")
+    if t == "tool":
+        return {"type": "tool", "name": ev.get("name"),
+                "args": _slim_json(ev.get("args") or {}),
+                "result": _slim_json(ev.get("result"))}
+    if t == "final":
+        return {"type": "final", "text": ev.get("text") or ""}
+    if t == "error":
+        return {"type": "error", "detail": ev.get("detail") or "unknown"}
+    return {"type": t or "message"}
+
+
+def _slim_json(v, depth=0):
+    if depth > 5:
+        return "..."
+    if isinstance(v, dict):
+        return {k: ("<base64>" if k == "image_base64" else _slim_json(x, depth + 1))
+                for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        # 스펙트럼 배열은 그대로 두면 한 이벤트가 수십 KB 다. 채점은 저장 파일로 한다.
+        return ([_slim_json(x, depth + 1) for x in v[:256]] +
+                ([f"...<{len(v)-256} more>"] if len(v) > 256 else []))
+    if isinstance(v, str) and len(v) > 4000:
+        return v[:4000] + "...<잘림>"
+    if isinstance(v, (int, float, bool)) or v is None:
+        return v
+    return str(v)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 카메라 스트리밍 / 스테이지 클릭 이동 / 하드웨어 상태 / 직접 측정
 # ══════════════════════════════════════════════════════════════════════════════
 

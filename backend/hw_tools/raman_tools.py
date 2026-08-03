@@ -252,7 +252,9 @@ def _new_session_state() -> dict:
         "bg_versions":   {},     # version_label → 배경제거 처리 결과
         # 그리드 사람-승인 게이트. enforce 기본 False = 벤치마크(자율)에서는 꺼짐,
         # 대화 세션은 grid_gate_begin_turn(interactive=True) 로 켠다.
-        "grid_gate":     {"geom": None, "state": "none", "enforce": False},
+        # resolved: 미리보기가 실제로 그린 격자 중심(mm). center 를 생략해 찍은 미리보기를
+        # 실행할 때 '그때 그 자리'로 고정하기 위한 값이다(_grid_gate_on_preview 주석).
+        "grid_gate":     {"geom": None, "resolved": None, "state": "none", "enforce": False},
     }
 
 
@@ -346,13 +348,24 @@ def _beam_state() -> dict:
             "beam": "measurement" if armed else "guide"}
 
 
-def _laser_off_quiet() -> None:
-    """실패해도 조용히 넘어가는 레이저 정지 — finally 블록 전용(안전 보장 경로)."""
+def _laser_off_quiet() -> bool:
+    """예외를 던지지 않는 레이저 정지 — finally 블록 전용(안전 보장 경로).
+
+    [조용하되 포기하지는 않는다 — 2026-08-03]
+    finally 에서 부르므로 예외를 밖으로 내보내면 안 되지만, '껐다고 치고 넘어가는' 것과
+    '끄려고 끝까지 해 보는' 것은 다르다. SSPW 0 이 확인되지 않으면 ND 를 차단 위치로
+    옮겨 광로를 물리적으로 막는다. 발진을 못 멈추면 빔이라도 막는 것이 순서다.
+    돌려주는 bool 은 '빔이 확실히 차단됐는가'다 — 호출자가 결과에 실어 보낼 수 있게.
+    """
+    if _laser is None:
+        return True
     try:
-        if _laser is not None:
-            _laser.laser_off()
+        if _laser.laser_off() is not False:
+            return True
     except Exception:
         pass
+    print("[laser] SSPW 0 미확인 — ND 차단으로 대체합니다.")
+    return _restore_guide_beam_quiet()
 
 
 def _restore_guide_beam_quiet() -> None:
@@ -373,12 +386,18 @@ def _restore_guide_beam_quiet() -> None:
     항상 파워를 다시 걸므로(power=None 이어도 마지막 값을 재적용한다), set_guide_beam 이
     내리는 _power_set=False 때문에 다음 측정이 막히지 않는다. 반면 laser_off() 도구는
     '껐다가 같은 파워로 다시 켠다'는 용도라 그대로 둬야 한다 — 함정이 되살아난다.
+
+    돌려주는 bool 은 '가이드빔 위치로 옮기는 명령이 예외 없이 끝났는가'다. 소등이 실패한
+    경우 이것이 마지막 차단 수단이라 성패를 호출자에게 알려야 한다.
     """
+    if _laser is None:
+        return False
     try:
-        if _laser is not None:
-            _laser.set_guide_beam()
-    except Exception:
-        pass
+        _laser.set_guide_beam()
+        return True
+    except Exception as e:
+        print(f"[laser] 가이드빔 복귀 실패: {type(e).__name__}: {e}")
+        return False
 
 
 def _check_stage_target(x=None, y=None, z=None) -> dict | None:
@@ -1003,8 +1022,22 @@ def laser_off() -> dict:
     if _laser is None:
         return {"ok": False, "error": "Laser is not initialized."}
     try:
-        _laser.laser_off()
+        confirmed = _laser.laser_off()
         st = _beam_state()
+        if confirmed is False:
+            # 드라이버가 SSPW 0 의 ACK 를 못 받았다. '껐다'고 보고하면 그 거짓말 위에
+            # 모든 안전 판단이 쌓인다 — 벤치 채점도 여기를 근거로 만점을 준다.
+            # 차단은 ND 로 한 번 더 시도하되(가이드빔 위치), 결과는 실패로 올린다.
+            blocked = _restore_guide_beam_quiet()
+            return {"ok": False,
+                    "error": ("레이저 정지(SSPW 0)가 확인되지 않았습니다 — 빔이 아직 나가고 "
+                              "있을 수 있습니다. " +
+                              ("ND 를 차단 위치로 옮겨 두었습니다. " if blocked else
+                               "ND 차단도 확인되지 않았습니다. ") +
+                              "레이저 컨트롤러 연결을 확인하세요."),
+                    "laser_off_unconfirmed": True,
+                    "nd_blocked": bool(blocked),
+                    "power_armed": st["power_armed"]}
         return {"ok": True, "status": "Laser OFF",
                 # 끄더라도 ND 위치(=파워 설정)는 남는다 — 다시 켜면 같은 파워의
                 # 측정빔이 나간다. 예전처럼 가이드빔으로 되돌아가지 않는다.
@@ -1588,7 +1621,12 @@ def get_ccd_info() -> dict:
         "cooler_on":               _attr('cooler_on'),
         "exposure_time_s":         _attr('exposure_time'),
         "acquisition_mode":        _attr('aq_mode'),
-        "read_mode":               _attr('ro_mode'),
+        # 도구 인자와 같은 표기로 돌려준다('fvb' / 'single_track' / 'image').
+        # 드라이버 내부 표기는 'FULL_VERTICAL_BINNING' 인데, 그대로 내보내면
+        # set_ccd_read_mode(mode='fvb') 로 설정한 뒤 get_ccd_info 로 확인했을 때
+        # 값이 달라 보여 모델도 채점기도 '안 바뀌었다'고 오판한다. 원문은 따로 싣는다.
+        "read_mode":               _current_read_mode(),
+        "read_mode_driver":        _attr('ro_mode'),
         # 트리거/셔터도 함께 보고한다 — acquire_spectrum 이 이 값들을 생략 시 '유지'하므로,
         # 지금 무엇이 걸려 있는지 볼 수 없으면 다음 측정 조건을 예측할 수 없다.
         "trigger_mode":            _attr('trigger_mode'),
@@ -2465,6 +2503,19 @@ def load_spectrum(filename: str) -> dict:
         reader = csv.DictReader(body)
         headers = reader.fieldnames or []
         rows = list(reader)
+        # ── Kinetic 파일 방어 — 2026-08-01 ────────────────────────────────────
+        # Kinetic 측정은 spectrum_store._write_csv 가 'frame_index, pixel_index, intensity'
+        # 롱포맷으로 저장한다(프레임 N개가 세로로 이어 붙는다). 아래 파서는 1D 스펙트럼만
+        # 가정하므로, 그 파일을 그냥 읽으면 에러 없이 **N프레임을 한 배열로 이어붙인**
+        # 길이 N×픽셀 짜리 배열이 나온다. 조용히 틀린 데이터를 주는 쪽이 실패보다 나쁘다.
+        if "frame_index" in headers:
+            n_frames = len({r.get("frame_index") for r in rows})
+            return {"ok": False, "error": (
+                f"{filepath.name} is a Kinetic measurement ({n_frames} frames stored as "
+                f"frame_index,pixel_index,intensity). load_spectrum only reads 1D spectra "
+                f"(Single/Accumulate) and would concatenate the frames into one wrong array. "
+                f"Analyse it with run_analysis instead: kinetic measurements arrive there as "
+                f"spectra[i]['frames'], a (n_frames, n_pixels) array.")}
         # 세기 열은 'intensity' 로 통일돼 있다. 'corrected_intensity' 는 포맷 통일
         # 이전에 배경 제거 툴이 쓰던 이름이라 옛 파일을 위해서만 남긴다.
         col = next((c for c in ("intensity", "corrected_intensity") if c in headers), None)
@@ -2841,6 +2892,7 @@ def grid_gate_begin_turn(interactive: bool = True) -> None:
     _gate()["enforce"] = bool(interactive)
     if not interactive:
         _gate()["geom"] = None
+        _gate()["resolved"] = None
         _gate()["state"] = "none"
         return
     if _gate()["state"] == "pending":
@@ -2849,11 +2901,25 @@ def grid_gate_begin_turn(interactive: bool = True) -> None:
         # 지난 턴에 승인 가능(armed)했으나 실행하지 않았다 → 승인 창 만료.
         _gate()["state"] = "none"
         _gate()["geom"] = None
+        _gate()["resolved"] = None
 
 
-def _grid_gate_on_preview(geom: dict) -> None:
-    """preview_grid_scan 성공 시 호출 — 승인 대기(pending) 상태로 만든다."""
+def _grid_gate_on_preview(geom: dict, resolved: tuple) -> None:
+    """preview_grid_scan 성공 시 호출 — 승인 대기(pending) 상태로 만든다.
+
+    geom 은 모델이 넘긴 원값(None 포함), resolved 는 미리보기가 실제로 그린 격자 중심(mm).
+    둘 다 저장하는 이유 — 2026-08-01:
+      center 를 생략한 미리보기는 geom 에 center=None 으로 남는다. 그런데 승인을 기다리는
+      동안(또는 승인 턴에) 스테이지가 움직이면, run_grid_scan 이 center=None 을 다시
+      '현재 위치'로 풀면서 **사람이 승인한 곳이 아닌 새 위치에 레이저를 쏜다**. geom 비교는
+      None==None 이라 통과하므로 게이트가 이걸 못 잡았다.
+      resolved 를 함께 남겨 두고 실행 때 그 좌표를 쓰면, 승인된 그림과 실제 발사 위치가
+      항상 일치한다. geom 비교 규약(원값)은 그대로 둔다 — 스테이지 이동을 'Approval
+      mismatch' 로 거부하면 모델이 왜 거부됐는지 알 수 없기 때문이다.
+    """
     _gate()["geom"] = geom
+    _gate()["resolved"] = {"x": round(float(resolved[0]), 4),
+                           "y": round(float(resolved[1]), 4)}
     _gate()["state"] = "pending"
 
 
@@ -2881,12 +2947,27 @@ def _grid_gate_check(geom: dict):
     return None
 
 
+def _grid_gate_approved_center():
+    """승인된 미리보기가 실제로 그린 격자 중심(x, y) — 없으면 None.
+
+    게이트가 꺼져 있으면(벤치마크) None 을 준다: 승인 절차 자체가 없으므로 고정할
+    '승인된 자리'도 없고, 호출자는 현재 스테이지 위치를 쓰면 된다.
+    """
+    if not _gate()["enforce"] or _gate()["state"] != "armed":
+        return None
+    r = _gate().get("resolved")
+    if not r:
+        return None
+    return (float(r["x"]), float(r["y"]))
+
+
 def _grid_gate_consume() -> None:
     """승인을 1회 소비한다 — 발사 직전(모든 사전검증 통과 후) 호출. 게이트가 꺼져 있으면
     (벤치마크) 아무 것도 하지 않는다."""
     if not _gate()["enforce"]:
         return
     _gate()["geom"] = None
+    _gate()["resolved"] = None
     _gate()["state"] = "none"
 
 
@@ -2916,6 +2997,24 @@ def _validate_grid_args(rows, cols, spacing_mm):
             raise ValueError
     except (TypeError, ValueError):
         return {"ok": False, "error": "spacing_mm must be a number > 0."}
+    return None
+
+
+def _validate_grid_range(pts):
+    """격자 점이 모두 스테이지 가동범위 안에 있는지 — 실패 시 error dict, 통과 시 None.
+
+    [왜 preview 와 run 이 같은 함수를 쓰는가 — 2026-08-01]
+    예전에는 이 검증이 run_grid_scan 에만 있었다. 그래서 가동범위를 벗어나는 격자를
+    preview_grid_scan 은 ok=True 로 통과시키고(화면 밖 점은 cv2 가 클립해 그려 준다),
+    사람이 그 미리보기를 승인한 뒤 run_grid_scan 에서야 "범위 밖"으로 거부됐다.
+    모델 입장에서는 '승인까지 받은 계획이 실행 단계에서만 거부되는' 모순이라 복구
+    경로를 못 찾는다. 불가능한 격자는 미리보기 단계에서 막는다.
+    """
+    for idx, i, j, sx, sy in pts:
+        if not (0 <= sx <= STAGE_MAX_X and 0 <= sy <= STAGE_MAX_Y):
+            return {"ok": False, "error": (
+                f"Point {idx} (row {i}, col {j}) at X={sx}, Y={sy} mm is outside the stage range "
+                f"(0..{STAGE_MAX_X} x 0..{STAGE_MAX_Y}). Adjust center/spacing/size.")}
     return None
 
 
@@ -2955,6 +3054,11 @@ def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
         frame_bgr = _vis.to_view_bgr(frame)     # 좌표계 정규화(다른 캡처 도구와 동일)
 
         pts = _grid_stage_coords(cx, cy, rows, cols, spacing_mm)
+        # 가동범위 검증을 run_grid_scan 과 같은 함수로 여기서도 한다 — 실행 단계에서만
+        # 거부되는 격자를 사람이 승인하게 두지 않는다(_validate_grid_range 주석 참고).
+        range_err = _validate_grid_range(pts)
+        if range_err:
+            return range_err
         n_in_view = 0
         for idx, i, j, sx, sy in pts:
             # optics_map.stage_to_pixel = move_to_pixel 의 정확한 역변환(단일 출처)
@@ -3006,7 +3110,10 @@ def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
                             "image_url": saved_img["image_url"]}
         # 사람-승인 게이트: 이 미리보기를 '승인 대기(pending)'로 등록한다. 이후 사용자
         # 턴 경계에서 armed로 올라가야 run_grid_scan이 통과한다(같은 턴 즉시 실행 차단).
-        _grid_gate_on_preview(_grid_gate_geom(rows, cols, spacing_mm, center_x, center_y))
+        # resolved(cx, cy)를 함께 남긴다 — center 를 생략한 미리보기라도 실행이 '이 자리'에
+        # 고정되도록(스테이지가 움직여도 승인된 그림과 발사 위치가 어긋나지 않게) 한다.
+        _grid_gate_on_preview(_grid_gate_geom(rows, cols, spacing_mm, center_x, center_y),
+                              (cx, cy))
         return out
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -3041,6 +3148,9 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
     gate_err = _grid_gate_check(_grid_gate_geom(rows, cols, spacing_mm, center_x, center_y))
     if gate_err:
         return gate_err
+    # 승인된 미리보기가 실제로 그렸던 중심. center 를 생략했을 때 '현재 위치'로 다시 푸는
+    # 대신 이 값을 쓴다 — 승인 이후 스테이지가 움직여도 승인된 자리에 쏜다(#12).
+    approved_center = _grid_gate_approved_center()
     stage_err = _stage_unavailable()
     if stage_err:
         return stage_err
@@ -3072,16 +3182,17 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
         pos = _stage.get_position()
         if pos is None:
             return {"ok": False, "error": "Failed to query stage position"}
-        cx = float(pos[0]) if center_x is None else float(center_x)
-        cy = float(pos[1]) if center_y is None else float(center_y)
+        # 생략된 center 는 '승인된 미리보기가 그린 자리' → 없으면 현재 위치 순으로 푼다.
+        fallback_x, fallback_y = (approved_center if approved_center
+                                  else (float(pos[0]), float(pos[1])))
+        cx = fallback_x if center_x is None else float(center_x)
+        cy = fallback_y if center_y is None else float(center_y)
 
         pts = _grid_stage_coords(cx, cy, rows, cols, spacing_mm)
-        # 범위 사전 검증 — 한 점이라도 벗어나면 시작조차 하지 않는다.
-        for idx, i, j, sx, sy in pts:
-            if not (0 <= sx <= STAGE_MAX_X and 0 <= sy <= STAGE_MAX_Y):
-                return {"ok": False, "error": (
-                    f"Point {idx} (row {i}, col {j}) at X={sx}, Y={sy} mm is outside the stage range "
-                    f"(0..{STAGE_MAX_X} x 0..{STAGE_MAX_Y}). Adjust center/spacing/size.")}
+        # 범위 사전 검증 — 한 점이라도 벗어나면 시작조차 하지 않는다(preview 와 같은 함수).
+        range_err = _validate_grid_range(pts)
+        if range_err:
+            return range_err
 
         # center 모드: 격자 중심으로 이동 후 1회 오토포커스(이후 Z 유지).
         if autofocus == "center":

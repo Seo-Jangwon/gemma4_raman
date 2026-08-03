@@ -184,10 +184,16 @@ def _read_text_table(path: Path):
     """
     import pandas as pd
 
+    # encoding="utf-8-sig" 를 명시한다 — 2026-08-02.
+    # pandas 기본값(utf-8)은 BOM 을 떼지 않아서, Excel 이 내보낸 CSV(항상 BOM 이 붙는다)를
+    # 읽으면 첫 컬럼 이름이 '﻿<원래이름>' 이 된다. 그러면 run_analysis 안에서
+    # table['raman_shift_cm-1'] 이 KeyError 로 죽고, 모델은 컬럼이 분명히 보이는데 왜
+    # 없다는 건지 알 수 없어 같은 코드를 고쳐 쓰기를 반복한다(inspect_file 이 보여주는
+    # 컬럼명에도 BOM 은 눈에 띄지 않는다). utf-8-sig 는 BOM 이 없는 파일도 그대로 읽는다.
     attempts = (
-        {"sep": None, "engine": "python"},     # 스니핑(쉼표/탭/세미콜론 등)
-        {"sep": r"\s+", "engine": "python"},   # 공백 구분
-        {"sep": ",", "engine": "python"},
+        {"sep": None, "engine": "python", "encoding": "utf-8-sig"},   # 스니핑(쉼표/탭/세미콜론 등)
+        {"sep": r"\s+", "engine": "python", "encoding": "utf-8-sig"}, # 공백 구분
+        {"sep": ",", "engine": "python", "encoding": "utf-8-sig"},
     )
     best = None
     last_err: Exception | None = None

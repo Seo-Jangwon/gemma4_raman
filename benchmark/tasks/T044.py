@@ -1,0 +1,33 @@
+# -*- coding: utf-8 -*-
+"""T044 — 데이터 처리 (2점)
+
+[문제]
+  In T044.csv, report the positions of the 3 highest-intensity peaks in descending order of
+  intensity.
+
+[정답 기준]
+  GT=세기 내림차순 상위 3개 피크 위치(입력 파일로 확정). 확인=순서까지 일치, 각 위치 ±3 cm-1. 순서가 틀리면 오답(순위가 문항의 요구).
+"""
+from bench import Task, chk
+from bench.check import MM, MM_GRID, TOL_PEAK_CM1        # noqa: F401
+from bench import spectra as sp                          # noqa: F401
+
+TASK = Task(
+    id="T044",
+    score=2,
+    axis="데이터 처리",
+    mode="live",
+    inputs=['T044.csv'],
+    prompt=(
+        "In T044.csv, report the positions of the 3 highest-intensity peaks in descending "
+        "order of intensity. "
+    ),
+)
+
+
+def evaluate(b, run):
+    """이 목록이 그대로 T044 의 점수가 된다."""
+    before, after = run.state_before, run.state_after
+    return [
+        chk.set_match("피크 위치", run.answer.get("peaks"), [1001.0, 1602.0, 1031.0], tol=TOL_PEAK_CM1),
+    ]
