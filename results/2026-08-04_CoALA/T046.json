@@ -1,0 +1,152 @@
+{
+  "task": "T046",
+  "axis": "data processing",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Compare the peaks of T046_sample.csv with the polystyrene reference T046_ref.csv and compute the match ratio. Detect peaks with prominence at 5% of range, pair them 1:1 by nearest neighbour within 3 cm-1, and define the ratio as matched peaks / reference peaks.",
+  "criteria": "NUM(±0.02) + SET(pairs EXACT)",
+  "checks": [
+    {
+      "name": "match ratio",
+      "passed": true,
+      "score": 1.0,
+      "detail": "1 (expected 1, |Δ|=0 ≤ 0.02)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T046_sample.csv",
+    "T046_ref.csv"
+  ],
+  "answer_text": "The peaks of the sample spectrum (`T046_sample.csv`) were compared with those of the polystyrene reference spectrum (`T046_ref.csv`). Peak detection was performed using a prominence threshold of 5% of the intensity range for each spectrum.\n\nThe reference spectrum exhibited 9 distinct peaks at Raman shifts of 620, 795, 1001, 1031, 1155, 1183, 1450, 1583, and 1602 cm⁻¹. The sample spectrum exhibited a corresponding set of 9 peaks at 620, 796, 1001, 1031, 1154, 1183, 1451, 1583, and 1602 cm⁻¹. All 9 reference peaks were successfully paired with a sample peak within the 3 cm⁻¹ nearest-neighbour tolerance.\n\nThe computed match ratio is 1.0 (9/9).\n\n```json\n{\"match_ratio\": 1.0}\n```",
+  "answer_json": {
+    "match_ratio": 1.0
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T046_ref.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T046_sample.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Extract data from files\nref_data = files[0][\"table\"] if files[0][\"filename\"] == \"T046_ref.csv\" else files[1][\"table\"]\nsamp_data = files[1][\"table\"] if files[1][\"filename\"] == \"T046_sample.csv\" else files[0][\"table\"]\n\n# Re-verify filenames to be sure since the list order might vary\nfor f in files:\n    if f[\"filename\"] == \"T046_ref.csv\":\n        ref_x = f[\"table\"][\"raman_shift_cm-1\"]\n        ref_y = f[\"table\"][\"intensity\"]\n    elif f[\"filename\"] == \"T046_sample.csv\":\n        samp_x = f[\"table\"][\"raman_shift_cm-1\"]\n        samp_y = f[\"table\"][\"intensity\"]\n\n# Peak detection function\ndef get_peaks(x, y):\n    rng = np.max(y) - np.min(y)\n    prom = 0.05 * rng\n    indices, properties = find_peaks(y, prominence=prom)\n    return x[indices]\n\nref_peaks = get_peaks(ref_x, ref_y)\nsamp_peaks = get_peaks(samp_x, samp_y)\n\nprint(f\"Reference peaks: {ref_peaks}\")\nprint(f\"Sample peaks: {samp_peaks}\")\n\n# Matching 1:1 nearest neighbour within 3 cm-1\nmatched_count = 0\nused_samp_indices = set()\n\nfor rp in ref_peaks:\n    # Find closest sample peak\n    diffs = np.abs(samp_peaks - rp)\n    min_idx = np.argmin(diffs)\n    if diffs[min_idx] <= 3 and min_idx not in used_samp_indices:\n        matched_count += 1\n        used_samp_indices.add(min_idx)\n\nmatch_ratio = matched_count / len(ref_peaks) if len(ref_peaks) > 0 else 0\nprint(f\"Matched count: {matched_count}\")\nprint(f\"Reference peak count: {len(ref_peaks)}\")\nprint(f\"Match ratio: {match_ratio}\")\n\n# Plotting for visual verification (though I can't see it, the numbers above are key)\nimport matplotlib.pyplot as plt\nplt.figure(figsize=(10, 5))\nplt.plot(ref_x, ref_y, label='Reference', alpha=0.7)\nplt.plot(samp_x, samp_y, label='Sample', alpha=0.7)\nplt.plot(ref_peaks, ref_y[np.isin(ref_x, ref_peaks)], \"ro\", label='Ref Peaks')\nplt.plot(samp_peaks, samp_y[np.isin(samp_x, samp_peaks)], \"bx\", label='Samp Peaks')\nplt.legend()\nplt.title(\"Spectrum Comparison\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Intensity\")\nplt.savefig(\"comparison_plot.png\")\n",
+        "file_ids": [
+          "2026-08-04/T046_ref.csv",
+          "2026-08-04/T046_sample.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "/api/results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T046_3ebea0/fig225253_769_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T046_3ebea0",
+  "elapsed_s": 65.61,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

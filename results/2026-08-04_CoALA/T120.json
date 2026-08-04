@@ -1,0 +1,225 @@
+{
+  "task": "T120",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Extract the peak positions of T120.csv (prominence 5% of range), treat peaks within 3 cm-1 as matching, and find the most similar material in reference_library.csv by the ratio of matched peaks to reference peaks (1:1 nearest-neighbour pairing, no duplicates).",
+  "criteria": "EXACT(material) + EXACT(matched peak count)",
+  "checks": [
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'PET' (expected 'PET')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T120.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "Based on the analysis of the provided files, I first extracted the peak positions from `T120.csv` using a prominence threshold of 5% of the intensity range. The detected peaks for the sample are located at approximately **631, 702, 797, 857, 1096, 1117, 1289, 1417, 1614, and 1728 cm⁻¹**.\n\nNext, I processed the `reference_library.csv` file, identifying peaks for each material (polystyrene, PET, PMMA, calcite, aragonite, and silicon) using the same prominence criterion relative to each reference spectrum's range. To determine similarity, I implemented a 1:1 nearest-neighbor pairing algorithm where a match is counted if a reference peak is within 3 cm⁻¹ of an unused sample peak. The materials were ranked by the ratio of matched peaks to total reference peaks.\n\nThe comparison yielded the following ratios:\n- **PET**: 1.0\n- **Aragonite**: ~0.25\n- **PMMA**: ~0.14\n- **Polystyrene**: ~0.13\n- **Calcite**: 0.0\n- **Silicon**: 0.0\n\nThe material with the highest similarity ratio is PET.\n\n```json\n{\"material\": \"PET\"}\n```",
+  "answer_json": {
+    "material": "PET"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/T120.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# 1. Extract peaks from T120.csv\nt120 = files['2026-08-05/T120.csv']\nx_s = t120['raman_shift_cm-1']\ny_s = t120['intensity']\n\nprom_s = 0.05 * (np.max(y_s) - np.min(y_s))\npeaks_s, _ = find_peaks(y_s, prominence=prom_s)\nsample_peak_pos = x_s[peaks_s]\nprint(f\"Sample peaks found: {len(sample_peak_pos)}\")\nprint(f\"Sample peak positions: {sample_peak_pos}\")\n\n# 2. Extract peaks for each material in reference_library.csv\nlib = files['2026-08-05/reference_library.csv']\nmats = np.unique(lib['material'])\nresults = {}\n\nfor mat in mats:\n    mask = lib['material'] == mat\n    # Assume one spectrum per material for simplicity, or average them if multiple\n    # The data shows 'spectrum_id', let's check unique spectrums per material\n    spec_ids = np.unique(lib['spectrum_id'][mask])\n    \n    mat_best_ratio = -1\n    \n    for sid in spec_ids:\n        m_mask = (lib['material'] == mat) & (lib['spectrum_id'] == sid)\n        x_r = lib['raman_shift_cm-1'][m_mask]\n        y_r = lib['intensity'][m_mask]\n        \n        prom_r = 0.05 * (np.max(y_r) - np.min(y_r))\n        peaks_r, _ = find_peaks(y_r, prominence=prom_r)\n        ref_peak_pos = x_r[peaks_r]\n        \n        if len(ref_peak_pos) == 0:\n            continue\n            \n        # Matching logic: 1:1 nearest-neighbour pairing within 3 cm-1\n        matched_count = 0\n        used_sample = set()\n        \n        # Sort ref peaks to be consistent, although not strictly required for ratio\n        sorted_ref = np.sort(ref_peak_pos)\n        for rp in sorted_ref:\n            # Find closest unused sample peak within 3 cm-1\n            best_dist = 3.01\n            best_idx = -1\n            for i, sp in enumerate(sample_peak_pos):\n                if i not in used_sample:\n                    dist = abs(rp - sp)\n                    if dist <= 3 and dist < best_dist:\n                        best_dist = dist\n                        best_idx = i\n            \n            if best_idx != -1:\n                matched_count += 1\n                used_sample.add(best_idx)\n        \n        ratio = matched_count / len(ref_peak_pos)\n        if ratio > mat_best_ratio:\n            mat_best_ratio = ratio\n            \n    results[mat] = mat_best_ratio\n\n# Find the material with the highest ratio\nbest_material = max(results, key=results.get)\nprint(f\"Ratios: {results}\")\nprint(f\"Best match: {best_material} with ratio {results[best_material]}\")\n",
+        "file_ids": [
+          "2026-08-05/T120.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Helper function to get file data by id\ndef get_file(fid):\n    for f in files:\n        if f['file_id'] == fid:\n            return f\n    return None\n\nt120 = get_file('2026-08-05/T120.csv')\nlib = get_file('2026-08-05/reference_library.csv')\n\n# 1. Extract peaks from T120.csv\nx_s = t120['table']['raman_shift_cm-1']\ny_s = t120['table']['intensity']\n\nprom_s = 0.05 * (np.max(y_s) - np.min(y_s))\npeaks_s, _ = find_peaks(y_s, prominence=prom_s)\nsample_peak_pos = x_s[peaks_s]\nprint(f\"Sample peaks found: {len(sample_peak_pos)}\")\nprint(f\"Sample peak positions: {sample_peak_pos}\")\n\n# 2. Extract peaks for each material in reference_library.csv\nmats_col = lib['table']['material']\nx_r_all = lib['table']['raman_shift_cm-1']\ny_r_all = lib['table']['intensity']\nsid_col = lib['table']['spectrum_id']\n\nmats = np.unique(mats_col)\nresults = {}\n\nfor mat in mats:\n    mat_mask = (mats_col == mat)\n    spec_ids = np.unique(sid_col[mat_mask])\n    \n    mat_best_ratio = -1\n    \n    for sid in spec_ids:\n        # Filter for this specific spectrum of the material\n        s_mask = (mats_col == mat) & (sid_col == sid)\n        x_r = x_r_all[s_mask]\n        y_r = y_r_all[s_mask]\n        \n        prom_r = 0.05 * (np.max(y_r) - np.min(y_r))\n        peaks_r, _ = find_peaks(y_r, prominence=prom_r)\n        ref_peak_pos = x_r[peaks_r]\n        \n        if len(ref_peak_pos) == 0:\n            continue\n            \n        # Matching logic: 1:1 nearest-neighbour pairing within 3 cm-1\n        matched_count = 0\n        used_sample = set()\n        \n        sorted_ref = np.sort(ref_peak_pos)\n        for rp in sorted_ref:\n            best_dist = 3.01\n            best_idx = -1\n            for i, sp in enumerate(sample_peak_pos):\n                if i not in used_sample:\n                    dist = abs(rp - sp)\n                    if dist <= 3 and dist < best_dist:\n                        best_dist = dist\n                        best_idx = i\n            \n            if best_idx != -1:\n                matched_count += 1\n                used_sample.add(best_idx)\n        \n        ratio = matched_count / len(ref_peak_pos)\n        if ratio > mat_best_ratio:\n            mat_best_ratio = ratio\n            \n    results[mat] = mat_best_ratio\n\n# Find the material with the highest ratio\nbest_material = max(results, key=results.get)\nprint(f\"Ratios: {results}\")\nprint(f\"Best match: {best_material} with ratio {results[best_material]}\")\n",
+        "file_ids": [
+          "2026-08-05/T120.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_file(fid):\n    for f in files:\n        if f['file_id'] == fid:\n            return f\n    return None\n\nt120 = get_file('2026-08-05/T120.csv')\nlib = get_file('2026-08-05/reference_library.csv')\n\n# 1. Extract peaks from T120.csv\nx_s = t120['table']['raman_shift_cm-1']\ny_s = t120['table']['intensity']\n\nprom_s = 0.05 * (np.max(y_s) - np.min(y_s))\npeaks_s, _ = find_peaks(y_s, prominence=prom_s)\nsample_peak_pos = x_s[peaks_s]\nprint(f\"Sample peaks found: {len(sample_peak_pos)}\")\nprint(f\"Sample peak positions: {sample_peak_pos}\")\n\n# 2. Extract peaks for each material in reference_library.csv\nmats_col = lib['table']['material']\nx_r_all = lib['table']['raman_shift_cm-1']\ny_r_all = lib['table']['intensity']\nsid_col = lib['table']['spectrum_id']\n\nmats = np.unique(mats_col)\nresults = {}\n\nfor mat in mats:\n    mat_mask = (mats_col == mat)\n    spec_ids = np.unique(sid_col[mat_mask])\n    \n    mat_best_ratio = -1\n    \n    for sid in spec_ids:\n        s_mask = (mats_col == mat) & (sid_col == sid)\n        x_r = x_r_all[s_mask]\n        y_r = y_r_all[s_mask]\n        \n        if len(x_r) == 0:\n            continue\n            \n        prom_r = 0.05 * (np.max(y_r) - np.min(y_r))\n        peaks_r, _ = find_peaks(y_r, prominence=prom_r)\n        ref_peak_pos = x_r[peaks_r]\n        \n        if len(ref_peak_pos) == 0:\n            continue\n            \n        matched_count = 0\n        used_sample = set()\n        \n        sorted_ref = np.sort(ref_peak_pos)\n        for rp in sorted_ref:\n            best_dist = 3.01\n            best_idx = -1\n            for i, sp in enumerate(sample_peak_pos):\n                if i not in used_sample:\n                    dist = abs(rp - sp)\n                    if dist <= 3 and dist < best_dist:\n                        best_dist = dist\n                        best_idx = i\n            \n            if best_idx != -1:\n                matched_count += 1\n                used_sample.add(best_idx)\n        \n        ratio = matched_count / len(ref_peak_pos)\n        if ratio > mat_best_ratio:\n            mat_best_ratio = ratio\n            \n    results[mat] = mat_best_ratio\n\nbest_material = max(results, key=results.get)\nprint(f\"Ratios: {results}\")\nprint(f\"Best match: {best_material} with ratio {results[best_material]}\")\n",
+        "file_ids": [
+          "2026-08-05/T120.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_file(fid):\n    for f in files:\n        if f['file_id'] == fid:\n            return f\n    return None\n\nlib = get_file('2026-08-05/reference_library.csv')\nmats_col = lib['table']['material']\nx_r_all = lib['table']['raman_shift_cm-1']\ny_r_all = lib['table']['intensity']\nsid_col = lib['table']['spectrum_id']\n\nmats = np.unique(mats_col)\nfor mat in mats:\n    mat_mask = (mats_col == mat)\n    spec_ids = np.unique(sid_col[mat_mask])\n    for sid in spec_ids[:1]: # Just one spectrum per material for check\n        s_mask = (mats_col == mat) & (sid_col == sid)\n        y_r = y_r_all[s_mask]\n        prom_r = 0.05 * (np.max(y_r) - np.min(y_r))\n        peaks_r, _ = find_peaks(y_r, prominence=prom_r)\n        print(f\"Material {mat} ({sid}): found {len(peaks_r)} peaks with prom {prom_r:.2f}\")\n",
+        "file_ids": [
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_file(fid):\n    for f in files:\n        if f['file_id'] == fid:\n            return f\n    return None\n\nt120 = get_file('2026-08-05/T120.csv')\nlib = get_file('2026-08-05/reference_library.csv')\n\n# 1. Sample Peaks\nx_s = t120['table']['raman_shift_cm-1']\ny_s = t120['table']['intensity']\nprom_s = 0.05 * (np.max(y_s) - np.min(y_s))\npeaks_s, _ = find_peaks(y_s, prominence=prom_s)\nsample_peak_pos = np.sort(x_s[peaks_s])\nprint(f\"Sample peaks ({len(sample_peak_pos)}): {sample_peak_pos}\")\n\n# 2. Library Peaks\nmats_col = lib['table']['material']\nx_r_all = lib['table']['raman_shift_cm-1']\ny_r_all = lib['table']['intensity']\nsid_col = lib['table']['spectrum_id']\n\nunique_mats = np.unique(mats_col)\nfinal_results = {}\n\nfor mat in unique_mats:\n    mat_mask = (mats_col == mat)\n    spec_ids = np.unique(sid_col[mat_mask])\n    best_ratio_for_mat = -1.0\n    \n    for sid in spec_ids:\n        s_mask = (mats_col == mat) & (sid_col == sid)\n        x_r = x_r_all[s_mask]\n        y_r = y_r_all[s_mask]\n        \n        if len(y_r) == 0:\n            continue\n            \n        prom_r = 0.05 * (np.max(y_r) - np.min(y_r))\n        peaks_r, _ = find_peaks(y_r, prominence=prom_r)\n        ref_peak_pos = np.sort(x_r[peaks_r])\n        \n        if len(ref_peak_pos) == 0:\n            continue\n            \n        # Matching logic: 1:1 nearest-neighbour pairing within 3 cm-1\n        matched_count = 0\n        used_sample = set()\n        \n        for rp in ref_peak_pos:\n            best_dist = 3.01\n            best_idx = -1\n            for i, sp in enumerate(sample_peak_pos):\n                if i not in used_sample:\n                    dist = abs(rp - sp)\n                    if dist <= 3 and dist < best_dist:\n                        best_dist = dist\n                        best_idx = i\n            if best_idx != -1:\n                matched_count += 1\n                used_sample.add(best_idx)\n        \n        ratio = matched_count / len(ref_peak_pos)\n        if ratio > best_ratio_for_mat:\n            best_ratio_for_mat = ratio\n    \n    final_results[mat] = best_ratio_for_mat\n\nprint(\"Ratios:\", final_results)\nbest_mat = max(final_results, key=final_results.get)\nprint(\"Best material:\", best_mat)\n",
+        "file_ids": [
+          "2026-08-05/T120.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_file(fid):\n    for f in files:\n        if f['file_id'] == fid:\n            return f\n    return None\n\nlib = get_file('2026-08-05/reference_library.csv')\nmats_col = lib['table']['material']\nx_r_all = lib['table']['raman_shift_cm-1']\ny_r_all = lib['table']['intensity']\nsid_col = lib['table']['spectrum_id']\n\nunique_mats = np.unique(mats_col)\nfor mat in unique_mats:\n    mat_mask = (mats_col == mat)\n    spec_ids = np.unique(sid_col[mat_mask])\n    for sid in spec_ids[:1]:\n        s_mask = (mats_col == mat) & (sid_col == sid)\n        y_r = y_r_all[s_mask]\n        range_val = np.max(y_r) - np.min(y_r)\n        prom_val = 0.05 * range_val\n        peaks, _ = find_peaks(y_r, prominence=prom_val)\n        print(f\"Material: {mat}, SpecID: {sid}, Range: {range_val:.2f}, Prom Threshold: {prom_val:.2f}, Peaks Found: {len(peaks)}\")\n",
+        "file_ids": [
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_file(fid):\n    for f in files:\n        if f['file_id'] == fid:\n            return f\n    return None\n\nt120 = get_file('2026-08-05/T120.csv')\nlib = get_file('2026-08-05/reference_library.csv')\n\n# 1. Sample Peaks\nx_s = t120['table']['raman_shift_cm-1']\ny_s = t120['table']['intensity']\nprom_s = 0.05 * (np.max(y_s) - np.min(y_s))\npeaks_s, _ = find_peaks(y_s, prominence=prom_s)\nsample_peak_pos = np.sort(x_s[peaks_s])\nprint(f\"Sample peaks ({len(sample_peak_pos)}): {sample_peak_pos}\")\n\n# 2. Library Peaks - Robust extraction\nmats_col = lib['table']['material']\nx_r_all = lib['table']['raman_shift_cm-1']\ny_r_all = lib['table']['intensity']\nsid_col = lib['table']['spectrum_id']\n\n# Clean strings to avoid mismatch\nmats_col = np.char.strip(mats_col.astype(str))\nsid_col = np.char.strip(sid_col.astype(str))\n\nunique_mats = np.unique(mats_col)\nfinal_results = {}\n\nfor mat in unique_mats:\n    mat_mask = (mats_col == mat)\n    spec_ids = np.unique(sid_col[mat_mask])\n    best_ratio_for_mat = -1.0\n    \n    for sid in spec_ids:\n        s_mask = (mats_col == mat) & (sid_col == sid)\n        x_r = x_r_all[s_mask]\n        y_r = y_r_all[s_mask]\n        \n        if len(y_r) < 10: # Minimum size to be a spectrum\n            continue\n            \n        # Prominence based on range of THIS specific reference spectrum\n        range_val = np.max(y_r) - np.min(y_r)\n        if range_val == 0: continue\n        prom_r = 0.05 * range_val\n        \n        peaks_r, _ = find_peaks(y_r, prominence=prom_r)\n        ref_peak_pos = np.sort(x_r[peaks_r])\n        \n        if len(ref_peak_pos) == 0:\n            continue\n            \n        # Matching logic: 1:1 nearest-neighbour pairing within 3 cm-1\n        matched_count = 0\n        used_sample = set()\n        \n        for rp in ref_peak_pos:\n            best_dist = 3.01\n            best_idx = -1\n            for i, sp in enumerate(sample_peak_pos):\n                if i not in used_sample:\n                    dist = abs(rp - sp)\n                    if dist <= 3 and dist < best_dist:\n                        best_dist = dist\n                        best_idx = i\n            if best_idx != -1:\n                matched_count += 1\n                used_sample.add(best_idx)\n        \n        ratio = matched_count / len(ref_peak_pos)\n        if ratio > best_ratio_for_mat:\n            best_ratio_for_mat = ratio\n    \n    final_results[mat] = best_ratio_for_mat\n\nprint(\"Final Ratios:\", final_results)\nbest_mat = max(final_results, key=final_results.get)\nprint(\"Best matching material:\", best_mat)\n",
+        "file_ids": [
+          "2026-08-05/T120.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_file(fid):\n    for f in files:\n        if f['file_id'] == fid:\n            return f\n    return None\n\nt120_data = get_file('2026-08-05/T120.csv')\nlib_data = get_file('2026-08-05/reference_library.csv')\n\n# 1. Sample Peak Extraction\nx_s = np.array(t120_data['table']['raman_shift_cm-1'])\ny_s = np.array(t120_data['table']['intensity'])\nprom_s = 0.05 * (np.max(y_s) - np.min(y_s))\npeaks_s, _ = find_peaks(y_s, prominence=prom_s)\nsample_peak_pos = np.sort(x_s[peaks_s])\nprint(f\"Sample peaks ({len(sample_peak_pos)}): {sample_peak_pos}\")\n\n# 2. Reference Library Extraction\n# Convert lists to numpy arrays for masking\nmats_col = np.array(lib_data['table']['material'])\nx_r_all = np.array(lib_data['table']['raman_shift_cm-1'])\ny_r_all = np.array(lib_data['table']['intensity'])\nsid_col = np.array(lib_data['table']['spectrum_id'])\n\nunique_mats = np.unique(mats_col)\nfinal_results = {}\n\nfor mat in unique_mats:\n    mat_mask = (mats_col == mat)\n    # Find which spectrum IDs belong to this material\n    spec_ids = np.unique(sid_col[mat_mask])\n    best_ratio_for_mat = -1.0\n    \n    for sid in spec_ids:\n        s_mask = (mats_col == mat) & (sid_col == sid)\n        x_r = x_r_all[s_mask]\n        y_r = y_r_all[s_mask]\n        \n        if len(y_r) < 10: continue\n            \n        # Prominence threshold for this specific spectrum\n        range_val = np.max(y_r) - np.min(y_r)\n        if range_val == 0: continue\n        prom_r = 0.05 * range_val\n        \n        peaks_r, _ = find_peaks(y_r, prominence=prom_r)\n        ref_peak_pos = np.sort(x_r[peaks_r])\n        \n        if len(ref_peak_pos) == 0:\n            continue\n            \n        # Matching logic: 1:1 nearest-neighbour pairing within 3 cm-1\n        matched_count = 0\n        used_sample = set()\n        \n        for rp in ref_peak_pos:\n            best_dist = 3.01\n            best_idx = -1\n            for i, sp in enumerate(sample_peak_pos):\n                if i not in used_sample:\n                    dist = abs(rp - sp)\n                    if dist <= 3 and dist < best_dist:\n                        best_dist = dist\n                        best_idx = i\n            if best_idx != -1:\n                matched_count += 1\n                used_sample.add(best_idx)\n        \n        ratio = matched_count / len(ref_peak_pos)\n        if ratio > best_ratio_for_mat:\n            best_ratio_for_mat = ratio\n    \n    final_results[mat] = best_ratio_for_mat\n\nprint(\"Material Ratios:\", final_results)\nbest_mat = max(final_results, key=final_results.get)\nprint(\"Best matching material:\", best_mat)\n",
+        "file_ids": [
+          "2026-08-05/T120.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T120_709c50",
+  "elapsed_s": 276.5,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

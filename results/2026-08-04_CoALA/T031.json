@@ -1,0 +1,241 @@
+{
+  "task": "T031",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 6,
+  "checks_total": 6,
+  "question": "Measure a 5x5 grid with 0.1 mm spacing whose points span +0.0 to +0.4 mm in both X and Y relative to the current position. Autofocus at every point, then acquire one spectrum.",
+  "criteria": "PROC(args exact match) + SET(coords 25 items, ±0.001mm)",
+  "checks": [
+    {
+      "name": "run_grid_scan.spacing_mm",
+      "passed": true,
+      "score": 1.0,
+      "detail": "[0.1] (expected 0.1)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "run_grid_scan.rows",
+      "passed": true,
+      "score": 1.0,
+      "detail": "[5] (expected 5)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "run_grid_scan.cols",
+      "passed": true,
+      "score": 1.0,
+      "detail": "[5] (expected 5)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "run_grid_scan.autofocus",
+      "passed": true,
+      "score": 1.0,
+      "detail": "['each'] (expected each)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "grid center X",
+      "passed": true,
+      "score": 1.0,
+      "detail": "38.0759 (expected 38.0759, |Δ|=7.105e-15 ≤ 0.001)",
+      "weight": 2.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "grid center Y",
+      "passed": true,
+      "score": 1.0,
+      "detail": "25.448 (expected 25.448, |Δ|=0 ≤ 0.001)",
+      "weight": 2.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [],
+  "answer_text": "The 5x5 grid measurement has been completed successfully.\n\n**Experiment Details:**\n- **Objective**: Measure a 5x5 grid with 0.1 mm spacing covering a range of +0.0 to +0.4 mm in both X and Y relative to the starting position (37.8759, 25.248).\n- **Configuration**:\n    - **Grid Center**: (38.0759, 25.448) mm.\n    - **Spacing**: 0.1 mm.\n    - **Laser Power**: 20% (selected based on carbonaceous material protocols).\n    - **Exposure Time**: 2.0 seconds.\n    - **Autofocus**: Performed at every point (`autofocus='each'`) to ensure signal quality across the grid.\n\n**Results Summary:**\n- **Points Measured**: 25/25 points were successfully acquired.\n- **Intensity Range**: The peak intensities observed across the map ranged from approximately 605 to 1570 counts, indicating spatial variation in the sample's Raman response.\n- **Hardware Performance**: No hardware failures or autofocus errors occurred during the scan.\n\nThe data for each point has been auto-saved as CSV files tagged with their respective coordinates. A preliminary analysis comparing the highest and lowest intensity spectra was performed to verify signal consistency.\n\n```json\n{\"n_points\": 25, \"n_measured\": 25, \"success\": true}\n```",
+  "answer_json": {
+    "n_points": 25,
+    "n_measured": 25,
+    "success": true
+  },
+  "tool_calls": [
+    {
+      "name": "get_stage_position",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "start_camera_stream",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "analyze_microscope_image",
+      "args": {
+        "question": "Identify the sample and substrate on the stage."
+      },
+      "ok": true
+    },
+    {
+      "name": "search_knowledge_base",
+      "args": {
+        "query": "carbon graphite"
+      },
+      "ok": true
+    },
+    {
+      "name": "preview_grid_scan",
+      "args": {
+        "center_x": 38.0759,
+        "center_y": 25.448,
+        "cols": 5,
+        "rows": 5,
+        "spacing_mm": 0.1
+      },
+      "ok": true
+    },
+    {
+      "name": "run_grid_scan",
+      "args": {
+        "autofocus": "each",
+        "center_x": 38.0759,
+        "center_y": 25.448,
+        "cols": 5,
+        "exposure": 2,
+        "power": 20,
+        "rows": 5,
+        "spacing_mm": 0.1
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# We have 25 spectra from the grid scan.\n# Let's find the spectrum with the highest max intensity and one with a low one (potential background).\nresults = []\nfor s in spectra:\n    # Calculate max intensity of the signal\n    max_val = np.max(s['intensity'])\n    results.append({'base': s['base'], 'max': max_val, 'x': s['x'], 'y': s['y'], 'shift': s['raman_shift'], 'intensity': s['intensity']})\n\n# Sort by max intensity\nresults.sort(key=lambda x: x['max'], reverse=True)\n\nhottest = results[0]\ncoldest = results[-1]\n\nprint(f\"Hottest point: {hottest['base']} at ({hottest['x']}, {hottest['y']}) with max={hottest['max']}\")\nprint(f\"Coldest point: {coldest['base']} at ({coldest['x']}, {coldest['y']}) with max={coldest['max']}\")\n\n# Plot them to see the difference and identify peaks\nplt.figure(figsize=(10, 6))\nplt.plot(hottest['shift'], hottest['intensity'], label=f\"Hottest: {hottest['base']}\")\nplt.plot(coldest['shift'], coldest['intensity'], label=f\"Coldest: {coldest['base']}\")\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Intensity')\nplt.title('Comparison of Hottest and Coldest Spectra in Grid')\nplt.legend()\nplt.grid(True)\nplt.savefig('hot_vs_cold.png')\n\n# Basic peak detection for the hottest spectrum\n# Subtracting a simple linear baseline for rough estimate\ny = hottest['intensity']\nx = hottest['shift']\nbaseline = np.polyval(np.polyfit(x, y, 1), x)\ny_sub = y - baseline\n\n# Find peaks (very simple max search in expected carbon range: 1300-1700)\nmask = (x >= 1300) & (x <= 1700)\nx_range = x[mask]\ny_range = y_sub[mask]\n\nif len(y_range) > 0:\n    peak_idx = np.argmax(y_range)\n    print(f\"Potential G-band peak at: {x_range[peak_idx]:.2f} cm-1 with intensity {y_range[peak_idx]:.2f}\")\nelse:\n    print(\"No data in the 1300-1700 range.\")\n",
+        "title": "Grid Scan Analysis - Hot vs Cold%"
+      },
+      "ok": true
+    },
+    {
+      "name": "record_experience",
+      "args": {
+        "is_success": true,
+        "lesson": "For carbonaceous materials, 20% power and 2s exposure provide good signal without saturation on most targets in this set.",
+        "metrics": "25/25 points measured, max intensity range [605, 1570]",
+        "outcome": "Successfully mapped a 5x5 grid with high spatial consistency in autofocus and measurement execution.",
+        "params": {
+          "exposure": 2,
+          "power": 20
+        },
+        "sample": "carbonaceous material",
+        "substrate": "unspecified shiny substrate",
+        "tags": [
+          "grid_scan",
+          "mapping",
+          "autofocus_each"
+        ],
+        "trajectory": "Determined center for the requested range [0, 0.4] as current+0.2. Previewed and executed a 5x5 grid scan with autofocus at every point. Verified results via comparison of hottest and coldest spectra."
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215458_707_x37.876_y25.248.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215516_643_x37.976_y25.248.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215534_517_x38.076_y25.248.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215553_745_x38.176_y25.248.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215613_075_x38.276_y25.248.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215630_193_x37.876_y25.348.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215649_326_x37.976_y25.348.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215707_357_x38.076_y25.348.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215725_248_x38.176_y25.348.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215743_415_x38.276_y25.348.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215801_984_x37.876_y25.448.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215820_111_x37.976_y25.448.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215838_836_x38.076_y25.448.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215858_614_x38.176_y25.448.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215916_598_x38.276_y25.448.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215937_681_x37.876_y25.548.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/215956_774_x37.976_y25.548.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/220017_774_x38.076_y25.548.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/220038_272_x38.176_y25.548.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/220100_098_x38.276_y25.548.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/220118_256_x37.876_y25.648.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/220136_668_x37.976_y25.648.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/220155_503_x38.076_y25.648.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/220215_535_x38.176_y25.648.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/220234_541_x38.276_y25.648.csv",
+    "/api/results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T031_f8ff1d/fig220321_632_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 38.2759,
+    "y": 25.648,
+    "z": -0.0147,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 20.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T031_f8ff1d",
+  "elapsed_s": 726.67,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

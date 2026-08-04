@@ -214,7 +214,7 @@ class ExperimentRequest(BaseModel):
     # 어떤 에이전트 아키텍처로 실행할지 선택. 기본값 "AILA"(ReAct baseline)라
     # 이 필드를 보내지 않던 기존 프론트엔드/벤치마크는 그대로 동작한다.
     # "CoALA"를 주면 single_agent_CoALA(의사결정 사이클 + 장기기억)로 라우팅된다.
-    agent: Optional[str] = "AILA"
+    agent: Optional[str] = "CoALA"
 
 
 def _agent_module(name: Optional[str], bench: bool = False):
@@ -517,6 +517,21 @@ class BenchRunRequest(BaseModel):
     enforce_grid_gate: bool = False
 
 
+class BenchCancelRequest(BaseModel):
+    session_id: str
+
+
+# 중단을 요청받은 벤치 세션들. /api/bench/cancel 이 넣고 _producer 가 뺀다.
+#
+# [왜 협조적 중단인가 — 2026-08-04]
+# 러너가 스트림만 끊으면 event_gen 만 취소되고 _producer 는 executor 스레드에서
+# **그대로 돈다**. 에이전트가 계속 장비를 쥐고 빔을 쏘는 채로 러너가 다음 문항의
+# reset()/setup() 을 걸어 버리면 그 문항은 앞 문항의 잔재 위에서 채점된다.
+# N07 이 30 회 측정으로 72 분을 먹은 날(CoALA) 이 경로가 없어서 실행 전체를
+# 죽이는 수밖에 없었다. 그래서 플래그를 두고 이벤트 경계마다 본다.
+_BENCH_CANCEL: set[str] = set()
+
+
 class BenchResetRequest(BaseModel):
     task: str = ""
     # 문항 간 스테이지 복귀 좌표 [x, y, z]. 생략하면 bench_ops.DEFAULTS["home"]
@@ -687,6 +702,7 @@ async def bench_stream(body: BenchRunRequest, request: Request):
     sid = body.session_id or f"bench_{name}_{body.task or 'adhoc'}"
 
     def _producer():
+        gen = None
         try:
             from backend.agents import run_store
             run_store.begin_session(sid, name)
@@ -706,12 +722,30 @@ async def bench_stream(body: BenchRunRequest, request: Request):
                 gen = mod.run_stream(llm, [], body.message)
             for ev in gen:
                 loop.call_soon_threadsafe(q.put_nowait, _bench_event(ev))
+                # 중단 요청은 **이벤트 경계에서만** 본다. 도구 호출 하나가 진행 중이면
+                # 그것이 끝나야 여기로 온다 — 측정 도중에 끊어 장비를 어중간한 상태로
+                # 남기지 않으려는 것이다. 그래서 컷은 '상한 + 마지막 도구 1회'만큼
+                # 늦게 걸린다.
+                if sid in _BENCH_CANCEL:
+                    loop.call_soon_threadsafe(
+                        q.put_nowait,
+                        {"type": "cancelled",
+                         "detail": "cut by the benchmark runner (per-task time limit)"})
+                    break
         except Exception as e:
             import traceback
             loop.call_soon_threadsafe(
                 q.put_nowait, {"type": "error",
                                "detail": f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=6)}"})
         finally:
+            # 제너레이터를 명시적으로 닫는다 — 에이전트 쪽 finally(장비 락 해제, 턴
+            # 종료 기록)를 태우려면 GC 를 기다리면 안 된다.
+            if gen is not None:
+                try:
+                    gen.close()
+                except Exception:
+                    pass
+            _BENCH_CANCEL.discard(sid)
             loop.call_soon_threadsafe(q.put_nowait, _SENTINEL)
 
     state.executor.submit(_producer)
@@ -731,6 +765,18 @@ async def bench_stream(body: BenchRunRequest, request: Request):
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
                  "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/api/bench/cancel")
+async def bench_cancel(body: BenchCancelRequest):
+    """진행 중인 벤치 세션에 중단을 요청한다. 러너의 문항별 시간 상한이 부른다.
+
+    협조적이다 — 표시만 남기고 곧바로 돌아온다. 실제 중단은 에이전트가 다음 이벤트를
+    낼 때 일어나므로, 도구 호출 하나가 진행 중이면 그것이 끝난 뒤다. 러너는 중단을
+    요청한 뒤 스트림이 실제로 닫히는지까지 확인해야 한다(client.Bench.run 참고).
+    """
+    _BENCH_CANCEL.add(body.session_id)
+    return {"ok": True, "session_id": body.session_id}
 
 
 def _bench_event(ev: dict) -> dict:

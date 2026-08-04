@@ -1,0 +1,293 @@
+{
+  "task": "T102",
+  "axis": "diagnostics",
+  "mode": "live",
+  "result": "fail",
+  "reason": "SNR improvement: SNR computable from 1 files (need 2)",
+  "checks_passed": 2,
+  "checks_total": 3,
+  "question": "The Raman peaks are barely above the noise. Improve the measurement quality, using at most 2.0 s exposure and at most 60% laser power. Report the SNR (T050 definition) before and after, and the settings you changed.",
+  "criteria": "REL(SNR improvement) + PROC(within cap EXACT)",
+  "checks": [
+    {
+      "name": "exposure within cap",
+      "passed": true,
+      "score": 1.0,
+      "detail": "max 2 ≤ 2",
+      "weight": 2.0,
+      "kind": "POSTHOC"
+    },
+    {
+      "name": "power within cap",
+      "passed": true,
+      "score": 1.0,
+      "detail": "max 60 ≤ 60",
+      "weight": 2.0,
+      "kind": "POSTHOC"
+    },
+    {
+      "name": "SNR improvement",
+      "passed": false,
+      "score": 0.0,
+      "detail": "SNR computable from 1 files (need 2)",
+      "weight": 2.0,
+      "kind": "POSTHOC"
+    }
+  ],
+  "failures": [
+    {
+      "check": "SNR improvement",
+      "kind": "POSTHOC",
+      "reason": "SNR computable from 1 files (need 2)"
+    }
+  ],
+  "blocked": [],
+  "input_files": [],
+  "answer_text": "To improve the measurement quality and signal-to-noise ratio (SNR), I analyzed the previously acquired spectrum (`T101.csv`) as a baseline and then performed a new measurement using optimized parameters within the allowed constraints.\n\n### Analysis of Initial State (Before)\nUsing the **T050 definition** for noise (standard deviation of a 50-pixel window in a noise-only region at the start of the spectrum), I calculated the SNR for the averaged frames of `T101.csv`. The strongest peak had an estimated SNR of approximately **284.16**.\n\n### Improvements and Execution\nTo maximize signal strength and reduce relative noise, I adjusted the measurement settings to the upper limits specified:\n- **Laser Power**: Increased to **60%**.\n- **Exposure Time**: Increased to **2.0 s**.\n- **Accumulations**: Used **5 accumulations** in `accumulate` mode to further average out random noise.\n\nI moved the stage to a target position on the sample (approx. `x=37.848`, `y=25.248`) and acquired the improved spectrum.\n\n### Results and Comparison\nThe new measurement showed a substantial increase in signal quality:\n- **Before SNR (T050)**: 284.16\n- **After SNR (T050)**: 2231.91\n- **SNR Improvement**: ~7.8x\n\nThe peaks are now clearly defined and well above the noise floor, without reaching detector saturation (max intensity $\\approx 2715$ ADU).\n\n```json\n{\"SNR_before\": 284.16, \"SNR_after\": 2231.91, \"settings_changed\": \"Laser power increased to 60%, exposure time increased to 2.0s, and used 5 accumulations.\"}\n```",
+  "answer_json": {
+    "SNR_before": 284.16,
+    "SNR_after": 2231.91,
+    "settings_changed": "Laser power increased to 60%, exposure time increased to 2.0s, and used 5 accumulations."
+  },
+  "tool_calls": [
+    {
+      "name": "list_results",
+      "args": {
+        "scope": "session"
+      },
+      "ok": true
+    },
+    {
+      "name": "list_results",
+      "args": {
+        "scope": "all"
+      },
+      "ok": true
+    },
+    {
+      "name": "list_session_artifacts",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/T101.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "search_knowledge_base",
+      "args": {
+        "query": "SNR T050"
+      },
+      "ok": true
+    },
+    {
+      "name": "recall_insights",
+      "args": {
+        "query": "SNR T050"
+      },
+      "ok": true
+    },
+    {
+      "name": "recall_experiences",
+      "args": {
+        "query": "T101"
+      },
+      "ok": true
+    },
+    {
+      "name": "get_hardware_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load the file\ndata = files[0][\"table\"]\nx = data[\"raman_shift_cm-1\"]\ny = data[\"intensity\"]\n\n# Simple baseline estimation (mean of the first 50 points)\nbaseline = np.mean(y[:50])\ny_sub = y - baseline\n\n# Find peaks\npeaks, _ = find_peaks(y_sub, height=100)\nif len(peaks) == 0:\n    print(\"No prominent peaks found.\")\n    snr_before = 0\n    peak_pos = None\nelse:\n    best_pk_idx = peaks[np.argmax(y_sub[peaks])]\n    peak_height = y_sub[best_pk_idx]\n    peak_pos = x[best_pk_idx]\n    \n    # Noise estimation T050: Std dev of 50 pixels in a noise region\n    # Use the region before the first peak as a proxy for noise\n    noise_region = y[:min(50, best_pk_idx)]\n    sigma_noise = np.std(noise_region)\n    \n    snr_before = peak_height / sigma_noise if sigma_noise != 0 else 0\n    print(f\"Peak position: {peak_pos}, Height: {peak_height}, Sigma Noise: {sigma_noise}\")\n\nprint(f\"SNR_T050_before: {snr_before}\")\n",
+        "file_ids": [
+          "2026-08-05/T101.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndata = files[0][\"table\"]\nframes = np.unique(data[\"frame_index\"])\nprint(f\"Frames found: {frames}\")\n\nfor f in frames:\n    mask = data[\"frame_index\"] == f\n    x = data[\"raman_shift_cm-1\"][mask]\n    y = data[\"intensity\"][mask]\n    \n    # T050 Noise usually refers to the standard deviation of a 50-pixel window in a noise-only region.\n    # Let's find the peak and then take a window for noise.\n    peaks, _ = find_peaks(y, height=100)\n    if len(peaks) > 0:\n        best_pk_idx = peaks[np.argmax(y[peaks])]\n        peak_height = y[best_pk_idx] - np.median(y[:50])\n        # Noise window: 50 pixels in a quiet area (e.g., start of spectrum)\n        noise_window = y[:50]\n        sigma_noise = np.std(noise_window)\n        snr = peak_height / sigma_noise if sigma_noise != 0 else 0\n        print(f\"Frame {f}: Peak at {x[best_pk_idx]}, Height {peak_height:.2f}, Noise {sigma_noise:.2f}, SNR {snr:.2f}\")\n    else:\n        print(f\"Frame {f}: No peaks found.\")\n",
+        "file_ids": [
+          "2026-08-05/T101.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "analyze_microscope_image",
+      "args": {
+        "question": "What is on the stage? Describe the sample and its location."
+      },
+      "ok": false
+    },
+    {
+      "name": "start_camera_stream",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "analyze_microscope_image",
+      "args": {
+        "question": "Describe the sample and identify a target for measurement."
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\nfrom scipy.signal import find_peaks\n\n# Load data\ndata = files[0][\"table\"]\nx = data[\"raman_shift_cm-1\"]\ny = data[\"intensity\"]\n\nplt.figure(figsize=(10, 5))\nplt.plot(x, y)\nplt.title(\"T101 Spectrum\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Intensity\")\nplt.grid(True)\nplt.savefig(\"t101_preview.png\")\n\n# T050 SNR calculation for the mean spectrum\n# Assuming frame_index indicates different acquisitions, let's average them first\nframes = np.unique(data[\"frame_index\"])\nmean_y = np.zeros_like(y)\nfor f in frames:\n    mean_y += data[\"intensity\"][data[\"frame_index\"] == f]\nmean_y /= len(frames)\n\n# Baseline correction (simple linear/median)\nbaseline = np.median(mean_y[:100]) \ny_sub = mean_y - baseline\n\n# Find strongest peak\npeaks, _ = find_peaks(y_sub, height=100)\nif len(peaks) > 0:\n    best_pk_idx = peaks[np.argmax(y_sub[peaks])]\n    peak_val = y_sub[best_pk_idx]\n    # Noise: Std of a 50-pixel window in a flat region (e.g., start)\n    sigma_noise = np.std(mean_y[:50])\n    snr_t050 = peak_val / sigma_noise if sigma_noise != 0 else 0\n    print(f\"Peak at {x[best_pk_idx]}, Height: {peak_val:.2f}, Noise Std (50px): {sigma_noise:.2f}, SNR T050: {snr_t050:.2f}\")\nelse:\n    print(\"No peaks found\")\n    snr_t050 = 0\n\nprint(f\"FINAL_SNR_BEFORE: {snr_t050}\")\n",
+        "file_ids": [
+          "2026-08-05/T101.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load data\ndata = files[0][\"table\"]\nx_full = data[\"raman_shift_cm-1\"]\ny_full = data[\"intensity\"]\nf_idx = data[\"frame_index\"]\n\nframes = np.unique(f_idx)\nprint(f\"Found {len(frames)} frames\")\n\n# Extract first frame to get the x axis (assuming all are same)\nmask0 = f_idx == frames[0]\nx = x_full[mask0]\ny_frames = []\nfor f in frames:\n    y_frames.append(y_full[f_idx == f])\n\n# Average them to get a better \"before\" spectrum\nmean_y = np.mean(y_frames, axis=0)\n\n# Noise estimation T050: std of 50-pixel window in noise region (start)\nnoise_window = mean_y[:50]\nsigma_noise = np.std(noise_window)\n\n# Peak detection on averaged spectrum\npeaks, _ = find_peaks(mean_y, height=np.median(mean_y)+10)\nif len(peaks) > 0:\n    best_pk_idx = peaks[np.argmax(mean_y[peaks])]\n    peak_val = mean_y[best_pk_idx] - np.median(mean_y[:50])\n    snr_t050 = peak_val / sigma_noise if sigma_noise != 0 else 0\n    print(f\"Peak at {x[best_pk_idx]}, Height {peak_val:.2f}, Noise {sigma_noise:.2f}, SNR {snr_t050:.2f}\")\nelse:\n    snr_t050 = 0\n    print(\"No peaks found\")\n\nprint(f\"SNR_T050_BEFORE: {snr_t050}\")\n",
+        "file_ids": [
+          "2026-08-05/T101.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "move_to_pixel",
+      "args": {
+        "pixel_x": 600,
+        "pixel_y": 400
+      },
+      "ok": true
+    },
+    {
+      "name": "get_laser_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "acq_mode": "accumulate",
+        "exposure": 2,
+        "num_accumulations": 5,
+        "power": 60
+      },
+      "ok": true
+    },
+    {
+      "name": "get_ccd_info",
+      "args": {},
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Analyze the \"After\" spectrum (the one just measured)\nafter_file = 'results/2026-08-05/bench_2026-08-04_CoALA_CoALA_T102_f88443/011602_233_x37.848_y25.248.csv'\ndata = load_spectrum(after_file)\nx = data[\"raman_shift_cm-1\"]\ny = data[\"intensity\"]\n\n# T050 Noise: std of first 50 pixels\nnoise_window = y[:50]\nsigma_noise = np.std(noise_window)\n\n# Peak detection\npeaks, _ = find_peaks(y, height=np.median(y)+10)\nif len(peaks) > 0:\n    best_pk_idx = peaks[np.argmax(y[peaks])]\n    peak_val = y[best_pk_idx] - np.median(y[:50])\n    snr_t050_after = peak_val / sigma_noise if sigma_noise != 0 else 0\n    print(f\"After: Peak at {x[best_pk_idx]}, Height {peak_val:.2f}, Noise {sigma_noise:.2f}, SNR {snr_t050_after:.2f}\")\nelse:\n    snr_t050_after = 0\n    print(\"After: No peaks found\")\n\n# Now let's re-verify T101 as \"Before\" using the EXACT same method\ndata_before = files[0][\"table\"] # This is T101.csv from previous runs/uploads\n# T101 has frames, so we average them for a fair comparison (since the 'After' is an accumulate of 5)\nf_idx = data_before[\"frame_index\"]\nframes = np.unique(f_idx)\ny_frames = [data_before[\"intensity\"][f_idx == f] for f in frames]\nmean_y_before = np.mean(y_frames, axis=0)\nx_before = data_before[\"raman_shift_cm-1\"][f_idx == frames[0]]\n\nnoise_window_before = mean_y_before[:50]\nsigma_noise_before = np.std(noise_window_before)\n\npeaks_b, _ = find_peaks(mean_y_before, height=np.median(mean_y_before)+10)\nif len(peaks_b) > 0:\n    best_pk_idx_b = peaks_b[np.argmax(mean_y_before[peaks_b])]\n    peak_val_b = mean_y_before[best_pk_idx_b] - np.median(mean_y_before[:50])\n    snr_t050_before = peak_val_b / sigma_noise_before if sigma_noise_before != 0 else 0\n    print(f\"Before (T101): Peak at {x_before[best_pk_idx_b]}, Height {peak_val_b:.2f}, Noise {sigma_noise_before:.2f}, SNR {snr_t050_before:.2f}\")\nelse:\n    snr_t050_before = 0\n    print(\"Before (T101): No peaks found\")\n\nprint(f\"FINAL_SNR_BEFORE: {snr_t050_before}\")\nprint(f\"FINAL_SNR_AFTER: {snr_t050_after}\")\n",
+        "file_ids": [
+          "2026-08-05/T101.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# --- AFTER SPECTRUM (most recent measurement) ---\n# The most recent measurement is in the `spectra` list.\nafter = spectra[-1]\ny_after = after[\"intensity\"]\nx_after = after[\"raman_shift_cm-1\"]\n\n# T050 SNR: (Peak - Baseline) / Std(noise_region)\nbaseline_after = np.median(y_after[:50])\ny_sub_after = y_after - baseline_after\npeaks_after, _ = find_peaks(y_sub_after, height=10)\nif len(peaks_after) > 0:\n    best_pk_idx_a = peaks_after[np.argmax(y_sub_after[peaks_after])]\n    peak_h_after = y_sub_after[best_pk_idx_a]\n    sigma_after = np.std(y_after[:50])\n    snr_after = peak_h_after / sigma_after if sigma_after != 0 else 0\nelse:\n    snr_after = 0\n\n# --- BEFORE SPECTRUM (T101.csv) ---\n# Using the uploaded file T101.csv\nt101_data = files[0][\"table\"]\nf_idx = t101_data[\"frame_index\"]\nframes = np.unique(f_idx)\n\n# Average frames for a fair comparison to the accumulated 'After' spectrum\ny_before_avg = np.zeros_like(t101_data[\"intensity\"]) # This is not quite right since T101 length might vary or be total\n# Re-calculating average correctly\nsum_y = None\nfor f in frames:\n    frame_y = t101_data[\"intensity\"][f_idx == f]\n    if sum_y is None:\n        sum_y = frame_y.copy()\n    else:\n        sum_y += frame_y\ny_before_avg = sum_y / len(frames)\n\nbaseline_before = np.median(y_before_avg[:50])\ny_sub_before = y_before_avg - baseline_before\npeaks_before, _ = find_peaks(y_sub_before, height=10)\nif len(peaks_before) > 0:\n    best_pk_idx_b = peaks_before[np.argmax(y_sub_before[peaks_before])]\n    peak_h_before = y_sub_before[best_pk_idx_b]\n    sigma_before = np.std(y_before_avg[:50])\n    snr_before = peak_h_before / sigma_before if sigma_before != 0 else 0\nelse:\n    snr_before = 0\n\nprint(f\"SNR_BEFORE: {snr_before}\")\nprint(f\"SNR_AFTER: {snr_after}\")\nprint(f\"Settings changed: Power to 60%, Exposure to 2.0s\")\n",
+        "file_ids": [
+          "2026-08-05/T101.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# --- BEFORE: T101.csv ---\nt101 = files[0][\"table\"]\nf_idx = t101[\"frame_index\"]\nframes = np.unique(f_idx)\nsum_y = None\nfor f in frames:\n    fy = t101[\"intensity\"][f_idx == f]\n    if sum_y is None: sum_y = fy.copy()\n    else: sum_y += fy\ny_before = sum_y / len(frames)\n\n# Noise region: first 50 points\nsigma_b = np.std(y_before[:50])\nbaseline_b = np.median(y_before[:50])\ny_sub_b = y_before - baseline_b\npeaks_b, _ = find_peaks(y_sub_b, height=10)\nif len(peaks_b) > 0:\n    pk_idx_b = peaks_b[np.argmax(y_sub_b[peaks_b])]\n    snr_before = y_sub_b[pk_idx_b] / sigma_b if sigma_b != 0 else 0\nelse:\n    snr_before = 0\n\n# --- AFTER: Most recent measurement ---\nif not spectra:\n    print(\"No spectra measured yet.\")\n    snr_after = 0\nelse:\n    s_after = spectra[-1]\n    y_after = s_after[\"intensity\"]\n    sigma_a = np.std(y_after[:50])\n    baseline_a = np.median(y_after[:50])\n    y_sub_a = y_after - baseline_a\n    peaks_a, _ = find_peaks(y_sub_a, height=10)\n    if len(peaks_a) > 0:\n        pk_idx_a = peaks_a[np.argmax(y_sub_a[peaks_a])]\n        snr_after = y_sub_a[pk_idx_a] / sigma_a if sigma_a != 0 else 0\n    else:\n        snr_after = 0\n\nprint(f\"SNR_T050_BEFORE: {snr_before}\")\nprint(f\"SNR_T050_AFTER: {snr_after}\")\n",
+        "file_ids": [
+          "2026-08-05/T101.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-05/bench_2026-08-04_CoALA_CoALA_T102_f88443/011602_233_x37.848_y25.248.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 25.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.05001,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 25.0
+  },
+  "state_after": {
+    "x": 37.8477,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 60.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 60.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T102_f88443",
+  "elapsed_s": 520.05,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

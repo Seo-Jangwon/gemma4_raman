@@ -1,0 +1,205 @@
+{
+  "task": "T074",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "In the map T074.csv, compute the element-wise median spectrum, judge the positions whose cosine similarity to it (after L2 normalization) is below 0.80 as anomalous, and re-measure a spectrum once at those positions only.",
+  "criteria": "SET(coords EXACT) + PROC",
+  "checks": [
+    {
+      "name": "re-measured positions",
+      "passed": true,
+      "score": 1.0,
+      "detail": "2/2 matched (submitted 2) [[37.8, 25.4], [38.0, 25.2]] vs [[37.8, 25.4], [38.0, 25.2]]",
+      "weight": 2.0,
+      "kind": "SET"
+    },
+    {
+      "name": "acquire_spectrum calls",
+      "passed": true,
+      "score": 1.0,
+      "detail": "2 calls (exactly 2 calls)",
+      "weight": 2.0,
+      "kind": "PROC"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T074.csv"
+  ],
+  "answer_text": "The analysis of the `T074.csv` map dataset (containing spectra from 9 unique positions) was performed by computing the element-wise median spectrum as a reference. Using L2 normalization and cosine similarity, two positions were found to be anomalous (similarity < 0.80):\n\n1.  **[37.8, 25.4]** (Cosine Similarity: 0.1846)\n2.  **[38.0, 25.2]** (Cosine Similarity: 0.1870)\n\nAs requested, these two positions were re-measured once using a laser power of 2% and an exposure time of 1.0 s to verify the findings. Both measurements were successful with maximum intensities of 136.0 ADU and 135.0 ADU respectively.\n\n```json\n{\"anomalous_positions\": [[37.8, 25.4], [38.0, 25.2]]}\n```",
+  "answer_json": {
+    "anomalous_positions": [
+      [
+        37.8,
+        25.4
+      ],
+      [
+        38.0,
+        25.2
+      ]
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/T074.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\nfile_id = '2026-08-05/T074.csv'\ndf = files[0][\"table\"] # Based on inspect_file, it's a dict mapping col name -> array\nx_vals = df['x']\ny_vals = df['y']\nshifts = df['raman_shift_cm-1']\nints = df['intensity']\n\n# Find unique positions\nunique_pos = np.unique(np.stack([x_vals, y_vals], axis=1), axis=0)\nn_pos = len(unique_pos)\n# Number of spectral points per position\nn_pts = len(shifts) // n_pos\n\n# Reshape intensities into (n_pos, n_pts)\n# We assume the data is sorted by x, y and then shifts. \n# To be safe, we'll group them.\npos_spectra = []\npos_list = []\nfor pos in unique_pos:\n    mask = (x_vals == pos[0]) & (y_vals == pos[1])\n    pos_spectra.append(ints[mask])\n    pos_list.append(pos)\n\nspectra_matrix = np.array(pos_spectra) # (n_pos, n_pts)\n\n# 1. Compute element-wise median spectrum\nmedian_spec = np.median(spectra_matrix, axis=0)\n\ndef l2_norm(v):\n    norm = np.linalg.norm(v)\n    return v / norm if norm > 0 else v\n\nnormalized_median = l2_norm(median_spec)\n\n# 2. Compute cosine similarity to median\nsimilarities = []\nfor i in range(n_pos):\n    spec = spectra_matrix[i]\n    norm_spec = l2_norm(spec)\n    sim = np.dot(norm_spec, normalized_median)\n    similarities.append(sim)\n\nsimilarities = np.array(similarities)\nanomalous_mask = similarities < 0.80\nanomalous_pos = unique_pos[anomalous_mask]\n\nprint(f\"Total positions: {n_pos}\")\nprint(f\"Anomalous positions found: {len(anomalous_pos)}\")\nfor pos in anomalous_pos:\n    print(f\"Pos: {pos}, Sim: {similarities[np.where((unique_pos == pos).all(axis=1))[0][0]]:.4f}\")\n\n# Save the list of positions for next step (can't save a list easily, so just print them)\n",
+        "file_ids": [
+          "2026-08-05/T074.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "recall_experiences",
+      "args": {
+        "query": "T074"
+      },
+      "ok": true
+    },
+    {
+      "name": "search_knowledge_base",
+      "args": {
+        "query": "T074"
+      },
+      "ok": true
+    },
+    {
+      "name": "move_stage",
+      "args": {
+        "x": 37.8,
+        "y": 25.4
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 1,
+        "power": 2
+      },
+      "ok": true
+    },
+    {
+      "name": "move_stage",
+      "args": {
+        "x": 38,
+        "y": 25.2
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 1,
+        "power": 2
+      },
+      "ok": true
+    },
+    {
+      "name": "record_experience",
+      "args": {
+        "is_success": true,
+        "lesson": "Cosine similarity after L2 normalization is an effective way to identify anomalous spectra in a mapping dataset. Low power (2%) and standard exposure (1s) were safe starting points for re-measurement.",
+        "metrics": "Anomalous positions detected: 2/9. Similarity threshold: 0.80.",
+        "outcome": "Successfully identified anomalous coordinates [37.8, 25.4] and [38.0, 25.2] from T074.csv and re-measured them.",
+        "params": {
+          "exposure": 1,
+          "power": 2
+        },
+        "sample": "T074 map sample",
+        "substrate": "Unknown",
+        "tags": [
+          "anomalous_detection",
+          "cosine_similarity",
+          "re-measurement"
+        ],
+        "trajectory": "Parsed T074.csv to extract spectra per position, computed element-wise median, and used L2-normalized cosine similarity to flag anomalous points. Moved stage to those specific coordinates and acquired new spectra."
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-05/bench_2026-08-04_CoALA_CoALA_T074_3a4281/002140_358_x37.8_y25.4.csv",
+    "results/2026-08-05/bench_2026-08-04_CoALA_CoALA_T074_3a4281/002209_481_x38.0_y25.2.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 38.0,
+    "y": 25.2,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 2.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 2.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T074_3a4281",
+  "elapsed_s": 168.82,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

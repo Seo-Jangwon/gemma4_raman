@@ -1,0 +1,192 @@
+{
+  "task": "T127",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "T127.csv was supplied to us as PMMA. Judge whether it really is, using reference_library.csv: accept if the cosine similarity to the PMMA reference is 0.85 or higher, otherwise reject.",
+  "criteria": "EXACT(verdict) + NUM(±0.01)",
+  "checks": [
+    {
+      "name": "accept / reject",
+      "passed": true,
+      "score": 1.0,
+      "detail": "reported=False (expected False: similarity to the claimed PMMA is 0.286 < 0.85)",
+      "weight": 2.0,
+      "kind": "EXACT"
+    },
+    {
+      "name": "similarity to the claimed material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "0.286036 (expected 0.286036, |Δ|=2.667e-07 ≤ 0.01)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T127.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "Based on a comparison between the supplied spectrum (`T127.csv`) and the reference spectra for PMMA found in `reference_library.csv`, the sample is rejected as PMMA. \n\nThe analysis involved calculating the cosine similarity between the intensities of the sample and the available PMMA references aligned on the same Raman shift axis (200–2000 $\\text{cm}^{-1}$). The highest similarity observed was approximately **0.286** (with reference `PMMA_02`), which is significantly lower than the required threshold of **0.85**.\n\n```json\n{\"matches\": false, \"similarity\": 0.28603573334962257}\n```",
+  "answer_json": {
+    "matches": false,
+    "similarity": 0.28603573334962257
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/T127.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load files from injected 'files' list\nt127_data = None\npmma_ref_data = None\n\nfor f in files:\n    if f['filename'] == 'T127.csv':\n        t127_data = {\n            'x': f['table']['raman_shift_cm-1'],\n            'y': f['table']['intensity']\n        }\n    elif f['filename'] == 'reference_library.csv':\n        # Filter for PMMA material\n        mask = f['table']['material'] == 'PMMA'\n        if not np.any(mask):\n             # Try case-insensitive just in case\n             mask = np.char.upper(f['table']['material'].astype(str)) == 'PMMA'\n        \n        if np.any(mask):\n            # Extract PMMA data. Since the structure is long format, we take the first one found.\n            # We assume all PMMA entries have same shift axis if they exist.\n            pmma_shifts = f['table']['raman_shift_cm-1'][mask]\n            pmma_intensities = f['table']['intensity'][mask]\n            pmma_ref_data = {\n                'x': pmma_shifts,\n                'y': pmma_intensities\n            }\n\nif t127_data is None or pmma_ref_data is None:\n    print(f\"Error: Missing data. T127: {t127_data is not None}, PMMA Ref: {pmma_ref_data is not None}\")\nelse:\n    # Ensure they are aligned on the same x-axis\n    # They both seem to be 200-2000, but let's verify lengths and values.\n    y_sample = t127_data['y']\n    y_ref = pmma_ref_data['y']\n    \n    if len(y_sample) != len(y_ref):\n        # Handle interpolation or cropping if necessary\n        print(f\"Length mismatch: sample {len(y_sample)}, ref {len(y_ref)}\")\n        # Simple alignment based on shift axis values\n        x_sample = t127_data['x']\n        x_ref = pmma_ref_data['x']\n        common_x = np.intersect1d(x_sample, x_ref)\n        y_sample = y_sample[np.isin(x_sample, common_x)]\n        y_ref = y_ref[np.isin(x_ref, common_x)]\n    \n    # Cosine Similarity: (A . B) / (||A|| * ||B||)\n    dot_product = np.dot(y_sample, y_ref)\n    norm_sample = np.linalg.norm(y_sample)\n    norm_ref = np.linalg.norm(y_ref)\n    \n    similarity = dot_product / (norm_sample * norm_ref)\n    print(f\"Cosine Similarity: {similarity}\")\n",
+        "file_ids": [
+          "2026-08-05/T127.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load files from injected 'files' list\nt127_data = None\npmma_ref_data = None\n\nfor f in files:\n    if f['filename'] == 'T127.csv':\n        t127_data = {\n            'x': np.array(f['table']['raman_shift_cm-1']),\n            'y': np.array(f['table']['intensity'])\n        }\n    elif f['filename'] == 'reference_library.csv':\n        # Convert the material list to a numpy array for masking\n        materials = np.array(f['table']['material'])\n        mask = materials == 'PMMA'\n        \n        if not np.any(mask):\n             # Try case-insensitive just in case it is 'pmma'\n             mask = np.char.upper(materials.astype(str)) == 'PMMA'\n        \n        if np.any(mask):\n            # Extract PMMA data. \n            # We assume all entries for one material share the same axis and are part of one spectrum\n            # or we take the first instance if multiple exist.\n            pmma_shifts = np.array(f['table']['raman_shift_cm-1'])[mask]\n            pmma_intensities = np.array(f['table']['intensity'])[mask]\n            pmma_ref_data = {\n                'x': pmma_shifts,\n                'y': pmma_intensities\n            }\n\nif t127_data is None or pmma_ref_data is None:\n    print(f\"Error: Missing data. T127 found: {t127_data is not None}, PMMA Ref found: {pmma_ref_data is not None}\")\nelse:\n    y_sample = t127_data['y']\n    x_sample = t127_data['x']\n    y_ref = pmma_ref_data['y']\n    x_ref = pmma_ref_data['x']\n    \n    # Align x-axis\n    common_x = np.intersect1d(x_sample, x_ref)\n    if len(common_x) == 0:\n        print(\"Error: No common Raman shift values found between sample and reference.\")\n    else:\n        # Subset both to the intersection\n        y_sample_aligned = y_sample[np.isin(x_sample, common_x)]\n        y_ref_aligned = y_ref[np.isin(x_ref, common_x)]\n        \n        # Ensure the order is the same (intersect1d returns sorted)\n        # Since both likely have monotonic shift axes, we can sort by x\n        sort_idx_sample = np.argsort(x_sample[np.isin(x_sample, common_x)])\n        y_sample_aligned = y_sample_aligned[sort_idx_sample]\n        \n        sort_idx_ref = np.argsort(x_ref[np.isin(x_ref, common_x)])\n        y_ref_aligned = y_ref_aligned[sort_idx_ref]\n\n        # Cosine Similarity: (A . B) / (||A|| * ||B||)\n        dot_product = np.dot(y_sample_aligned, y_ref_aligned)\n        norm_sample = np.linalg.norm(y_sample_aligned)\n        norm_ref = np.linalg.norm(y_ref_aligned)\n        \n        similarity = dot_product / (norm_sample * norm_ref)\n        print(f\"Similarity: {similarity}\")\n        print(f\"Points used for similarity: {len(common_x)}\")\n",
+        "file_ids": [
+          "2026-08-05/T127.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load files from injected 'files' list\nt127_data = None\npmma_ref_data = None\n\nfor f in files:\n    if f['filename'] == 'T127.csv':\n        t127_data = {\n            'x': np.array(f['table']['raman_shift_cm-1']),\n            'y': np.array(f['table']['intensity'])\n        }\n    elif f['filename'] == 'reference_library.csv':\n        # Convert to numpy arrays for processing\n        materials = np.array(f['table']['material'])\n        spec_ids = np.array(f['table']['spectrum_id'])\n        shifts = np.array(f['table']['raman_shift_cm-1'])\n        intensities = np.array(f['table']['intensity'])\n        \n        # Filter for PMMA material (case-insensitive)\n        mask = np.char.upper(materials.astype(str)) == 'PMMA'\n        if np.any(mask):\n            pmma_spec_ids = spec_ids[mask]\n            unique_ids = np.unique(pmma_spec_ids)\n            print(f\"Found {len(unique_ids)} PMMA spectra in library: {unique_ids}\")\n            \n            # Take the first one found as the reference\n            ref_id = unique_ids[0]\n            ref_mask = (spec_ids == ref_id)\n            pmma_ref_data = {\n                'x': shifts[ref_mask],\n                'y': intensities[ref_mask]\n            }\n\nif t127_data is None or pmma_ref_data is None:\n    print(f\"Error: Missing data. T127 found: {t127_data is not None}, PMMA Ref found: {pmma_ref_data is not None}\")\nelse:\n    x_sample = t127_data['x']\n    y_sample = t127_data['y']\n    x_ref = pmma_ref_data['x']\n    y_ref = pmma_ref_data['y']\n    \n    # Identify common X values\n    common_x = np.intersect1d(x_sample, x_ref)\n    print(f\"Common points: {len(common_x)}\")\n\n    if len(common_x) == 0:\n        print(\"Error: No common Raman shift values found.\")\n    else:\n        # To ensure vectors A and B are matched point-by-point, we map them to the sorted common_x\n        y_sample_aligned = []\n        y_ref_aligned = []\n        \n        # Create lookup dictionaries for efficiency\n        sample_map = dict(zip(x_sample, y_sample))\n        ref_map = dict(zip(x_ref, y_ref))\n        \n        for val in common_x:\n            y_sample_aligned.append(sample_map[val])\n            y_ref_aligned.append(ref_map[val])\n            \n        v_sample = np.array(y_sample_aligned)\n        v_ref = np.array(y_ref_aligned)\n\n        # Cosine Similarity: (A . B) / (||A|| * ||B||)\n        dot_product = np.dot(v_sample, v_ref)\n        norm_sample = np.linalg.norm(v_sample)\n        norm_ref = np.linalg.norm(v_ref)\n        \n        similarity = dot_product / (norm_sample * norm_ref)\n        print(f\"Cosine Similarity: {similarity}\")\n",
+        "file_ids": [
+          "2026-08-05/T127.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load files from injected 'files' list\nt127_data = None\npmma_refs = []\n\nfor f in files:\n    if f['filename'] == 'T127.csv':\n        t127_data = {\n            'x': np.array(f['table']['raman_shift_cm-1']),\n            'y': np.array(f['table']['intensity'])\n        }\n    elif f['filename'] == 'reference_library.csv':\n        materials = np.array(f['table']['material'])\n        spec_ids = np.array(f['table']['spectrum_id'])\n        shifts = np.array(f['table']['raman_shift_cm-1'])\n        intensities = np.array(f['table']['intensity'])\n        \n        mask = np.char.upper(materials.astype(str)) == 'PMMA'\n        if np.any(mask):\n            unique_ids = np.unique(spec_ids[mask])\n            for uid in unique_ids:\n                uid_mask = (spec_ids == uid)\n                pmma_refs.append({\n                    'id': uid,\n                    'x': shifts[uid_mask],\n                    'y': intensities[uid_mask]\n                })\n\nif t127_data is None or not pmma_refs:\n    print(\"Error: Missing data.\")\nelse:\n    x_sample = t127_data['x']\n    y_sample = t127_data['y']\n    sample_map = dict(zip(x_sample, y_sample))\n    \n    for ref in pmma_refs:\n        common_x = np.intersect1d(x_sample, ref['x'])\n        ref_map = dict(zip(ref['x'], ref['y']))\n        \n        v_sample = np.array([sample_map[val] for val in common_x])\n        v_ref = np.array([ref_map[val] for val in common_x])\n        \n        sim = np.dot(v_sample, v_ref) / (np.linalg.norm(v_sample) * np.linalg.norm(v_ref))\n        print(f\"Similarity with {ref['id']}: {sim}\")\n",
+        "file_ids": [
+          "2026-08-05/T127.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T127_4fc4b9",
+  "elapsed_s": 138.74,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

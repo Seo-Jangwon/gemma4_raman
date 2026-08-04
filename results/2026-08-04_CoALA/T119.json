@@ -1,0 +1,174 @@
+{
+  "task": "T119",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Apply Savitzky-Golay smoothing (window_length=11, polyorder=3) to the low-signal spectrum T119.csv, interpolate onto the reference axis, L2 normalize, and identify the material against reference_library.csv.",
+  "criteria": "EXACT(material)",
+  "checks": [
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'polystyrene' (expected 'polystyrene')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T119.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "The low-signal spectrum **T119.csv** was processed and identified against the reference library. The processing pipeline included:\n1.  **Smoothing**: Savitzky-Golay smoothing with a window length of 11 and polynomial order of 3 to reduce noise.\n2.  **Interpolation**: The smoothed spectrum was interpolated onto the common Raman shift axis (200–2000 cm⁻¹) extracted from `reference_library.csv`.\n3.  **Normalization**: L2 normalization was applied to ensure that comparisons were based on spectral shape rather than absolute intensity.\n4.  **Material Identification**: The processed spectrum was compared against each entry in the reference library using cosine similarity (dot product of L2-normalized vectors).\n\nThe material with the highest similarity (0.8866) is **polystyrene**.\n\n```json\n{\"material\": \"polystyrene\"}\n```",
+  "answer_json": {
+    "material": "polystyrene"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/T119.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import savgol_filter\n\n# Load data\nt119 = files[0] if files[0]['filename'] == 'T119.csv' else files[1]\nlib = files[1] if files[0]['filename'] == 'T119.csv' else files[0]\n\nx_sample = t119['table']['raman_shift_cm-1']\ny_sample = t119['table']['intensity']\n\n# 1. Savitzky-Golay smoothing\ny_smoothed = savgol_filter(y_sample, window_length=11, polyorder=3)\n\n# 2. Reference axis and interpolation\n# Extract reference axis from the library (assuming it's consistent for all entries)\nx_ref = lib['table']['raman_shift_cm-1'][:int(len(lib['table']['raman_shift_cm-1'])/len(np.unique(lib['table']['spectrum_id'])))]\n# Actually, let's just get the unique values of raman_shift if it's a long table\nx_ref = np.unique(lib['table']['raman_shift_cm-1'])\n\ny_interp = np.interp(x_ref, x_sample, y_smoothed)\n\n# 3. L2 Normalization\nnorm_sample = np.linalg.norm(y_interp)\ny_final = y_interp / norm_sample\n\n# Identification against reference library\nspectrum_ids = np.unique(lib['table']['spectrum_id'])\nmaterials = lib['table']['material']\nx_lib_col = lib['table']['raman_shift_cm-1']\ny_lib_col = lib['table']['intensity']\n\nbest_sim = -1\nbest_mat = None\n\n# We'll iterate through each spectrum in the library\nfor sid in spectrum_ids:\n    mask = (lib['table']['spectrum_id'] == sid)\n    mat = materials[mask][0]\n    y_ref = y_lib_col[mask]\n    x_r = x_lib_col[mask]\n    \n    # Interpolate ref to the same axis as our processed sample (x_ref)\n    y_ref_interp = np.interp(x_ref, x_r, y_ref)\n    \n    # L2 Normalize reference\n    norm_ref = np.linalg.norm(y_ref_interp)\n    if norm_ref > 0:\n        y_ref_norm = y_ref_interp / norm_ref\n    else:\n        y_ref_norm = y_ref_interp\n        \n    # Cosine similarity (dot product of L2 normalized vectors)\n    sim = np.dot(y_final, y_ref_norm)\n    \n    if sim > best_sim:\n        best_sim = sim\n        best_mat = mat\n\nprint(f\"Best material: {best_mat}\")\nprint(f\"Similarity: {best_sim:.4f}\")\n\n# Save the processed spectrum for verification/reporting\nsave_result('T119_processed.csv', y_final, raman_shift=x_ref)\n",
+        "file_ids": [
+          "2026-08-05/T119.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import savgol_filter\n\n# Load data safely\nt119_data = None\nlib_data = None\nfor f in files:\n    if 'T119.csv' in f['filename']:\n        t119_data = f\n    elif 'reference_library.csv' in f['filename']:\n        lib_data = f\n\nx_sample = np.asarray(t119_data['table']['raman_shift_cm-1']).flatten()\ny_sample = np.asarray(t119_data['table']['intensity']).flatten()\n\n# 1. Savitzky-Golay smoothing\ny_smoothed = savgol_filter(y_sample, window_length=11, polyorder=3)\n\n# 2. Reference axis and interpolation\nx_lib_all = np.asarray(lib_data['table']['raman_shift_cm-1']).flatten()\nx_ref = np.unique(x_lib_all)\n\nprint(f\"Sample x shape: {x_sample.shape}, y smoothed shape: {y_smoothed.shape}\")\nprint(f\"Ref axis (x_ref) shape: {x_ref.shape}\")\n\ny_interp = np.interp(x_ref, x_sample, y_smoothed)\n\n# 3. L2 Normalization\nnorm_sample = np.linalg.norm(y_interp)\nif norm_sample == 0:\n    print(\"Warning: Sample norm is zero\")\n    y_final = y_interp\nelse:\n    y_final = y_interp / norm_sample\n\n# Identification against reference library\nspectrum_ids = np.unique(lib_data['table']['spectrum_id'])\nmaterials_all = np.asarray(lib_data['table']['material'])\nx_lib_col = np.asarray(lib_data['table']['raman_shift_cm-1']).flatten()\ny_lib_col = np.asarray(lib_data['table']['intensity']).flatten()\n\nbest_sim = -1\nbest_mat = None\n\nfor sid in spectrum_ids:\n    mask = (lib_data['table']['spectrum_id'] == sid)\n    # Extract material for this spectrum id\n    mat = materials_all[mask][0]\n    y_ref_raw = y_lib_col[mask]\n    x_r_raw = x_lib_col[mask]\n    \n    # Interpolate ref to the same axis as our processed sample (x_ref)\n    y_ref_interp = np.interp(x_ref, x_r_raw, y_ref_raw)\n    \n    # L2 Normalize reference\n    norm_ref = np.linalg.norm(y_ref_interp)\n    if norm_ref > 0:\n        y_ref_norm = y_ref_interp / norm_ref\n    else:\n        y_ref_norm = y_ref_interp\n        \n    # Cosine similarity\n    sim = np.dot(y_final, y_ref_norm)\n    \n    if sim > best_sim:\n        best_sim = sim\n        best_mat = mat\n\nprint(f\"Best material: {best_mat}\")\nprint(f\"Similarity: {best_sim:.4f}\")\n\nsave_result('T119_processed.csv', y_final, raman_shift=x_ref)\n",
+        "file_ids": [
+          "2026-08-05/T119.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import savgol_filter\n\n# Load data safely\nt119_data = None\nlib_data = None\nfor f in files:\n    if 'T119.csv' in f['filename']:\n        t119_data = f\n    elif 'reference_library.csv' in f['filename']:\n        lib_data = f\n\n# Convert to numpy arrays explicitly\nx_sample = np.asarray(t119_data['table']['raman_shift_cm-1']).flatten()\ny_sample = np.asarray(t119_data['table']['intensity']).flatten()\n\n# 1. Savitzky-Golay smoothing\ny_smoothed = savgol_filter(y_sample, window_length=11, polyorder=3)\n\n# 2. Reference axis and interpolation\nx_lib_all = np.asarray(lib_data['table']['raman_shift_cm-1']).flatten()\nx_ref = np.unique(x_lib_all)\n\ny_interp = np.interp(x_ref, x_sample, y_smoothed)\n\n# 3. L2 Normalization\nnorm_sample = np.linalg.norm(y_interp)\ny_final = y_interp / norm_sample if norm_sample != 0 else y_interp\n\n# Identification against reference library\nsids_raw = np.asarray(lib_data['table']['spectrum_id'])\nmats_raw = np.asarray(lib_data['table']['material'])\nx_lib_col = np.asarray(lib_data['table']['raman_shift_cm-1']).flatten()\ny_lib_col = np.asarray(lib_data['table']['intensity']).flatten()\n\nspectrum_ids = np.unique(sids_raw)\n\nbest_sim = -1\nbest_mat = None\n\nfor sid in spectrum_ids:\n    mask = (sids_raw == sid)\n    mat = mats_raw[mask][0]\n    y_ref_raw = y_lib_col[mask]\n    x_r_raw = x_lib_col[mask]\n    \n    # Interpolate ref to the same axis as our processed sample (x_ref)\n    y_ref_interp = np.interp(x_ref, x_r_raw, y_ref_raw)\n    \n    # L2 Normalize reference\n    norm_ref = np.linalg.norm(y_ref_interp)\n    y_ref_norm = y_ref_interp / norm_ref if norm_ref != 0 else y_ref_interp\n        \n    # Cosine similarity\n    sim = np.dot(y_final, y_ref_norm)\n    \n    if sim > best_sim:\n        best_sim = sim\n        best_mat = mat\n\nprint(f\"Best material: {best_mat}\")\nprint(f\"Similarity: {best_sim:.4f}\")\n\nsave_result('T119_processed.csv', y_final, raman_shift=x_ref)\n",
+        "file_ids": [
+          "2026-08-05/T119.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-04_CoALA_CoALA_T119_1078a6/spectra/01_T119_processed.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T119_1078a6",
+  "elapsed_s": 124.23,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

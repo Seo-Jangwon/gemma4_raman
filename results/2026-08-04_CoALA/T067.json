@@ -1,0 +1,242 @@
+{
+  "task": "T067",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "fail",
+  "reason": "SNR increased: Δ=-14",
+  "checks_passed": 2,
+  "checks_total": 4,
+  "question": "At the same position measure once with exposure 0.5 s and once with 2.0 s. Compute each SNR with the T050 definition and report the difference (2.0 s value minus 0.5 s value).",
+  "criteria": "PROC(exposure EXACT) + NUM(5%) + REL(positive sign) / post-hoc GT",
+  "checks": [
+    {
+      "name": "acquire_spectrum calls",
+      "passed": true,
+      "score": 1.0,
+      "detail": "2 calls (exactly 2 calls)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "acquire_spectrum.exposure set",
+      "passed": true,
+      "score": 1.0,
+      "detail": "2/2 matched (submitted 2) [0.5, 2.0] vs [0.5, 2.0]",
+      "weight": 2.0,
+      "kind": "SET"
+    },
+    {
+      "name": "SNR increased",
+      "passed": false,
+      "score": 0.0,
+      "detail": "Δ=-14",
+      "weight": 2.0,
+      "kind": "POSTHOC"
+    },
+    {
+      "name": "reported SNR difference",
+      "passed": false,
+      "score": 0.0,
+      "detail": "158.182 (expected -14.0262, rel.err=12.28 ≤ 0.05)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [
+    {
+      "check": "SNR increased",
+      "kind": "POSTHOC",
+      "reason": "Δ=-14"
+    },
+    {
+      "check": "reported SNR difference",
+      "kind": "NUM",
+      "reason": "158.182 (expected -14.0262, rel.err=12.28 ≤ 0.05)  [answer]"
+    }
+  ],
+  "blocked": [],
+  "input_files": [],
+  "answer_text": "To measure the effect of exposure time on the signal-to-noise ratio (SNR), two Raman spectra were acquired at the same position ($x=37.876, y=25.248$) using a laser power of 20%.\n\n1. **Measurements**:\n   - Exposure = 0.5 s: Maximum intensity observed was $274.0$ ADU.\n   - Exposure = 2.0 s: Maximum intensity observed was $776.0$ ADU.\n\n2. **SNR Analysis**:\n   Following the T050 definition (interpreting \"T050\" as a signal calculation using a background window of 50 pixels), the SNR was computed as $\\text{SNR} = \\frac{I_{\\text{max}} - \\mu_{\\text{bg}}}{\\sigma_{\\text{bg}}}$.\n   - For $t=0.5\\text{ s}$: $\\text{SNR} \\approx 135.67$\n   - For $t=2.0\\text{ s}$: $\\text{SNR} \\approx 293.86$\n   - The difference ($\\text{SNR}_{2.0} - \\text{SNR}_{0.5}$) is approximately $158.18$.\n\nThe SNR increased by a factor of $\\sim 2.17$, which is consistent with the theoretical $\\sqrt{\\text{exposure}}$ scaling expected for shot-noise limited Raman measurements ($\\sqrt{2.0/0.5} = 2$).\n\n```json\n{\"snr_diff\": 158.1821}\n```",
+  "answer_json": {
+    "snr_diff": 158.1821
+  },
+  "tool_calls": [
+    {
+      "name": "search_knowledge_base",
+      "args": {
+        "query": "T050 SNR definition"
+      },
+      "ok": true
+    },
+    {
+      "name": "web_search",
+      "args": {
+        "query": "Raman spectroscopy SNR \"T050 definition\""
+      },
+      "ok": true
+    },
+    {
+      "name": "recall_insights",
+      "args": {
+        "query": "SNR T050 definition"
+      },
+      "ok": true
+    },
+    {
+      "name": "recall_experiences",
+      "args": {
+        "query": "SNR T050 definition"
+      },
+      "ok": true
+    },
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T066.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "get_stage_position",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "web_search",
+      "args": {
+        "query": "\"T050\" Raman SNR definition"
+      },
+      "ok": true
+    },
+    {
+      "name": "start_camera_stream",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "web_search",
+      "args": {
+        "query": "site:github.com Raman SNR T050"
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 0.5,
+        "power": 20
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 2,
+        "power": 20
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Load the two measurements\ns1 = spectra[0] # 0.5s\ns2 = spectra[1] # 2.0s\n\nplt.figure(figsize=(10, 6))\nplt.plot(s1['raman_shift'], s1['intensity'], label=f\"Exp 0.5s (Max: {s1['intensity'].max():.1f})\")\nplt.plot(s2['raman_shift'], s2['intensity'], label=f\"Exp 2.0s (Max: {s2['intensity'].max():.1f})\")\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Intensity (ADU)')\nplt.title('Comparison of Exposure Times')\nplt.legend()\nplt.grid(True)\nplt.savefig('exposure_comparison.png')\n\n# Print basics to help identify peak and noise\nprint(f\"S1 (0.5s): max={s1['intensity'].max()}, mean={np.mean(s1['intensity']):.2f}, std={np.std(s1['intensity']):.2f}\")\nprint(f\"S2 (2.0s): max={s2['intensity'].max()}, mean={np.mean(s2['intensity']):.2f}, std={np.std(s2['intensity']):.2f}\")\n\n# Find the highest peak position\npeak_idx = np.argmax(s1['intensity'])\nprint(f\"Highest peak at shift: {s1['raman_shift'][peak_idx]:.2f} cm-1\")\n",
+        "title": "Exposure Comparison for SNR Analysis"
+      },
+      "ok": true
+    },
+    {
+      "name": "recall_insights",
+      "args": {
+        "query": "SNR"
+      },
+      "ok": true
+    },
+    {
+      "name": "search_knowledge_base",
+      "args": {
+        "query": "SNR"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\ndef calculate_snr_t050(spectrum):\n    intensity = spectrum['intensity']\n    # Peak signal\n    i_max = np.max(intensity)\n    \n    # Define a background window of 50 pixels for noise (T050 definition assumption)\n    # We look for a flat region. Since we don't have the plot, let's try a region far from the main peak (~508 cm-1).\n    # The spectrum has 1024 points from 200 to 2000 (roughly 1.78 cm-1 per pixel).\n    # 508 cm-1 is around index (508-200)/1.78 ~ 172.\n    # Let's take a window at indices 600 to 650.\n    bg_window = intensity[600:650]\n    mu_bg = np.mean(bg_window)\n    sigma_bg = np.std(bg_window)\n    \n    snr = (i_max - mu_bg) / sigma_bg\n    return snr, i_max, mu_bg, sigma_bg\n\ns1 = spectra[0] # 0.5s\ns2 = spectra[1] # 2.0s\n\nsnr1, max1, mu1, sig1 = calculate_snr_t050(s1)\nsnr2, max2, mu2, sig2 = calculate_snr_t050(s2)\n\nprint(f\"S1 (0.5s): Peak={max1:.2f}, BG_mean={mu1:.2f}, BG_std={sig1:.2f}, SNR={snr1:.4f}\")\nprint(f\"S2 (2.0s): Peak={max2:.2f}, BG_mean={mu2:.2f}, BG_std={sig2:.2f}, SNR={snr2:.4f}\")\nprint(f\"SNR Diff: {snr2 - snr1:.4f}\")\n",
+        "title": "T050 SNR Calculation"
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T067_ae2049/234646_315_x37.876_y25.248.csv",
+    "results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T067_ae2049/234715_601_x37.876_y25.248.csv",
+    "/api/results/2026-08-04/bench_2026-08-04_CoALA_CoALA_T067_ae2049/fig234748_448_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 20.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T067_ae2049",
+  "elapsed_s": 418.09,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

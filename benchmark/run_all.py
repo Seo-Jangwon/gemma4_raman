@@ -5,6 +5,12 @@
     python benchmark/run_all.py --agent AILA                 # 터미널 2
     python benchmark/run_all.py --agent CoALA --tasks T001,T062
     python benchmark/run_all.py --check                      # 실행 없이 문항 파일만 점검
+    python benchmark/run_all.py --agent CoALA --task-timeout 600   # 문항당 10분에서 컷
+    python benchmark/run_all.py --agent AILA  --task-timeout 0     # 상한 없음(예전과 동일)
+
+문항당 상한은 기본 900 초다. 넘기면 그 문항을 끊고 **그때까지 한 일로 그대로 채점**한다
+(판정 항목은 안 늘어난다 — 상한 없이 돈 예전 결과와 checks_total 이 같아야 비교가 된다).
+끊었는데도 에이전트가 안 멈추면 실행 전체를 세운다 — --task-timeout 주석 참고.
 
 [한 문항이 도는 순서]
     reset()          앞 문항이 무엇을 바꿔 놨든 전 장비를 기본값으로
@@ -187,7 +193,7 @@ def _check_answer_keys(pairs) -> tuple:
 # ══════════════════════════════════════════════════════════════════════════════
 # 실행
 # ══════════════════════════════════════════════════════════════════════════════
-def run_one(b: Bench, mod, task, run_id: str, axis=None) -> tuple:
+def run_one(b: Bench, mod, task, run_id: str, axis=None, timeout_s=None) -> tuple:
     """(평가 payload, 치명적 사유 or None)
 
     [치명과 권고를 가르는 기준 — 2026-08-03]
@@ -231,7 +237,14 @@ def run_one(b: Bench, mod, task, run_id: str, axis=None) -> tuple:
     before = b.state()
     if not before:
         fatal.append("could not read the starting state - every state check will fail")
-    run = b.run(task, run_id)
+    run = b.run(task, run_id, timeout_s=timeout_s)
+    # 시간 상한에 걸린 것은 warn 이지 fatal 이 아니다. 상한을 넘겼다는 것 자체가
+    # 에이전트가 못 끝냈다는 뜻이므로, 그때까지 한 일로 그대로 채점한다 —
+    # fatal 로 올리면 result=error 가 되어 해결률 분모에서 빠지고, 영원히 도는
+    # 에이전트가 오히려 분모에서 사라져 성적이 좋아 보인다.
+    if run.timed_out:
+        warn.append(f"cut at the {timeout_s:.0f}s task time limit "
+                    f"(ran {run.elapsed_s:.0f}s, {len(run.calls)} tool calls)")
     run.state_before = before
     run.state_after = b.state()
     return _finish(b, mod, task, run, fatal, warn), None
@@ -244,7 +257,12 @@ def _finish(b, mod, task, run, fatal, warn) -> dict:
         checks = mod.evaluate(b, run)
     except Exception:
         checks = [chk.fail("grading raised", traceback.format_exc(limit=4))]
-    return R.score_task(task, checks, run)
+    payload = R.score_task(task, checks, run)
+    # 판정 목록은 건드리지 않고 키만 더 얹는다. 상한 없이 돈 예전 결과 파일에는 이
+    # 키들이 없으므로 읽는 쪽은 .get("timed_out", False) 로 봐야 한다.
+    payload["timed_out"] = bool(getattr(run, "timed_out", False))
+    payload["abandoned"] = bool(getattr(run, "abandoned", False))
+    return payload
 
 
 def main() -> int:
@@ -255,6 +273,22 @@ def main() -> int:
     ap.add_argument("--server", default="http://localhost:8000")
     ap.add_argument("--run-id", default="")
     ap.add_argument("--check", action="store_true", help="실행 없이 문항 파일만 점검")
+    # 문항당 벽시계 상한.
+    #
+    # [왜 필요한가 — 2026-08-04]
+    # CoALA 가 N07 에서 같은 좌표를 30 회 재측정하며 72 분을 먹고도 안 끝났다.
+    # 에이전트 안의 가드(_MAX_CYCLES=150)는 사이클당 2.4 분이면 6 시간이라 사실상
+    # 없는 것과 같았고, 실행 전체를 죽이는 수밖에 없었다.
+    #
+    # [기본값을 900 으로 정한 근거]
+    # 2026-08-04 AILA 143 문항의 실측: 중앙값 56 초, 평균 92 초, 최대 574 초(T031).
+    # 10 분(600 초)은 최장 문항 위로 26 초밖에 안 남겨서, T031 류가 조금만 느려지면
+    # 잘린다 — 그러면 그 문항의 결과가 바뀌어 상한 없이 돈 예전 실행과 비교가
+    # 깨진다. 900 초는 최장 문항의 1.6 배라 정상 문항은 걸리지 않으면서, N07 이
+    # 72 분을 먹은 것 같은 폭주는 확실히 자른다.
+    # 0 이면 무제한(= 상한이 없던 예전 실행과 동일).
+    ap.add_argument("--task-timeout", type=float, default=900.0, metavar="SEC",
+                    help="문항당 상한(초). 0 이면 무제한. 기본 900(15분)")
     args = ap.parse_args()
 
     only = {t.strip() for t in args.tasks.split(",") if t.strip()} or None
@@ -305,12 +339,14 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     b.run_id = run_id
 
-    print(f"에이전트 {args.agent} / 문항 {len(pairs)}개 / 출력 {out}\n")
+    cap = max(0.0, args.task_timeout)
+    print(f"에이전트 {args.agent} / 문항 {len(pairs)}개 / 출력 {out}"
+          + (f" / 문항당 상한 {cap:.0f}s" if cap else " / 문항당 상한 없음") + "\n")
     results = []
     for i, (mod, task) in enumerate(pairs, 1):
         tag = "?" if task.mode == "hypothetical" else " "
         print(f"  [{i:3d}/{len(pairs)}]{tag}{task.id} ...", end="", flush=True)
-        payload, fatal = run_one(b, mod, task, run_id)
+        payload, fatal = run_one(b, mod, task, run_id, timeout_s=cap or None)
         if fatal:
             print(f"\n[fatal] {task.id}: {fatal}\n        장비가 이상한 상태로 남았을 수 "
                   f"있습니다. 확인 후 다시 시작하세요.", file=sys.stderr)
@@ -326,7 +362,21 @@ def main() -> int:
                 "blocked": "- 채점제외", "error": "! 실행실패"}
         print(f" {MARK.get(payload['result'], payload['result']):9s}"
               f" ({payload['checks_passed']}/{payload['checks_total']} 판정)"
+              f"{'  [시간초과 컷]' if payload.get('timed_out') else ''}"
               f"{'  ' + payload['reason'][:44] if payload['reason'] else ''}")
+
+        # 중단을 요청했는데 안 멈춘 에이전트. 이 문항의 결과는 위에 이미 남겼고,
+        # 여기서 실행을 세운다 — 장비를 쥔 채 도는 에이전트 위에서 남은 문항을
+        # 돌리면 그 결과가 전부 못 쓰게 되고, 그 사이 시료에는 계속 빔이 들어간다.
+        # (teardown·reset 은 위에서 이미 한 번 시도했다 — reset 이 레이저를 끈다.)
+        if payload.get("abandoned"):
+            print(f"\n[fatal] {task.id}: 시간 상한으로 중단을 요청했으나 에이전트가 멈추지 "
+                  f"않았습니다.\n"
+                  f"        장비를 계속 쥐고 있을 수 있어 여기서 세웁니다 — 남은 "
+                  f"{len(pairs) - i}개 문항은 돌리지 않습니다.\n"
+                  f"        레이저 상태를 직접 확인하고, 서버(python -m backend.server)를 "
+                  f"내렸다 올린 뒤 --tasks 로 이어서 돌리세요.", file=sys.stderr)
+            break
 
     summary = R.summarize(results, all_tasks,
                           meta={"agent": args.agent, "run_id": run_id,

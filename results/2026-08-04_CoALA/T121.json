@@ -1,0 +1,235 @@
+{
+  "task": "T121",
+  "axis": "identification",
+  "mode": "live",
+  "result": "fail",
+  "reason": "all 8 references in order: 6/8 matched (submitted 8) ['PS_01', 'PS_03', 'PS_02', 'PET_02', 'PMMA_01', 'PET_01']... vs ['PS_01', 'PS_03', 'PS_02', 'PET_02', 'PMMA_01', 'PET_01']...",
+  "checks_passed": 0,
+  "checks_total": 2,
+  "question": "Compare T121.csv with all 8 references in reference_library_8.csv and sort every reference by similarity, descending. If two scores are equal, order them by spectrum_id ascending.",
+  "criteria": "EXACT(8 items in order) + NUM(scores ±0.01)",
+  "checks": [
+    {
+      "name": "all 8 references in order",
+      "passed": false,
+      "score": 0.75,
+      "detail": "6/8 matched (submitted 8) ['PS_01', 'PS_03', 'PS_02', 'PET_02', 'PMMA_01', 'PET_01']... vs ['PS_01', 'PS_03', 'PS_02', 'PET_02', 'PMMA_01', 'PET_01']...",
+      "weight": 2.0,
+      "kind": "SET"
+    },
+    {
+      "name": "similarity scores",
+      "passed": false,
+      "score": 0.0,
+      "detail": "3/8 matched (submitted 8) [0.994, 0.994, 0.977, 0.108, 0.09, 0.067]... vs [0.995, 0.994, 0.978, 0.229, 0.179, 0.167]...",
+      "weight": 1.0,
+      "kind": "SET"
+    }
+  ],
+  "failures": [
+    {
+      "check": "all 8 references in order",
+      "kind": "SET",
+      "reason": "6/8 matched (submitted 8) ['PS_01', 'PS_03', 'PS_02', 'PET_02', 'PMMA_01', 'PET_01']... vs ['PS_01', 'PS_03', 'PS_02', 'PET_02', 'PMMA_01', 'PET_01']..."
+    },
+    {
+      "check": "similarity scores",
+      "kind": "SET",
+      "reason": "3/8 matched (submitted 8) [0.994, 0.994, 0.977, 0.108, 0.09, 0.067]... vs [0.995, 0.994, 0.978, 0.229, 0.179, 0.167]..."
+    }
+  ],
+  "blocked": [],
+  "input_files": [
+    "T121.csv",
+    "reference_library_8.csv"
+  ],
+  "answer_text": "The target spectrum `T121.csv` was compared against the 8 references in `reference_library_8.csv` using Pearson correlation as the similarity metric. The reference spectra were sorted by their similarity scores in descending order, with ties broken by sorting the `spectrum_id` in ascending order.\n\nThe most similar spectrum is `PS_01`, followed closely by `PS_03` and `PS_02`, indicating that T121 is highly similar to polystyrene references.\n\n```json\n{\n  \"ranking\": [\n    {\"spectrum_id\": \"PS_01\", \"score\": 0.9942251575639341},\n    {\"spectrum_id\": \"PS_03\", \"score\": 0.9936069869565981},\n    {\"spectrum_id\": \"PS_02\", \"score\": 0.9774328301008776},\n    {\"spectrum_id\": \"PET_02\", \"score\": 0.10826284125212271},\n    {\"spectrum_id\": \"PMMA_01\", \"score\": 0.09006121021482966},\n    {\"spectrum_id\": \"PET_01\", \"score\": 0.06700552391293213},\n    {\"spectrum_id\": \"SI_01\", \"score\": -0.02581725495699466},\n    {\"spectrum_id\": \"CAL_01\", \"score\": -0.027055206886987353}\n  ]\n}\n```",
+  "answer_json": {
+    "ranking": [
+      {
+        "spectrum_id": "PS_01",
+        "score": 0.9942251575639341
+      },
+      {
+        "spectrum_id": "PS_03",
+        "score": 0.9936069869565981
+      },
+      {
+        "spectrum_id": "PS_02",
+        "score": 0.9774328301008776
+      },
+      {
+        "spectrum_id": "PET_02",
+        "score": 0.10826284125212271
+      },
+      {
+        "spectrum_id": "PMMA_01",
+        "score": 0.09006121021482966
+      },
+      {
+        "spectrum_id": "PET_01",
+        "score": 0.06700552391293213
+      },
+      {
+        "spectrum_id": "SI_01",
+        "score": -0.02581725495699466
+      },
+      {
+        "spectrum_id": "CAL_01",
+        "score": -0.027055206886987353
+      }
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/T121.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/reference_library_8.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# Load target spectrum T121\ntarget_file = files['2026-08-05/T121.csv']\nx_target = target_file['table']['raman_shift_cm-1']\ny_target = target_file['table']['intensity']\n\n# Load reference library\nlib_file = files['2026-08-05/reference_library_8.csv']\nids = lib_file['table']['spectrum_id']\nx_lib = lib_file['table']['raman_shift_cm-1']\ny_lib = lib_file['table']['intensity']\n\n# Find unique spectrum IDs\nunique_ids = np.unique(ids)\nprint(f\"Found {len(unique_ids)} unique spectra in library: {unique_ids}\")\n\nresults = []\n\nfor sid in unique_ids:\n    # Mask for current reference spectrum\n    mask = (ids == sid)\n    x_ref = x_lib[mask]\n    y_ref = y_lib[mask]\n    \n    # Ensure they are aligned. Both should be 200-2000 with step 1.\n    # We can use interpolation or just assume alignment if shapes match and x is same.\n    if len(x_ref) == len(x_target):\n        # Calculate Pearson correlation coefficient\n        corr = np.corrcoef(y_target, y_ref)[0, 1]\n    else:\n        # If lengths differ, interpolate reference to target's x-axis\n        y_ref_interp = np.interp(x_target, x_ref, y_ref)\n        corr = np.corrcoef(y_target, y_ref_interp)[0, 1]\n    \n    results.append({'spectrum_id': sid, 'score': float(corr)})\n\n# Sort: score DESC, spectrum_id ASC\n# In Python, sort is stable. So we sort by id first, then by score (desc).\nsorted_results = sorted(results, key=lambda x: x['spectrum_id'])\nsorted_results = sorted(sorted_results, key=lambda x: x['score'], reverse=True)\n\nprint(\"Ranking:\")\nfor r in sorted_results:\n    print(f\"{r['spectrum_id']}: {r['score']}\")\n\n# Store for the final answer\nfinal_ranking = sorted_results\n",
+        "file_ids": [
+          "2026-08-05/T121.csv",
+          "2026-08-05/reference_library_8.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# Find target spectrum data in files list\ntarget_data = next(f for f in files if f['file_id'] == '2026-08-05/T121.csv')\nx_target = target_data['table']['raman_shift_cm-1']\ny_target = target_data['table']['intensity']\n\n# Find reference library data in files list\nlib_data = next(f for f in files if f['file_id'] == '2026-08-05/reference_library_8.csv')\nids = lib_data['table']['spectrum_id']\nx_lib = lib_data['table']['raman_shift_cm-1']\ny_lib = lib_data['table']['intensity']\n\n# Find unique spectrum IDs\nunique_ids = np.unique(ids)\nprint(f\"Found {len(unique_ids)} unique spectra in library: {unique_ids}\")\n\nresults = []\n\nfor sid in unique_ids:\n    # Mask for current reference spectrum\n    mask = (ids == sid)\n    x_ref = x_lib[mask]\n    y_ref = y_lib[mask]\n    \n    # Alignment check. Both should be 200-2000 with step 1.\n    if len(x_ref) == len(x_target):\n        corr = np.corrcoef(y_target, y_ref)[0, 1]\n    else:\n        y_ref_interp = np.interp(x_target, x_ref, y_ref)\n        corr = np.corrcoef(y_target, y_ref_interp)[0, 1]\n    \n    results.append({'spectrum_id': sid, 'score': float(corr)})\n\n# Sort: score DESC, spectrum_id ASC\nsorted_results = sorted(results, key=lambda x: x['spectrum_id'])\nsorted_results = sorted(sorted_results, key=lambda x: x['score'], reverse=True)\n\nprint(\"Ranking:\")\nfor r in sorted_results:\n    print(f\"{r['spectrum_id']}: {r['score']}\")\n",
+        "file_ids": [
+          "2026-08-05/T121.csv",
+          "2026-08-05/reference_library_8.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# Locate target file in the files list\ntarget_data = None\nfor f in files:\n    if f['file_id'] == '2026-08-05/T121.csv':\n        target_data = f\n        break\n\n# Locate library file in the files list\nlib_data = None\nfor f in files:\n    if f['file_id'] == '2026-08-05/reference_library_8.csv':\n        lib_data = f\n        break\n\nif target_data is None or lib_data is None:\n    print(\"Error: One or more files not found in the injected 'files' list.\")\nelse:\n    x_target = target_data['table']['raman_shift_cm-1']\n    y_target = target_data['table']['intensity']\n\n    ids = lib_data['table']['spectrum_id']\n    x_lib = lib_data['table']['raman_shift_cm-1']\n    y_lib = lib_data['table']['intensity']\n\n    unique_ids = np.unique(ids)\n    print(f\"Found {len(unique_ids)} unique spectra in library: {unique_ids}\")\n\n    results = []\n\n    for sid in unique_ids:\n        # Mask for current reference spectrum\n        mask = (ids == sid)\n        x_ref = x_lib[mask]\n        y_ref = y_lib[mask]\n        \n        # Correlation calculation\n        if len(x_ref) == len(x_target):\n            corr = np.corrcoef(y_target, y_ref)[0, 1]\n        else:\n            y_ref_interp = np.interp(x_target, x_ref, y_ref)\n            corr = np.corrcoef(y_target, y_ref_interp)[0, 1]\n        \n        results.append({'spectrum_id': sid, 'score': float(corr)})\n\n    # Sort: score DESC, then spectrum_id ASC\n    # First sort by ID ascending (secondary key)\n    sorted_results = sorted(results, key=lambda x: x['spectrum_id'])\n    # Then sort by score descending (primary key), since Python's sort is stable\n    sorted_results = sorted(sorted_results, key=lambda x: x['score'], reverse=True)\n\n    print(\"Ranking:\")\n    for r in sorted_results:\n        print(f\"{r['spectrum_id']}: {r['score']}\")\n",
+        "file_ids": [
+          "2026-08-05/T121.csv",
+          "2026-08-05/reference_library_8.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# Locate target file in the files list\ntarget_data = None\nfor f in files:\n    if f['file_id'] == '2026-08-05/T121.csv':\n        target_data = f\n        break\n\n# Locate library file in the files list\nlib_data = None\nfor f in files:\n    if f['file_id'] == '2026-08-05/reference_library_8.csv':\n        lib_data = f\n        break\n\nif target_data is None or lib_data is None:\n    print(\"Error: One or more files not found in the injected 'files' list.\")\nelse:\n    # Use .flatten() to ensure 1D arrays\n    x_target = np.asarray(target_data['table']['raman_shift_cm-1']).flatten()\n    y_target = np.asarray(target_data['table']['intensity']).flatten()\n\n    ids = np.asarray(lib_data['table']['spectrum_id']).flatten()\n    x_lib_all = np.asarray(lib_data['table']['raman_shift_cm-1']).flatten()\n    y_lib_all = np.asarray(lib_data['table']['intensity']).flatten()\n\n    unique_ids = np.unique(ids)\n    print(f\"Found {len(unique_ids)} unique spectra in library: {unique_ids}\")\n\n    results = []\n\n    for sid in unique_ids:\n        # Mask for current reference spectrum\n        mask = (ids == sid)\n        x_ref = x_lib_all[mask]\n        y_ref = y_lib_all[mask]\n        \n        # Correlation calculation\n        if len(x_ref) == len(x_target):\n            # Both are likely 1801 points, calculate correlation directly\n            corr = np.corrcoef(y_target, y_ref)[0, 1]\n        else:\n            # Interpolate reference to target's x-axis to ensure alignment\n            y_ref_interp = np.interp(x_target, x_ref, y_ref)\n            corr = np.corrcoef(y_target, y_ref_interp)[0, 1]\n        \n        results.append({'spectrum_id': sid, 'score': float(corr)})\n\n    # Sort: score DESC, then spectrum_id ASC\n    sorted_results = sorted(results, key=lambda x: x['spectrum_id'])\n    sorted_results = sorted(sorted_results, key=lambda x: x['score'], reverse=True)\n\n    print(\"Ranking:\")\n    for r in sorted_results:\n        print(f\"{r['spectrum_id']}: {r['score']}\")\n",
+        "file_ids": [
+          "2026-08-05/T121.csv",
+          "2026-08-05/reference_library_8.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T121_31c1e1",
+  "elapsed_s": 135.2,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

@@ -108,6 +108,14 @@ class Run:
         self.errors: list[str] = []
         self.warnings: list[str] = []
         self.elapsed_s: float = 0.0
+        # 문항별 시간 상한에 걸려 중간에 끊겼는가. 채점은 그대로 한다 — 그때까지 한
+        # 일로 판정할 뿐이고, 판정 항목이 늘거나 줄지 않는다(상한 없이 돈 예전 결과와
+        # checks_total 이 같아야 비교가 성립한다).
+        self.timed_out: bool = False
+        # 중단을 요청했는데 유예 안에 **안 멈춘** 경우. timed_out 과 달리 이건
+        # 그 문항 하나의 문제가 아니다 — 에이전트가 장비를 쥔 채 계속 돌고 있다는
+        # 뜻이라 뒤에 오는 문항이 전부 그 위에서 돈다. 러너가 실행을 세운다.
+        self.abandoned: bool = False
 
     # ── 도구 호출 ────────────────────────────────────────────────────────────
     def names(self) -> list[str]:
@@ -305,19 +313,46 @@ class Bench:
         return self._post("/api/bench/inputs", {"names": list(names)}, timeout=300.0)
 
     # ── 실행 ─────────────────────────────────────────────────────────────────
-    def run(self, task, run_id="") -> Run:
-        """문항을 실행하고 Run 을 돌려준다. 예외를 던지지 않는다."""
+    def run(self, task, run_id="", timeout_s=None, grace_s=300.0) -> Run:
+        """문항을 실행하고 Run 을 돌려준다. 예외를 던지지 않는다.
+
+        timeout_s 를 주면 그 초를 넘긴 실행을 끊는다(None·0 이면 무제한 — 상한이
+        없던 예전 실행과 같다). 컷은 세 단계다:
+
+          1. 상한을 넘긴 것을 **이벤트를 받은 자리에서** 안다. 도구 호출 하나가
+             진행 중이면 그것이 끝나야 오므로, 실제 컷은 '상한 + 마지막 도구 1회'다.
+          2. /api/bench/cancel 로 서버의 에이전트 루프에 중단을 요청한다. 스트림만
+             끊으면 에이전트는 executor 스레드에서 계속 돌며 장비를 쥐고 있어
+             **다음 문항이 그 잔재 위에서 채점된다** — 이쪽이 훨씬 나쁘다.
+          3. grace_s 동안 스트림이 실제로 닫히는지 본다. 안 닫히면 run.abandoned 를
+             세우고, 러너가 거기서 실행 전체를 세운다 — 폭주하는 에이전트가 장비를
+             쥔 채로 남은 문항이 도는 것보다 멈추는 편이 낫다.
+
+        읽기 타임아웃도 함께 줄인다 — 이벤트가 아예 안 오는(완전히 멈춘) 실행은
+        1 번이 영영 안 오기 때문이다.
+
+        [grace_s 를 300 초로 잡은 근거 — 2026-08-04]
+        중단은 이벤트 경계에서만 걸리므로, 유예는 **도구 호출 1 회보다 넉넉해야**
+        한다. 짧으면 멀쩡한 문항을 '안 멈췄다'고 오판해 실행을 세운다. 그날 AILA
+        143 문항에서 관측된 최장 단일 호출은 T088 의 약 101 초였다(1 호출 101 초).
+        그 3 배이자 reset() 자체 타임아웃과 같은 값으로 맞췄다.
+        """
         import time
         sid = f"bench_{run_id or self.run_id or 'adhoc'}_{self.agent}_{task.id}_{uuid.uuid4().hex[:6]}"
         r = Run(task.id, task.prompt, self.agent, sid)
         message = task.prompt + output_contract(task)
 
+        cap = float(timeout_s) if timeout_s else 0.0
+        # 무응답 백스톱. 상한이 있으면 '상한+유예'만큼 기다렸다 읽기 타임아웃으로 끊는다.
+        read_to = (cap + grace_s) if cap > 0 else self.timeout
+
         t0 = time.time()
+        cut_at = None                      # 중단을 요청한 시각(아직이면 None)
         body = {"agent": self.agent, "message": message, "task": task.id,
                 "session_id": sid, "enforce_grid_gate": task.enforce_grid_gate}
         try:
             resp = self._rq.post(f"{self.base}/api/bench/stream", json=body, stream=True,
-                                 timeout=self.timeout,
+                                 timeout=(10.0, read_to),
                                  headers={"Accept": "text/event-stream"})
             if not resp.ok:
                 r.errors.append(f"HTTP {resp.status_code}: {resp.text[:300]}")
@@ -331,12 +366,42 @@ class Bench:
                         r.text = ev.get("text") or ""
                     elif kind == "error":
                         r.errors.append(ev.get("detail") or "unknown")
+
+                    now = time.time()
+                    if cut_at is None:
+                        if cap > 0 and now - t0 > cap:
+                            r.timed_out = True
+                            cut_at = now
+                            self.cancel(sid)
+                    elif now - cut_at > grace_s:
+                        r.abandoned = True
+                        r.warnings.append(
+                            f"the agent did not stop within {grace_s:.0f}s of the time-limit cut "
+                            f"- it may still be holding the instrument, so every task after this "
+                            f"one is suspect")
+                        break
+                resp.close()
         except Exception as e:
-            r.errors.append(f"stream failed: {type(e).__name__}: {e}")
+            if cap > 0 and time.time() - t0 > cap:
+                # 이벤트가 끊긴 채로 상한을 넘겼다. 중단을 요청은 하지만 **멈췄는지
+                # 확인할 방법이 없다**(확인에 쓸 스트림이 이미 죽었다). 확인 못 한
+                # 것은 안 멈춘 것으로 친다 — 장비를 쥔 채 도는 에이전트 위에서
+                # 남은 문항을 돌리는 쪽이 훨씬 나쁘다.
+                r.timed_out = True
+                r.abandoned = True
+                self.cancel(sid)
+                r.errors.append(f"no event for {read_to:.0f}s after the {cap:.0f}s time limit "
+                                f"- cut ({type(e).__name__})")
+            else:
+                r.errors.append(f"stream failed: {type(e).__name__}: {e}")
         r.elapsed_s = time.time() - t0
         r.answer = _parse_answer(r.text)
         r.artifacts = self.artifacts(sid)
         return r
+
+    def cancel(self, session_id: str) -> dict:
+        """진행 중인 실행에 중단을 요청한다(협조적 — 다음 이벤트 경계에서 멈춘다)."""
+        return self._post("/api/bench/cancel", {"session_id": session_id}, timeout=30.0)
 
     def artifacts(self, session_id: str) -> list:
         d = self._get("/api/bench/artifacts", {"session_id": session_id})

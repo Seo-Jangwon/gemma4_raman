@@ -1,0 +1,141 @@
+{
+  "task": "T045",
+  "axis": "data processing",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Compute the FWHM of the strongest peak inside 980-1020 cm-1 of T045.csv. Take the half height as (peak intensity - interval minimum)/2 and find the crossings by linear interpolation.",
+  "criteria": "NUM(5%)",
+  "checks": [
+    {
+      "name": "FWHM",
+      "passed": true,
+      "score": 1.0,
+      "detail": "5.8345 (expected 5.83453, rel.err=5.681e-06 ≤ 0.05)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T045.csv"
+  ],
+  "answer_text": "Based on the analysis of the file `T045.csv`, the strongest peak in the interval 980-1020 cm⁻¹ was identified. The calculation was performed as follows:\n- **Interval Minimum Intensity**: 22.0626\n- **Peak Maximum Intensity**: 1000.8970\n- **Half Height Level**: $22.0626 + \\frac{1000.8970 - 22.0626}{2} = 511.4798$\n- **Left Crossing (interpolated)**: 998.1010 cm⁻¹\n- **Right Crossing (interpolated)**: 1003.9355 cm⁻¹\n- **FWHM**: $1003.9355 - 998.1010 = 5.8345$ cm⁻¹\n\n```json\n{\"fwhm_cm1\": 5.8345}\n```",
+  "answer_json": {
+    "fwhm_cm1": 5.8345
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T045.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load the file data\nfile_id = '2026-08-04/T045.csv'\ndata = files[0] # Based on list_uploaded_files, only one file is present\nx = data['table']['raman_shift_cm-1']\ny = data['table']['intensity']\n\n# Define interval\nlow, high = 980, 1020\nmask = (x >= low) & (x <= high)\nx_int = x[mask]\ny_int = y[mask]\n\nif len(x_int) == 0:\n    print(\"No data found in the specified interval.\")\nelse:\n    # Find strongest peak and interval minimum\n    idx_max = np.argmax(y_int)\n    i_max = y_int[idx_max]\n    x_max = x_int[idx_max]\n    i_min = np.min(y_int)\n    \n    # Half height calculation: (peak intensity - interval minimum)/2 + interval minimum\n    half_height = i_min + (i_max - i_min) / 2\n    print(f\"Interval min: {i_min:.4f}, Peak max: {i_max:.4f}\")\n    print(f\"Half height level: {half_height:.4f}\")\n\n    # Find crossings by linear interpolation\n    # Left crossing (between low and x_max)\n    left_mask = (x_int <= x_max)\n    x_left = x_int[left_mask]\n    y_left = y_int[left_mask]\n    \n    # Find the last index where y < half_height before the peak\n    idx_l1 = np.where(y_left < half_height)[0]\n    if len(idx_l1) == 0:\n        print(\"Could not find left crossing.\")\n        fwhm = None\n    else:\n        i_l1 = idx_l1[-1]\n        # Interpolate between i_l1 and i_l1 + 1\n        x1, x2 = x_left[i_l1], x_left[i_l1+1]\n        y1, y2 = y_left[i_l1], y_left[i_l1+1]\n        cross_left = x1 + (half_height - y1) * (x2 - x1) / (y2 - y1)\n        \n        # Right crossing (between x_max and high)\n        right_mask = (x_int >= x_max)\n        x_right = x_int[right_mask]\n        y_right = y_int[right_mask]\n        \n        # Find the first index where y < half_height after the peak\n        idx_r1 = np.where(y_right < half_height)[0]\n        if len(idx_r1) == 0:\n            print(\"Could not find right crossing.\")\n            fwhm = None\n        else:\n            i_r1 = idx_r1[0]\n            # Interpolate between i_r1 - 1 and i_r1\n            x1, x2 = x_right[i_r1-1], x_right[i_r1]\n            y1, y2 = y_right[i_r1-1], y_right[i_r1]\n            cross_right = x1 + (half_height - y1) * (x2 - x1) / (y2 - y1)\n            \n            fwhm = cross_right - cross_left\n            print(f\"Left crossing: {cross_left:.4f}, Right crossing: {cross_right:.4f}\")\n            print(f\"FWHM: {fwhm:.4f}\")\n\n# Save result for convenience if needed, but printing is enough here.\n",
+        "file_ids": [
+          "2026-08-04/T045.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T045_3772bf",
+  "elapsed_s": 65.22,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

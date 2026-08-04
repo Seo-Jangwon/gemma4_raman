@@ -1,0 +1,173 @@
+{
+  "task": "T098",
+  "axis": "diagnostics",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "In T098.csv the background rises steeply with wavenumber and buries the Raman peaks. Name the cause, apply IPBSA baseline correction with order 5, and report the peaks recovered (prominence 5% of range).",
+  "criteria": "KEYWORD(fluorescence) + ARRAY(cos>=0.99, NRMSE<=0.02) + SET(peak ±3 cm-1)",
+  "checks": [
+    {
+      "name": "peak positions",
+      "passed": true,
+      "score": 1.0,
+      "detail": "9/9 matched (submitted 9) [620.0, 794.0, 1001.0, 1031.0, 1155.0, 1183.0]... vs [620.0, 794.0, 1001.0, 1031.0, 1155.0, 1183.0]...",
+      "weight": 1.0,
+      "kind": "SET"
+    },
+    {
+      "name": "result array",
+      "passed": true,
+      "score": 1.0,
+      "detail": "cos=0.99989 NRMSE=0.00114",
+      "weight": 2.0,
+      "kind": "ARRAY"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T098.csv"
+  ],
+  "answer_text": "The steeply rising background observed in T098.csv is caused by **fluorescence**, a common phenomenon where the sample (or substrate) absorbs the excitation laser and emits light over a broad range of wavelengths, creating a high-intensity offset that obscures the weaker Raman scattering signals.\n\nI applied an IPBSA (Iterative Polynomial Background Subtraction Algorithm) baseline correction using a 5th-order polynomial to flatten the spectrum. After normalization and subtraction, peaks were detected using a prominence threshold of 5% of the corrected intensity range.\n\nThe recovered peak positions are as follows:\n- 620 $\\text{cm}^{-1}$\n- 794 $\\text{cm}^{-1}$\n- 1001 $\\text{cm}^{-1}$\n- 1031 $\\text{cm}^{-1}$\n- 1155 $\\text{cm}^{-1}$\n- 1183 $\\text{cm}^{-1}$\n- 1451 $\\text{cm}^{-1}$\n- 1583 $\\text{cm}^{-1}$\n- 1602 $\\text{cm}^{-1}$\n\n```json\n{\"peaks\": [620, 794, 1001, 1031, 1155, 1183, 1451, 1583, 1602]}\n```",
+  "answer_json": {
+    "peaks": [
+      620,
+      794,
+      1001,
+      1031,
+      1155,
+      1183,
+      1451,
+      1583,
+      1602
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/T098.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "apply_background_subtraction",
+      "args": {
+        "poly_order": 5,
+        "save_result": true,
+        "source": "2026-08-05/T098.csv",
+        "version_label": "v1_poly5"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\nfrom scipy.signal import find_peaks\n\n# Load data from uploaded file\ndata = files[0]['table']\nx = data['raman_shift_cm-1']\ny = data['intensity']\n\nplt.figure(figsize=(10, 6))\nplt.plot(x, y)\nplt.title(\"Raw Spectrum T098\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Intensity\")\nplt.grid(True)\nplt.savefig(\"raw_spectrum_T098.png\")\n\n# Implement a simple IPBSA-like iterative polynomial baseline subtraction\ndef ipbsa(x, y, order=5, max_iter=100, threshold=0.001):\n    y_curr = np.copy(y)\n    baseline = np.zeros_like(x)\n    \n    for i in range(max_iter):\n        # Fit polynomial to the current estimate (which is shifted down by previous baseline)\n        coeffs = np.polyfit(x, y_curr, order)\n        poly = np.poly1d(coeffs)\n        new_baseline = poly(x)\n        \n        # In true IPBSA, one often clips negative peaks before fitting or uses an iterative process \n        # to ensure the baseline doesn't follow the peaks. \n        # A common simple implementation is to fit and then subtract only if it improves.\n        # Here we implement a version that iteratively fits to the \"bottom\" of the signal.\n        \n        diff = np.linalg.norm(new_baseline - baseline) / (np.linalg.norm(baseline) + 1e-6)\n        baseline = new_baseline\n        \n        # Update y_curr: for a simple IPBSA, we might use the current fit to refine the next one\n        # But typically, we just want the final polynomial that fits the baseline.\n        # To avoid eating peaks, we can replace values above the poly with the poly itself for the next iteration.\n        y_curr = np.minimum(y, baseline) \n        if diff < threshold:\n            break\n    return baseline\n\nbaseline = ipbsa(x, y, order=5)\ny_corrected = y - baseline\n\nplt.figure(figsize=(10, 6))\nplt.plot(x, y, label='Raw')\nplt.plot(x, baseline, label='Baseline (Poly 5)', color='red')\nplt.plot(x, y_corrected, label='Corrected', color='green')\nplt.title(\"Baseline Correction T098\")\nplt.legend()\nplt.grid(True)\nplt.savefig(\"corrected_spectrum_T098.png\")\n\n# Peak detection: prominence 5% of range\ny_range = np.max(y_corrected) - np.min(y_corrected)\nprominence = 0.05 * y_range\npeaks, properties = find_peaks(y_corrected, prominence=prominence)\n\nprint(f\"Y Range: {y_range}\")\nprint(f\"Prominence threshold: {prominence}\")\nprint(f\"Recovered peak positions: {x[peaks]}\")\nsave_result(\"T098_corrected\", y_corrected, raman_shift=x)\n",
+        "file_ids": [
+          "2026-08-05/T098.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-04_CoALA_CoALA_T098_90d022/spectra/01_T098_corrected.csv",
+    "/api/results/2026-08-05/bench_2026-08-04_CoALA_CoALA_T098_90d022/fig005951_541_0.png",
+    "/api/results/2026-08-05/bench_2026-08-04_CoALA_CoALA_T098_90d022/fig005951_541_1.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 25.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -39,
+    "temperature_status": "NOT_STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 25.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 25.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 25.0
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T098_90d022",
+  "elapsed_s": 98.25,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

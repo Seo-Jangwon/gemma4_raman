@@ -1,0 +1,164 @@
+{
+  "task": "T103",
+  "axis": "diagnostics",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "All peaks of T103.csv are shifted by the same amount from the expected positions of the reference T103_ref.csv. Estimate the shift by cross-correlation, correct it, and report both the estimated shift and the corrected peak positions.",
+  "criteria": "NUM(shift ±0.2 cm-1, sign included) + SET(peak ±3 cm-1)",
+  "checks": [
+    {
+      "name": "shift",
+      "passed": true,
+      "score": 1.0,
+      "detail": "1 (expected 1, |Δ|=0 ≤ 0.2)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T103.csv",
+    "T103_ref.csv"
+  ],
+  "answer_text": "Based on the cross-correlation analysis of the provided spectra, it was determined that the peaks in `T103.csv` are shifted by **+1.0 cm⁻¹** relative to those in the reference file `T103_ref.csv`.\n\nTo correct this shift, the Raman shift axis of `T103.csv` was adjusted by subtracting 1.0 cm⁻¹. The original peaks at [621, 1002, 1032, 1451, 1583, 1603] cm⁻¹ were shifted to the corrected positions listed below, which align with the reference spectrum (excluding the additional peak at 620 cm⁻¹ present in T103).\n\n- **Estimated Shift**: 1.0 cm⁻¹\n- **Corrected Peak Positions**: [620, 1001, 1031, 1450, 1582, 1602] cm⁻¹\n\n```json\n{\"shift_cm1\": 1.0}\n```",
+  "answer_json": {
+    "shift_cm1": 1.0
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/T103.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/T103_ref.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\n\n# Load data from files (T103 and T103_ref)\n# Based on list_uploaded_files, indices depend on order of passing file_ids.\n# We pass ['2026-08-05/T103.csv', '2026-08-05/T103_ref.csv']\nt103 = files[0]\nt103_ref = files[1]\n\nx = t103['table']['raman_shift_cm-1']\ny = t103['table']['intensity']\nx_ref = t103_ref['table']['raman_shift_cm-1']\ny_ref = t103_ref['table']['intensity']\n\n# Normalize spectra for cross-correlation (subtract mean, divide by std)\ny_norm = (y - np.mean(y)) / np.std(y)\ny_ref_norm = (y_ref - np.mean(y_ref)) / np.std(y_ref)\n\n# Cross-correlation\ncorr = signal.correlate(y_norm, y_ref_norm, mode='full')\nlags = signal.correlation_lags(len(y_norm), len(y_ref_norm), mode='full')\nshift_idx = lags[np.argmax(corr)]\n\n# The shift in cm-1 is shift_idx * resolution\nresolution = x[1] - x[0]\nshift_cm1 = shift_idx * resolution\n\nprint(f\"Estimated shift: {shift_cm1} cm-1\")\n\n# Correct the spectrum\nx_corrected = x + shift_cm1\n\n# Peak detection for verification and reporting\ndef get_peaks(x_axis, y_axis):\n    # Basic peak finding. We'll use a height threshold to avoid noise.\n    # Normalize intensity to 0-1 range for consistent thresholding\n    y_scaled = (y_axis - np.min(y_axis)) / (np.max(y_axis) - np.min(y_axis))\n    peaks, _ = signal.find_peaks(y_scaled, height=0.2, distance=10)\n    return x_axis[peaks], y_axis[peaks]\n\npeaks_ref, vals_ref = get_peaks(x_ref, y_ref)\npeaks_corr, vals_corr = get_peaks(x_corrected, y)\n\nprint(\"Reference peaks (cm-1):\", peaks_ref)\nprint(\"Corrected T103 peaks (cm-1):\", peaks_corr)\n\n# Save the corrected spectrum\nsave_result('T103_corrected.csv', y, raman_shift=x_corrected)\n",
+        "file_ids": [
+          "2026-08-05/T103.csv",
+          "2026-08-05/T103_ref.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\n\nt103 = files[0]\nt103_ref = files[1]\n\nx = t103['table']['raman_shift_cm-1']\ny = t103['table']['intensity']\nx_ref = t103_ref['table']['raman_shift_cm-1']\ny_ref = t103_ref['table']['intensity']\n\n# Normalize\ny_norm = (y - np.mean(y)) / np.std(y)\ny_ref_norm = (y_ref - np.mean(y_ref)) / np.std(y_ref)\n\n# Cross-correlation to find the shift of T103 relative to Ref\n# corr[k] = sum(y_norm[n] * y_ref_norm[n-k])\ncorr = signal.correlate(y_norm, y_ref_norm, mode='full')\nlags = signal.correlation_lags(len(y_norm), len(y_ref_norm), mode='full')\nshift_idx = lags[np.argmax(corr)]\n\nresolution = x[1] - x[0]\nshift_cm1 = shift_idx * resolution\n\n# Peak detection function\ndef get_peaks(x_axis, y_axis):\n    y_scaled = (y_axis - np.min(y_axis)) / (np.max(y_axis) - np.min(y_axis))\n    peaks, _ = signal.find_peaks(y_scaled, height=0.2, distance=10)\n    return x_axis[peaks]\n\np_orig = get_peaks(x, y)\np_ref = get_peaks(x_ref, y_ref)\n\nprint(f\"Original T103 peaks: {p_orig}\")\nprint(f\"Reference peaks: {p_ref}\")\nprint(f\"Cross-correlation shift (T103 relative to Ref): {shift_cm1} cm-1\")\n\n# If T103 is shifted by 'shift_cm1' from Ref, then x_corrected = x - shift_cm1\nx_corrected = x - shift_cm1\np_corr = get_peaks(x_corrected, y)\nprint(f\"Corrected T103 peaks: {p_corr}\")\n\nsave_result('T103_corrected.csv', y, raman_shift=x_corrected)\n",
+        "file_ids": [
+          "2026-08-05/T103.csv",
+          "2026-08-05/T103_ref.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-04_CoALA_CoALA_T103_cda9c0/spectra/01_T103_corrected.csv",
+    "runs/bench_2026-08-04_CoALA_CoALA_T103_cda9c0/spectra/02_T103_corrected.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 60.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 60.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 60.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 60.0
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T103_cda9c0",
+  "elapsed_s": 104.63,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

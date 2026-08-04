@@ -1,0 +1,203 @@
+{
+  "task": "T114",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "Compute the highest cosine similarity between T114.csv and the references in reference_library.csv (interpolate onto the reference axis, L2 normalize) and state whether it is 0.85 or higher.",
+  "criteria": "NUM(±0.01) + EXACT(threshold verdict)",
+  "checks": [
+    {
+      "name": "highest similarity",
+      "passed": true,
+      "score": 1.0,
+      "detail": "0.995852 (expected 0.995852, |Δ|=7.11e-12 ≤ 0.01)  [answer]",
+      "weight": 2.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "threshold verdict",
+      "passed": true,
+      "score": 1.0,
+      "detail": "reported=True (expected True, best=0.9959 vs 0.85)",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T114.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "To compute the highest cosine similarity between the spectrum in `T114.csv` and the references in `reference_library.csv`, I first inspected the structure of both files. `T114.csv` contains a single Raman spectrum with columns for Raman shift and intensity, while `reference_library.csv` contains multiple reference spectra identified by `spectrum_id`.\n\nI performed the following analysis steps:\n1. **Interpolation**: For each reference spectrum in the library, I interpolated the target spectrum (`T114`) onto the specific Raman shift axis of that reference to ensure a consistent vector length and alignment.\n2. **L2 Normalization**: Both the interpolated target spectrum and the reference spectrum were L2 normalized (scaled such that their Euclidean norm is 1).\n3. **Cosine Similarity**: I computed the cosine similarity as the dot product of these two normalized vectors.\n\nThe highest cosine similarity obtained was approximately **0.9959** (matching reference ID `PET_01`). This value is significantly higher than the threshold of 0.85.\n\n```json\n{\"best_score\": 0.9958523269764362, \"above_threshold\": true}\n```",
+  "answer_json": {
+    "best_score": 0.9958523269764362,
+    "above_threshold": true
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/T114.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Load files\nt114 = files[0] if files[0]['filename'] == 'T114.csv' else files[1]\nlib = files[1] if files[0]['filename'] == 'T114.csv' else files[0]\n\n# Target spectrum\nx_target = t114['table']['raman_shift_cm-1']\ny_target = t114['table']['intensity']\n\n# Reference library data\nref_ids = np.unique(lib['table']['spectrum_id'])\nref_x_all = lib['table']['raman_shift_cm-1']\nref_y_all = lib['table']['intensity']\nref_ids_col = lib['table']['spectrum_id']\n\ndef l2_normalize(v):\n    norm = np.linalg.norm(v)\n    if norm == 0:\n        return v\n    return v / norm\n\nbest_score = -1.0\nbest_ref = None\n\n# Interpolator for target spectrum\nf_target = interp1d(x_target, y_target, bounds_error=False, fill_value=0)\n\nfor rid in ref_ids:\n    mask = (ref_ids_col == rid)\n    rx = ref_x_all[mask]\n    ry = ref_y_all[mask]\n    \n    # Interpolate target onto this reference's axis\n    y_target_interp = f_target(rx)\n    \n    # L2 Normalize\n    v_target = l2_normalize(y_target_interp)\n    v_ref = l2_normalize(ry)\n    \n    # Cosine similarity (dot product of normalized vectors)\n    score = np.dot(v_target, v_ref)\n    \n    if score > best_score:\n        best_score = score\n        best_ref = rid\n\nprint(f\"Best Score: {best_score}\")\nprint(f\"Best Reference ID: {best_ref}\")\n",
+        "file_ids": [
+          "2026-08-05/T114.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Identify files correctly\ntarget_file = None\nlib_file = None\nfor f in files:\n    if 'T114.csv' in f['filename']:\n        target_file = f\n    elif 'reference_library.csv' in f['filename']:\n        lib_file = f\n\nif target_file is None or lib_file is None:\n    print(\"Error: Could not find both files in the sandbox.\")\n    exit()\n\n# Target spectrum\nx_target = target_file['table']['raman_shift_cm-1']\ny_target = target_file['table']['intensity']\nprint(f\"Target shapes: x={x_target.shape}, y={y_target.shape}\")\n\n# Reference library data\nref_ids_col = lib_file['table']['spectrum_id']\nref_x_all = lib_file['table']['raman_shift_cm-1']\nref_y_all = lib_file['table']['intensity']\nunique_refs = np.unique(ref_ids_col)\nprint(f\"Library contains {len(unique_refs)} unique spectra.\")\n\ndef l2_normalize(v):\n    norm = np.linalg.norm(v)\n    if norm == 0:\n        return v\n    return v / norm\n\nbest_score = -1.0\nbest_ref_id = None\n\n# Target interpolator for mapping onto reference axes\nf_target = interp1d(x_target, y_target, bounds_error=False, fill_value=0)\n\nfor rid in unique_refs:\n    mask = (ref_ids_col == rid)\n    rx = ref_x_all[mask]\n    ry = ref_y_all[mask]\n    \n    # Interpolate target onto the current reference axis\n    yt_interp = f_target(rx)\n    \n    # L2 Normalize both\n    v_target = l2_normalize(yt_interp)\n    v_ref = l2_normalize(ry)\n    \n    # Cosine similarity is dot product of normalized vectors\n    score = np.dot(v_target, v_ref)\n    \n    if score > best_score:\n        best_score = score\n        best_ref_id = rid\n\nprint(f\"Best Score: {best_score}\")\nprint(f\"Best Reference ID: {best_ref_id}\")\n",
+        "file_ids": [
+          "2026-08-05/T114.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Setup files\ntarget_file = None\nlib_file = None\nfor f in files:\n    if 'T114.csv' in f['filename']:\n        target_file = f\n    elif 'reference_library.csv' in f['filename']:\n        lib_file = f\n\n# Target data\nx_t = target_file['table']['raman_shift_cm-1']\ny_t = target_file['table']['intensity']\n\n# Lib data\nid_col = lib_file['table']['spectrum_id']\nx_lib_all = lib_file['table']['raman_shift_cm-1']\ny_lib_all = lib_file['table']['intensity']\nu_ids = np.unique(id_col)\n\ndef l2_norm(v):\n    n = np.linalg.norm(v)\n    return v / n if n > 0 else v\n\n# Interpolator for target\nf_t = interp1d(x_t, y_t, bounds_error=False, fill_value=0)\n\nbest_s = -1.0\nbest_id = None\n\nfor rid in u_ids:\n    m = (id_col == rid)\n    rx = x_lib_all[m]\n    ry = y_lib_all[m]\n    \n    # Target on ref axis\n    yt_interp = f_t(rx)\n    \n    v1 = l2_norm(yt_interp)\n    v2 = l2_norm(ry)\n    \n    s = np.dot(v1, v2)\n    if s > best_s:\n        best_s = s\n        best_id = rid\n\nprint(f\"Best score: {best_s}\")\nprint(f\"Reference ID: {best_id}\")\n",
+        "file_ids": [
+          "2026-08-05/T114.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Find files\ntarget = next(f for f in files if 'T114' in f['filename'])\nlib = next(f for f in files if 'reference' in f['filename'])\n\n# Extract arrays and force 1D\nxt = np.asarray(target['table']['raman_shift_cm-1']).flatten()\nyt = np.asarray(target['table']['intensity']).flatten()\n\nids = np.asarray(lib['table']['spectrum_id']).flatten()\nxl = np.asarray(lib['table']['raman_shift_cm-1']).flatten()\nyl = np.asarray(lib['table']['intensity']).flatten()\n\nu_ids = np.unique(ids)\nprint(f\"Target shape: {xt.shape}\")\nprint(f\"Lib total rows: {len(ids)}\")\nprint(f\"Unique refs: {len(u_ids)}\")\n\ndef l2_norm(v):\n    n = np.linalg.norm(v)\n    return v / n if n > 0 else v\n\n# Interpolator for target spectrum\nf_t = interp1d(xt, yt, bounds_error=False, fill_value=0)\n\nbest_s = -1.0\nbest_id = None\n\nfor rid in u_ids:\n    mask = (ids == rid)\n    rx = xl[mask]\n    ry = yl[mask]\n    \n    # Map target to ref axis\n    yt_interp = f_t(rx)\n    \n    v1 = l2_norm(yt_interp)\n    v2 = l2_norm(ry)\n    \n    # Manual dot product for stability/debugging\n    s = np.sum(v1 * v2)\n    \n    if s > best_s:\n        best_s = s\n        best_id = rid\n\nprint(f\"Best score: {best_s}\")\nprint(f\"Reference ID: {best_id}\")\n",
+        "file_ids": [
+          "2026-08-05/T114.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# 1. Find files without using 'next()'\ntarget = None\nlib = None\nfor f in files:\n    if 'T114' in f['filename']:\n        target = f\n    elif 'reference_library' in f['filename']:\n        lib = f\n\nif target is None or lib is None:\n    print(\"Files not found\")\nelse:\n    # 2. Extract and ensure 1D arrays\n    xt = np.asarray(target['table']['raman_shift_cm-1']).ravel()\n    yt = np.asarray(target['table']['intensity']).ravel()\n\n    ids = np.asarray(lib['table']['spectrum_id']).ravel()\n    xl_all = np.asarray(lib['table']['raman_shift_cm-1']).ravel()\n    yl_all = np.asarray(lib['table']['intensity']).ravel()\n\n    u_ids = np.unique(ids)\n    print(f\"Target: {len(xt)} points\")\n    print(f\"Lib unique spectra: {len(u_ids)}\")\n\n    # 3. L2 normalization function\n    def l2_norm(v):\n        norm = np.linalg.norm(v)\n        if norm == 0:\n            return v\n        return v / norm\n\n    # 4. Target interpolator\n    f_t = interp1d(xt, yt, bounds_error=False, fill_value=0)\n\n    best_s = -1.0\n    best_id = None\n\n    for rid in u_ids:\n        mask = (ids == rid)\n        rx = xl_all[mask]\n        ry = yl_all[mask]\n        \n        if len(rx) == 0:\n            continue\n\n        # Interpolate target onto reference axis\n        yt_interp = f_t(rx)\n        \n        # L2 Normalize both vectors\n        v1 = l2_norm(yt_interp)\n        v2 = l2_norm(ry)\n        \n        # Cosine similarity (dot product of normalized vectors)\n        s = np.dot(v1, v2)\n        \n        if s > best_s:\n            best_s = s\n            best_id = rid\n\n    print(f\"BEST_SCORE: {best_s}\")\n    print(f\"BEST_ID: {best_id}\")\n",
+        "file_ids": [
+          "2026-08-05/T114.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T114_479f1b",
+  "elapsed_s": 153.54,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

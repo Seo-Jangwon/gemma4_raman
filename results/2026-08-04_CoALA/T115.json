@@ -1,0 +1,177 @@
+{
+  "task": "T115",
+  "axis": "identification",
+  "mode": "live",
+  "result": "fail",
+  "reason": "result array: cos=0.99964 NRMSE=0.06224",
+  "checks_passed": 1,
+  "checks_total": 2,
+  "question": "Apply IPBSA baseline correction with order 5 and L2 normalization to the raw spectrum T115.csv, then compare it with reference_library.csv on the reference axis and report the most similar material.",
+  "criteria": "EXACT(material) + ARRAY(corrected array, cos>=0.99) bonus",
+  "checks": [
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'calcite' (expected 'calcite')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    },
+    {
+      "name": "result array",
+      "passed": false,
+      "score": 0.0,
+      "detail": "cos=0.99964 NRMSE=0.06224",
+      "weight": 2.0,
+      "kind": "ARRAY"
+    }
+  ],
+  "failures": [
+    {
+      "check": "result array",
+      "kind": "ARRAY",
+      "reason": "cos=0.99964 NRMSE=0.06224"
+    }
+  ],
+  "blocked": [],
+  "input_files": [
+    "T115.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "To identify the material of spectrum **T115**, I performed a digital processing workflow including baseline correction and spectral matching against a known library.\n\n### Processing Workflow\n1.  **Baseline Correction**: The raw spectrum in `T115.csv` exhibited a significant fluorescence background. I applied an Iterative Polynomial Baseline Subtraction Algorithm (IPBSA) with a polynomial order of **5**, effectively flattening the baseline while preserving the characteristic Raman peaks.\n2.  **Normalization**: To ensure a fair comparison with reference spectra regardless of absolute intensity, I applied **L2 normalization** to the corrected signal.\n3.  **Material Matching**: The processed spectrum was compared against `reference_library.csv` using cosine similarity (dot product of normalized vectors). Each material in the library was evaluated by averaging the similarity scores across all available reference samples for that material.\n\n### Results and Analysis\nThe similarity scores obtained are as follows:\n*   **Calcite**: 0.9844 (Strongest match)\n*   **Aragonite**: 0.8115\n*   **PET**: 0.1741\n*   **PMMA**: 0.0716\n*   **Polystyrene**: 0.0372\n*   **Silicon**: 0.0115\n\nThe spectrum shows an extremely high correlation with **calcite**, which is consistent with the distinct Raman signature of calcium carbonate polymorphs. The high similarity to aragonite is expected given their chemical identity, but the match for calcite is significantly more precise.\n\n```json\n{\"material\": \"calcite\"}\n```",
+  "answer_json": {
+    "material": "calcite"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/T115.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "apply_background_subtraction",
+      "args": {
+        "poly_order": 5,
+        "save_result": true,
+        "source": "2026-08-05/T115.csv",
+        "version_label": "T115_bc_poly5"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\ndef ipbsa(x, y, order=5, max_iter=20, tol=0.001):\n    \"\"\"Iterative Polynomial Baseline Subtraction Algorithm.\"\"\"\n    current_y = y.copy()\n    poly_coeffs = np.polyfit(x, current_y, order)\n    baseline = np.polyval(poly_coeffs, x)\n    \n    for i in range(max_iter):\n        # Mask points that are significantly above the current baseline\n        # Use a threshold based on the standard deviation of the residuals\n        residuals = y - baseline\n        threshold = 0.1 * np.std(residuals) # Heuristic for masking peaks\n        mask = residuals <= threshold\n        \n        if np.sum(mask) < order + 1:\n            break\n            \n        new_coeffs = np.polyfit(x[mask], y[mask], order)\n        new_baseline = np.polyval(new_coeffs, x)\n        \n        if np.linalg.norm(new_baseline - baseline) < tol:\n            baseline = new_baseline\n            break\n        baseline = new_baseline\n    return y - baseline, baseline\n\ndef l2_normalize(y):\n    norm = np.linalg.norm(y)\n    return y / norm if norm > 0 else y\n\n# Load files\nt115_x = files[0][\"table\"][\"raman_shift_cm-1\"]\nt115_y = files[0][\"table\"][\"intensity\"]\n\nref_data = files[1][\"table\"]\nref_x_all = ref_data[\"raman_shift_cm-1\"]\nref_y_all = ref_data[\"intensity\"]\nref_mat_all = np.array(ref_data[\"material\"])\n\n# 1. Baseline correction for T115\nt115_bc, baseline = ipbsa(t115_x, t115_y, order=5)\n\n# 2. L2 Normalization\nt115_norm = l2_normalize(t115_bc)\n\nprint(f\"T115 processed: min={t115_norm.min():.4f}, max={t115_norm.max():.4f}, norm={np.linalg.norm(t115_norm):.4f}\")\n\n# 3. Compare with reference library\nmaterials = np.unique(ref_mat_all)\nsimilarities = {}\n\nfor mat in materials:\n    # Get all spectra for this material\n    mask = (ref_mat_all == mat)\n    mat_x = ref_x_all[mask]\n    mat_y = ref_y_all[mask]\n    \n    # Since multiple samples of same material might exist, we identify unique spectrum IDs\n    unique_ids = np.unique(np.array(ref_data[\"spectrum_id\"])[mask])\n    mat_sims = []\n    \n    for sid in unique_ids:\n        sid_mask = (np.array(ref_data[\"spectrum_id\"]) == sid)\n        sx = ref_x_all[sid_mask]\n        sy = ref_y_all[sid_mask]\n        \n        # Ensure x-axis match via interpolation if necessary\n        # Both T115 and Library are 200-2000, but we verify.\n        f = interp1d(sx, sy, bounds_error=False, fill_value=0)\n        sy_interp = f(t115_x)\n        \n        # L2 normalize reference for cosine similarity (equivalent to dot product of normalized vectors)\n        sy_norm = l2_normalize(sy_interp)\n        \n        sim = np.dot(t115_norm, sy_norm)\n        mat_sims.append(sim)\n    \n    similarities[mat] = np.mean(mat_sims)\n\nbest_material = max(similarities, key=similarities.get)\nprint(f\"Similarity scores: {similarities}\")\nprint(f\"Best match: {best_material}\")\n\n# Save result for verification (optional but good practice)\nsave_result('T115_processed', t115_norm, raman_shift=t115_x)\n",
+        "file_ids": [
+          "2026-08-05/T115.csv",
+          "2026-08-05/reference_library.csv"
+        ],
+        "title": "T115 Material Identification"
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-04_CoALA_CoALA_T115_36b07c/spectra/01_T115_processed.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T115_36b07c",
+  "elapsed_s": 111.78,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

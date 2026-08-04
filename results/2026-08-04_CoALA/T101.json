@@ -1,0 +1,203 @@
+{
+  "task": "T101",
+  "axis": "diagnostics",
+  "mode": "live",
+  "result": "fail",
+  "reason": "peak positions: 9/9 matched (submitted 10) [431.0, 620.0, 796.0, 1000.0, 1032.0, 1155.0]... vs [620.0, 796.0, 1001.0, 1031.0, 1154.0, 1183.0]...",
+  "checks_passed": 0,
+  "checks_total": 2,
+  "question": "T101.csv contains three repeated measurements (column frame_index 0,1,2) in which sharp spikes appear at inconsistent positions. Name the cause, remove the spikes (5-point moving median, 5x MAD, linear interpolation) from each frame, and report the peaks of the cleaned mean spectrum.",
+  "criteria": "KEYWORD(cosmic ray) + SET(index EXACT ×3) + SET(peak ±3 cm-1)",
+  "checks": [
+    {
+      "name": "peak positions",
+      "passed": false,
+      "score": 0.0,
+      "detail": "9/9 matched (submitted 10) [431.0, 620.0, 796.0, 1000.0, 1032.0, 1155.0]... vs [620.0, 796.0, 1001.0, 1031.0, 1154.0, 1183.0]...",
+      "weight": 1.0,
+      "kind": "SET"
+    },
+    {
+      "name": "result array",
+      "passed": false,
+      "score": 0.0,
+      "detail": "max deviation=127.4 (tolerance 0.001)",
+      "weight": 2.0,
+      "kind": "ARRAY"
+    }
+  ],
+  "failures": [
+    {
+      "check": "peak positions",
+      "kind": "SET",
+      "reason": "9/9 matched (submitted 10) [431.0, 620.0, 796.0, 1000.0, 1032.0, 1155.0]... vs [620.0, 796.0, 1001.0, 1031.0, 1154.0, 1183.0]..."
+    },
+    {
+      "check": "result array",
+      "kind": "ARRAY",
+      "reason": "max deviation=127.4 (tolerance 0.001)"
+    }
+  ],
+  "blocked": [],
+  "input_files": [
+    "T101.csv"
+  ],
+  "answer_text": "The sharp spikes appearing at inconsistent positions across repeated measurements are caused by **cosmic rays** hitting the CCD detector during acquisition. These high-energy particles deposit charge on a few pixels, resulting in intense spikes that do not originate from the sample's Raman signal and vary between frames.\n\nFollowing the requested procedure, I processed the three frames in `T101.csv` by applying a 5-point moving median filter to identify local outliers, calculating the Median Absolute Deviation (MAD), and replacing any values exceeding $5 \\times \\text{MAD}$ with linear interpolation. The cleaned frames were then averaged to produce the mean spectrum.\n\nThe peaks identified in the cleaned mean spectrum are listed below.\n\n```json\n{\"peaks\": [431.0, 620.0, 796.0, 1000.0, 1032.0, 1155.0, 1183.0, 1450.0, 1583.0, 1601.0]}\n```",
+  "answer_json": {
+    "peaks": [
+      431.0,
+      620.0,
+      796.0,
+      1000.0,
+      1032.0,
+      1155.0,
+      1183.0,
+      1450.0,
+      1583.0,
+      1601.0
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/T101.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\nfrom scipy.ndimage import median_filter\n\n# The file is in 'long' format. We need to separate the 3 frames.\n# x = files[0][\"table\"][\"raman_shift_cm-1\"]\n# y = files[0][\"table\"][\"intensity\"]\n# f = files[0][\"table\"][\"frame_index\"]\n\n# Extract data\ndf = files[0][\"table\"]\nx = df[\"raman_shift_ uma\"]} # Wait, the column name is \"raman_shift_cm-1\"\n# Let me fix the access. \n",
+        "file_ids": [
+          "2026-08-05/T101.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Load data from files[0]\ndf = files[0][\"table\"]\nf_idx = df[\"frame_index\"]\nx_all = df[\"raman_shift_cm-1\"]\ny_all = df[\"intensity\"]\n\n# Separate frames\nframes = []\nunique_indices = np.unique(f_idx)\nfor idx in unique_indices:\n    mask = (f_idx == idx)\n    frames.append({\n        'x': x_all[mask],\n        'y': y_all[mask]\n    })\n\n# Spike removal function: 5-point moving median, 5x MAD, linear interpolation\ndef remove_spikes(x, y):\n    y = np.array(y, dtype=float)\n    # Moving median (window size 5)\n    # We can use a simple loop or scipy.ndimage.median_filter\n    from scipy.ndimage import median_filter\n    y_med = median_filter(y, size=5)\n    \n    diff = np.abs(y - y_med)\n    mad = np.median(diff)\n    threshold = 5 * mad\n    \n    spikes = diff > threshold\n    n_spikes = np.sum(spikes)\n    \n    # Linear interpolation for spikes\n    y_clean = np.copy(y)\n    # Find indices of non-spikes\n    non_spikes = np.where(~spikes)[0]\n    # Interpolate y values at spike positions using non-spike positions and values\n    y_clean[spikes] = np.interp(np.where(spikes)[0], non_spikes, y[non_spikes])\n    \n    return y_clean, n_spikes\n\n# Process frames\ncleaned_intensities = []\nfor i in range(len(frames)):\n    y_c, n = remove_spikes(frames[i]['x'], frames[i]['y'])\n    cleaned_intensities.append(y_c)\n    print(f\"Frame {i}: removed {n} spikes\")\n\n# Compute mean spectrum\nx_axis = frames[0]['x']\nmean_intensity = np.mean(cleaned_intensities, axis=0)\n\n# Peak detection on cleaned mean spectrum\ndef find_peaks(x, y):\n    # Simple peak finding: point is a peak if it's greater than its neighbors\n    peaks = []\n    for i in range(1, len(y)-1):\n        if y[i] > y[i-1] and y[i] > y[i+1]:\n            # Basic threshold to avoid noise: must be significantly above 0/baseline\n            # But usually we just report all local maxima in these tasks.\n            # Let's use a small relative height check or just list them.\n            peaks.append(x[i])\n    return peaks\n\npeak_positions = find_peaks(x_axis, mean_intensity)\nprint(f\"Detected peaks at: {peak_positions}\")\n\nplt.figure(figsize=(10, 6))\nfor i in range(len(frames)):\n    plt.plot(frames[i]['x'], frames[i]['y'], alpha=0.3, label=f'Raw Frame {i}')\nplt.plot(x_axis, mean_intensity, 'k-', lw=2, label='Cleaned Mean')\nplt.title('Spike Removal and Averaging')\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Intensity')\nplt.legend()\nplt.savefig('cleaned_spectrum.png')\n\n# Save the cleaned mean spectrum\nsave_result('T101_cleaned_mean.csv', mean_intensity, raman_shift=x_axis)\n",
+        "file_ids": [
+          "2026-08-05/T101.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load the cleaned mean spectrum saved in the previous turn\nspec = load_spectrum('runs/bench_2026-08-04_CoALA_CoALA_T101_92f17a/spectra/01_T101_cleaned_mean.csv')\nx = spec['raman_shift_cm-1']\ny = spec['intensity']\n\n# To find significant peaks, we need a threshold. \n# Let's use prominence. Since I don't know the signal strength, \n# I will calculate the noise (std of the spectrum) and set a prominence based on that.\nnoise_std = np.std(y)\n# Typically, a peak is significant if its prominence > 3-5 * noise\npeaks_idx, properties = find_peaks(y, prominence=5*noise_std)\n\npeak_positions = x[peaks_idx]\nprint(f\"Significant peaks found at: {peak_positions}\")\nprint(f\"Peak intensities: {y[peaks_idx]}\")\nprint(f\"Prominences: {properties['prominences']}\")\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\nfrom scipy.ndimage import median_filter\nfrom scipy.signal import find_peaks\n\n# 1. Load data\ndf = files[0][\"table\"]\nf_idx = df[\"frame_index\"]\nx_all = df[\"raman_shift_cm-1\"]\ny_all = df[\"intensity\"]\n\n# Separate frames\nframes_y = []\nunique_indices = np.unique(f_idx)\nfor idx in unique_indices:\n    mask = (f_idx == idx)\n    frames_y.append(y_all[mask])\n\nx_axis = x_all[f_idx == 0] # All frames share the same axis\n\n# 2. Spike removal function\ndef remove_spikes(y):\n    y = np.array(y, dtype=float)\n    y_med = median_filter(y, size=5)\n    diff = np.abs(y - y_med)\n    mad = np.median(diff)\n    threshold = 5 * mad\n    spikes = diff > threshold\n    \n    y_clean = np.copy(y)\n    non_spikes = np.where(~spikes)[0]\n    # Linearly interpolate spikes\n    y_clean[spikes] = np.interp(np.where(spikes)[0], non_spikes, y[non_spikes])\n    return y_clean\n\n# Process and average\ncleaned_frames = [remove_spikes(y) for y in frames_y]\nmean_intensity = np.mean(cleaned_frames, axis=0)\n\n# 3. Peak detection\n# Since we need to report \"the peaks\", let's find the most prominent ones.\n# I will use a prominence relative to the noise.\nnoise_level = np.std(mean_intensity[0:100]) # Estimate noise from first few points\npeaks_idx, props = find_peaks(mean_intensity, prominence=5*noise_level)\n\npeak_positions = x_axis[peaks_idx]\nprint(f\"Cleaned Mean Spectrum Peaks: {peak_positions}\")\n\n# Plot for verification (internal check via figure path provided in result)\nplt.figure(figsize=(10, 6))\nplt.plot(x_axis, mean_intensity, 'k-', label='Cleaned Mean')\nplt.plot(peak_positions, mean_intensity[peaks_idx], \"rx\", label='Detected Peaks')\nplt.title('Cleaned Spectrum and Detected Peaks')\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Intensity')\nplt.legend()\nplt.savefig('final_cleaned_peaks.png')\n\nsave_result('T101_final_mean.csv', mean_intensity, raman_shift=x_axis)\n",
+        "file_ids": [
+          "2026-08-05/T101.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-04_CoALA_CoALA_T101_92f17a/spectra/01_T101_cleaned_mean.csv",
+    "/api/results/2026-08-05/bench_2026-08-04_CoALA_CoALA_T101_92f17a/fig010841_806_0.png",
+    "runs/bench_2026-08-04_CoALA_CoALA_T101_92f17a/spectra/02_T101_final_mean.csv",
+    "/api/results/2026-08-05/bench_2026-08-04_CoALA_CoALA_T101_92f17a/fig010929_548_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 25.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 25.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 25.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 25.0
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T101_92f17a",
+  "elapsed_s": 136.75,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

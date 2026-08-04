@@ -1,0 +1,187 @@
+{
+  "task": "T129",
+  "axis": "identification",
+  "mode": "live",
+  "result": "fail",
+  "reason": "shift: 3 (expected 2.7, |Δ|=0.3 ≤ 0.2)  [answer]",
+  "checks_passed": 1,
+  "checks_total": 2,
+  "question": "All peaks of T129.csv are shifted by the same unknown amount. Estimate the shift by cross-correlation against reference_library.csv, correct it, identify the material, and report the estimated shift.",
+  "criteria": "NUM(delta ±0.2 cm-1, sign included) + EXACT(material)",
+  "checks": [
+    {
+      "name": "shift",
+      "passed": false,
+      "score": 0.0,
+      "detail": "3 (expected 2.7, |Δ|=0.3 ≤ 0.2)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'polystyrene' (expected 'polystyrene')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [
+    {
+      "check": "shift",
+      "kind": "NUM",
+      "reason": "3 (expected 2.7, |Δ|=0.3 ≤ 0.2)  [answer]"
+    }
+  ],
+  "blocked": [],
+  "input_files": [
+    "T129.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "The provided spectrum in `T129.csv` was analyzed against the `reference_library.csv` using cross-correlation of z-score normalized intensity arrays to estimate the spectral shift and identify the material.\n\nThe analysis revealed that the sample's peaks are shifted by **3 cm⁻¹** relative to the reference spectra. The highest correlation values were observed for **polystyrene** (specifically IDs PS_01 and PS_02), indicating a strong match between the sample and this material. Other materials in the library, such as silicon and aragonite, showed significantly lower correlation coefficients and inconsistent shifts.\n\n```json\n{\"shift_cm1\": 3, \"material\": \"polystyrene\"}\n```",
+  "answer_json": {
+    "shift_cm1": 3,
+    "material": "polystyrene"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/T129.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-05/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\n\n# Load files\nt129 = files[0] if files[0]['filename'] == 'T129.csv' else files[1]\nlib = files[1] if files[0]['filename'] == 'T129.csv' else files[0]\n\nx_sample = t129['table']['raman_shift_cm-1']\ny_sample = t129['table']['intensity']\n\n# Normalize sample\ny_sample_norm = (y_sample - np.mean(y_sample)) / np.std(y_sample)\n\n# Get unique materials in library\nmaterials = np.unique(lib['table']['material'])\nref_x = lib['table']['raman_shift_cm-1']\nref_y = lib['table']['intensity']\nref_mat = lib['table']['material']\n\nresults = []\n\nfor mat in materials:\n    # Extract reference spectrum for this material\n    mask = (ref_mat == mat)\n    # Assuming one spectrum per material or we average them. \n    # Let's check how many spectra per material there are.\n    mats_indices = np.where(mask)[0]\n    \n    # The library might have multiple IDs for same material. \n    # We should check if they differ. But usually, a \"library\" has one canonical ref.\n    # If there are multiple, I'll average them or just take the first one.\n    # Let's see how many indices per material.\n    # For now, let's just use the first sequence found for each material \n    # since we assume it's a library of distinct materials.\n    \n    # Actually, looking at reference_library.csv head: \"PS_01\", \"polystyrene\".\n    # I will group by spectrum_id if needed, but let's first see if one mat = one spectrum.\n    \n    # Get the slice for this material\n    y_ref = ref_y[mask]\n    x_ref = ref_x[mask]\n    \n    # Normalize reference\n    y_ref_norm = (y_ref - np.mean(y_ref)) / np.std(y_ref)\n    \n    # Cross-correlation\n    corr = signal.correlate(y_sample_norm, y_ref_norm, mode='full')\n    lags = signal.correlation_lags(len(y_sample_norm), len(y_ref_norm))\n    \n    idx_max = np.argmax(corr)\n    shift = lags[idx_max]\n    max_corr = corr[idx_max]\n    \n    results.append({\n        'material': mat,\n        'shift': shift,\n        'max_corr': max_corr\n    })\n\n# Find best match\nbest = max(results, key=lambda x: x['max_corr'])\nprint(f\"Best material: {best['material']}\")\nprint(f\"Estimated shift: {best['shift']} cm-1\")\nprint(f\"Correlation value: {best['max_corr']}\")\n\n# Print all for transparency\nfor r in results:\n    print(f\"Mat: {r['material']}, Shift: {r['shift']}, Corr: {r['max_corr']}\")\n",
+        "file_ids": [
+          "2026-08-05/T129.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\n\n# identify files safely\nt129_id = '2026-08-05/T129.csv'\nlib_id = '2026-08-05/reference_library.csv'\n\n# find which file is which in the injected list\nt129_file = next(f for f in files if f['filename'] == 'T129.csv')\nlib_file = next(f for f in files if f['filename'] == 'reference_library.csv')\n\n# Extract data\nx_sample = t129_file['table']['raman_shift_cm-1']\ny_sample = t129_file['table']['intensity']\n\nref_mat = lib_file['table']['material']\nref_x = lib_file['table']['raman_shift_cm-1']\nref_y = lib_file['table']['intensity']\nref_sid = lib_file['table']['spectrum_id']\n\n# Normalize sample (z-score)\ny_sample_norm = (y_sample - np.mean(y_sample)) / np.std(y_sample)\n\n# Get unique materials and spectrum IDs for those materials\nmaterials = np.unique(ref_mat)\nresults = []\n\nfor mat in materials:\n    # Find all spectrum IDs belonging to this material\n    mat_mask = (ref_mat == mat)\n    sids_for_mat = np.unique(ref_sid[mat_mask])\n    \n    for sid in sids_for_mat:\n        # Get the specific spectrum for this SID\n        sid_mask = (ref_sid == sid)\n        y_ref = ref_y[sid_mask]\n        \n        if len(y_ref) == 0:\n            continue\n            \n        # Normalize reference (z-score)\n        y_ref_norm = (y_ref - np.mean(y_ref)) / np.std(y_ref)\n        \n        # Cross-correlation\n        corr = signal.correlate(y_sample_norm, y_ref_norm, mode='full')\n        lags = signal.correlation_lags(len(y_sample_norm), len(y_ref_norm))\n        \n        idx_max = np.argmax(corr)\n        shift = lags[idx_max]\n        max_corr = corr[idx_max]\n        \n        results.append({\n            'material': mat,\n            'sid': sid,\n            'shift': shift,\n            'max_corr': max_corr\n        })\n\n# Find best match across all reference spectra\nif results:\n    best = max(results, key=lambda x: x['max_corr'])\n    print(f\"Best material: {best['material']} (ID: {best['sid']})\")\n    print(f\"Estimated shift: {best['shift']} cm-1\")\n    print(f\"Correlation value: {best['max_corr']}\")\nelse:\n    print(\"No matches found.\")\n\n# Also report top 5 for verification\nsorted_res = sorted(results, key=lambda x: x['max_corr'], reverse=True)\nprint(\"\\nTop matches:\")\nfor r in sorted_res[:5]:\n    print(f\"Mat: {r['material']}, SID: {r['sid']}, Shift: {r['shift']}, Corr: {r['max_corr']}\")\n",
+        "file_ids": [
+          "2026-08-05/T129.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\n\n# Find files by filename in the list\nt129_file = None\nlib_file = None\nfor f in files:\n    if f['filename'] == 'T129.csv':\n        t129_file = f\n    elif f['filename'] == 'reference_library.csv':\n        lib_file = f\n\nif t129_file is None or lib_file is None:\n    print(\"Required files not found in the provided list.\")\nelse:\n    # Extract data\n    x_sample = t129_file['table']['raman_shift_cm-1']\n    y_sample = t129_file['table']['intensity']\n\n    ref_mat = lib_file['table']['material']\n    ref_x = lib_file['table']['raman_shift_cm-1']\n    ref_y = lib_file['table']['intensity']\n    ref_sid = lib_file['table']['spectrum_id']\n\n    # Normalize sample (z-score)\n    y_sample_norm = (y_sample - np.mean(y_sample)) / np.std(y_sample)\n\n    # Get unique spectrum IDs to iterate through them correctly\n    unique_sids = []\n    for sid in ref_sid:\n        if sid not in unique_sids:\n            unique_sids.append(sid)\n\n    results = []\n\n    for sid in unique_sids:\n        # Get the specific spectrum for this SID\n        # Find indices where ref_sid == sid\n        indices = []\n        for i in range(len(ref_sid)):\n            if ref_sid[i] == sid:\n                indices.append(i)\n        \n        y_ref = ref_y[indices]\n        \n        # Find the material for this SID (first occurrence)\n        mat = \"unknown\"\n        for i in range(len(ref_sid)):\n            if ref_sid[i] == sid:\n                mat = ref_mat[i]\n                break\n        \n        if len(y_ref) == 0:\n            continue\n            \n        # Normalize reference (z-score)\n        y_ref_norm = (y_ref - np.mean(y_ref)) / np.std(y_ref)\n        \n        # Cross-correlation\n        corr = signal.correlate(y_sample_norm, y_ref_norm, mode='full')\n        lags = signal.correlation_lags(len(y_sample_norm), len(y_ref_norm))\n        \n        idx_max = np.argmax(corr)\n        shift = lags[idx_max]\n        max_corr = corr[idx_max]\n        \n        results.append({\n            'material': mat,\n            'sid': sid,\n            'shift': shift,\n            'max_corr': max_corr\n        })\n\n    # Find best match across all reference spectra\n    if results:\n        best = None\n        for r in results:\n            if best is None or r['max_corr'] > best['max_corr']:\n                best = r\n                \n        print(f\"Best material: {best['material']} (ID: {best['sid']})\")\n        print(f\"Estimated shift: {best['shift']} cm-1\")\n        print(f\"Correlation value: {best['max_corr']}\")\n\n        # Sort for reporting\n        sorted_res = sorted(results, key=lambda x: x['max_corr'], reverse=True)\n        print(\"\\nTop matches:\")\n        for r in sorted_res[:5]:\n            print(f\"Mat: {r['material']}, SID: {r['sid']}, Shift: {r['shift']}, Corr: {r['max_corr']}\")\n    else:\n        print(\"No matches found.\")\n",
+        "file_ids": [
+          "2026-08-05/T129.csv",
+          "2026-08-05/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-04_CoALA_CoALA_T129_3ff937",
+  "elapsed_s": 127.04,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}
