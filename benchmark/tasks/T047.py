@@ -9,6 +9,19 @@
 [정답 기준]
   GT=4단계를 이 순서로 적용한 배열(각 단계 규약은 T040/T039/T041/T042와 동일). 순서도 GT의 일부다. 확인=저장 배열 대조 +
   min=0/max=1. 순서를 바꾸면 결과가 달라져 배열 비교에서 걸린다.
+
+  [criteria 가 약속만 하고 안 재던 판정 — 2026-08-03]
+  criteria 는 'ARRAY + STATE(min0/max1)' 인데 evaluate 에는 배열 판정 하나뿐이었다.
+  0-1 정규화는 이 문항이 명시적으로 요구한 마지막 단계이고 저장 배열에서 바로 확인되므로,
+  약속한 대로 판정한다.
+
+  [차수 5 는 여기서도 못 가린다 — 실측]
+  파이프라인 전체를 order 를 바꿔 가며 돌려 GT 와 비교하면 4~10 차가 전부 통과한다
+  (order 4: cos 0.9984 / order 10: cos 0.9965). 2·3 차만 탈락한다. 즉 배열 판정이 가리는
+  것은 '차수 5'가 아니라 '알고리즘 계열과 차수가 너무 낮지 않은가'다 — T039 와 같다.
+  T039 와 달리 여기서는 프롬프트에 order 5 를 남겨 둔다: 이 문항의 요구는 '지정된 4단계
+  파이프라인을 지정된 순서로 재현하라'이고, 파라미터를 고정해 둬야 GT 배열이 하나로
+  정해지기 때문이다. 다만 채점이 차수를 개별로 가린다고 주장하지는 않는다.
 """
 from pathlib import Path
 
@@ -35,7 +48,17 @@ TASK = Task(
 def evaluate(b, run):
     """이 목록이 그대로 T047 의 점수가 된다."""
     before, after = run.state_before, run.state_after
-    return _array_check(run)
+    out = _array_check(run)
+    saved = run.spectra()
+    if not saved:
+        return out + [chk.fail("final 0-1 normalization", "no spectrum was saved")]
+    y = saved[-1][2]
+    return out + [
+        chk.ok("final 0-1 normalization",
+               abs(float(y.min())) < 1e-6 and abs(float(y.max()) - 1.0) < 1e-6,
+               f"min={float(y.min()):.6g} max={float(y.max()):.6g} (expected 0 and 1)",
+               kind="STATE"),
+    ]
 
 
 # ── 배열 GT ──────────────────────────────────────────────────────────────────

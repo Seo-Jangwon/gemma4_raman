@@ -19,7 +19,7 @@ TASK = Task(
     axis="identification",
     mode="live",
     inputs=['T126_1.csv', 'T126_2.csv', 'T126_3.csv', 'T126_4.csv', 'T126_5.csv', 'reference_library.csv'],
-    criteria="EXACT(5 materials, in order) / partial credit = correct count / 5",
+    criteria="EXACT(5 materials, in order) - all five must be right",
     prompt=(
         "Identify the material of each of T126_1.csv through T126_5.csv against "
         "reference_library.csv, and report them in that order. "

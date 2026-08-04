@@ -35,5 +35,9 @@ def evaluate(b, run):
     """이 목록이 그대로 T044 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.set_match("peak positions", run.answer.get("peaks"), [1001.0, 1602.0, 1031.0], tol=TOL_PEAK_CM1),
+        # ordered=True 가 빠져 있었다. 프롬프트·criteria·answer_keys 가 모두 '세기
+        # 내림차순'을 요구하는데 집합 일치로만 봐서, 세 값의 6 가지 순열이 전부
+        # 통과했다 — 순위가 이 문항의 요구인데 순위를 안 본 셈이다.
+        chk.set_match("peak positions", run.answer.get("peaks"),
+                      [1001.0, 1602.0, 1031.0], tol=TOL_PEAK_CM1, ordered=True),
     ]

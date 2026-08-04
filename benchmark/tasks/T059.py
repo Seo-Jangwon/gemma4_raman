@@ -49,7 +49,11 @@ def evaluate(b, run):
     # 에이전트가 보정 결과를 저장했다면 그것이 곧 답이다. 채점기가 한 번 더 보정하면
     # 이중 처리가 되어, 중간 산출물을 저장했는지 여부에 따라 정답이 달라진다.
     _, x, y = saved[-1]
-    want = sp.peaks(x, y)[:5]
+    # 규약대로 검출된 피크 **전부**가 정답이다. 예전에는 [:5] 로 잘랐는데, 그 5 개는
+    # '가장 센 5 개'가 아니라 파수가 낮은 앞 5 개였다(sp.peaks 는 축 순서로 돌려준다).
+    # 프롬프트는 "report the peaks found" 라고만 하므로, 규약대로 다 보고한 실행이
+    # 개수 불일치로 오답이 됐다. 자를 이유가 없다.
+    want = sp.peaks(x, y)
     got = run.answer.get("peaks")
     if not want:
         return out + [chk.fail("peaks after correction", "no peak was detected in the saved file",

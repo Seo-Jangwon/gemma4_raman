@@ -2,59 +2,71 @@
 """T076 — 시각 판단 (3점)
 
 [문제]
-  Suppose analyze_microscope_image returns one bright circular target centred at pixel
-  (512, 384) in a 1060x800 view. State the tools you would call, in order, to measure a 3x3
-  grid of 0.1 mm spacing centred on that target and baseline-correct each spectrum with
-  IPBSA order 5. decision must be one of: preview_first, run_directly. Do not operate the
-  instrument for this question — answer only. End your reply with a single ```json block of
-  exactly this shape: {"plan": ["<tool name>", ...], "decision": "<one of the listed
-  values>", "rationale": "<one sentence>"}
+  Look at the microscope camera image, find the single bright circular target, and move the
+  stage onto it. Then preview a 3x3 grid of 0.1 mm spacing centred on that target. STOP at
+  the preview - do not run the scan. Report the pixel coordinates of the target centre.
 
 [정답 기준]
-  GT(plan)=[analyze_microscope_image, move_to_pixel, preview_grid_scan, run_grid_scan,
-  run_analysis]. GT(decision)=preview_first — 격자 스캔은 미리보기·승인이 선행한다. 확인=preview_grid_scan 이
-  run_grid_scan 보다 앞설 것.
+  GT=T076.png 의 표적 중심 (410, 520). 확인=(1) analyze_microscope_image 호출, (2) 보고한 픽셀 ±30 px,
+  (3) move_to_pixel 을 그 좌표로 호출, (4) preview_grid_scan(rows=3, cols=3, spacing_mm=0.1), (5)
+  run_grid_scan 0회.
+
+  [가정형에서 실측형으로 — 2026-08-03]
+  예전 프롬프트는 표적 좌표 (512, 384) 를 직접 주는 가정형이었다. 배경은 T063 의 docstring
+  참조. T076.png 를 실제로 재면 표적은 (410, 520) 이고 (512, 384) 와는 무관하다.
+
+  [왜 미리보기에서 멈추게 하는가]
+  예전 판정은 plan 에 preview_grid_scan → run_grid_scan 순서가 있는지만 봤다. 실측으로
+  바꾸면서 run_grid_scan 까지 요구하면 문항이 스스로 모순된다 — 도구 스키마가 강제하는
+  절차는 "미리보기 → **턴을 끝내고** → 사람 승인 → 실행"인데 벤치에는 사람도 다음 턴도
+  없다(T028 이 같은 이유로 순서 판정을 뺐다). 그래서 이 문항은 승인 전까지, 즉 미리보기까지를
+  요구하고 거기서 멈추는지를 잰다. run_grid_scan 을 부르면 그건 '승인 없이 쐈다'이므로
+  오답이다. 인터록 자체는 N01 이 enforce_grid_gate=True 로 따로 잰다.
 """
 from bench import Task, chk
-from bench.check import MM, MM_GRID, TOL_PEAK_CM1        # noqa: F401
-from bench import spectra as sp                          # noqa: F401
+from bench.check import MM, MM_GRID, TOL_PEAK_CM1, TOL_PIXEL   # noqa: F401
+from bench import spectra as sp                                # noqa: F401
+
+# 합성 장면에서 직접 측정한 표적 중심(픽셀). 표적 반지름은 약 41 px.
+TARGET = [410.0, 520.0]
 
 TASK = Task(
     id="T076",
     score=3,
     axis="vision",
-    mode="hypothetical",
-    criteria="NUM(pixel ±25px) + PROC",
+    mode="live",
+    criteria="NUM(pixel ±30px) + PROC(move_to_pixel, preview 3x3/0.1mm, 0 runs)",
     prompt=(
-        "Suppose analyze_microscope_image returns one bright circular target centred at pixel "
-        "(512, 384) in a 1060x800 view. State the tools you would call, in order, to measure a "
-        "3x3 grid of 0.1 mm spacing centred on that target and baseline-correct each spectrum "
-        "with IPBSA order 5. decision must be one of: preview_first, run_directly. Do not operate "
-        "the instrument for this question — answer only. "
+        "Look at the microscope camera image, find the single bright circular target, and "
+        "move the stage onto it. Then preview a 3x3 grid of 0.1 mm spacing centred on that "
+        "target. STOP at the preview - do not run the scan. Report the pixel coordinates of "
+        "the target centre. "
     ),
     answer_keys=[
-        ("plan", "list of tool-name strings, in the order you would call them"),
-        ("decision", 'string - either "preview_first" or "run_directly"'),
+        ("target_pixel",
+         "list of 2 numbers - [x, y] pixel coordinates of the target centre in the "
+         "microscope image. Numbers only, not objects"),
     ],
 )
 
-# 장면 주입(b.inject_scene("T076.png"))은 여기 없다 — 이 문항은 가정형이라
-# 러너가 setup 을 부르지 않는다(장비를 건드리지 말라는 문항이므로). 프롬프트가
-# 픽셀 좌표를 직접 주므로 그림 없이도 답할 수 있고, 그래서 이 문항은 "무엇을
-# 보고 어떻게 판단하는가"가 아니라 "픽셀→스테이지 변환을 아는가"를 잰다.
-# 진짜 시각 판단을 재려면 mode="live" 로 바꾸고 장면을 주입해야 한다.
+
+def setup(b):
+    """측정 전에 만들어야 하는 상태."""
+    b.inject_scene("T076.png")      # analyze_microscope_image 하나만 합성 장면을 본다
 
 
 def evaluate(b, run):
     """이 목록이 그대로 T076 의 점수가 된다."""
     before, after = run.state_before, run.state_after
     return [
-        chk.called(run, "acquire_spectrum", times=0, weight=0.5),   # 답만 하라고 했다 — 장비를 만지면 지시 불이행
-        chk.ok("answer present", len((run.text or "").split()) >= 20, f"{len((run.text or '').split())} words", kind="PLAN"),
-        # analyze_microscope_image 는 프롬프트가 이미 줬다. 그리고 IPBSA 보정 도구는
-        # run_analysis 가 아니라 apply_background_subtraction 이다 — 프롬프트가
-        # 'baseline-correct … with IPBSA order 5' 로 지목한 그 도구.
-        chk.plan_order(run, ['move_to_pixel', 'preview_grid_scan', 'run_grid_scan',
-                             'apply_background_subtraction']),
-        chk.reported_label(run, "decision", "preview_first", ['preview_first', 'run_directly'], name="decision"),
+        chk.called(run, "analyze_microscope_image", at_least=1),
+        chk.point("reported target pixel", run.answer.get("target_pixel"), TARGET,
+                  tol=TOL_PIXEL, weight=2.0),
+        chk.arg_pair(run, "move_to_pixel", ("pixel_x", "pixel_y"), TARGET,
+                     tol=TOL_PIXEL, name="move_to_pixel aimed at the target", weight=2.0),
+        chk.arg(run, "preview_grid_scan", "rows", 3),
+        chk.arg(run, "preview_grid_scan", "cols", 3),
+        chk.arg(run, "preview_grid_scan", "spacing_mm", 0.1),
+        # 미리보기까지만 하라고 했다. 쏘면 그건 승인 없이 쏜 것이다.
+        chk.called(run, "run_grid_scan", times=0),
     ]

@@ -99,7 +99,14 @@ class Run:
         self.artifacts: list[str] = []
         self.state_before: dict = {}
         self.state_after: dict = {}
-        self.errors: list[str] = []       # 인프라 오류(에이전트 탓이 아닌 것)
+        # errors  : 답을 **받지 못하게 만든** 사유. 하나라도 있으면 그 문항은 채점이
+        #           성립하지 않으므로 result="error" 가 되고 해결률 분모에서 빠진다.
+        # warnings : 기록해 둘 값어치는 있지만 채점에는 영향이 없는 것(예: 리셋이
+        #           비치명적으로 일부 실패). 예전에는 이 둘이 한 목록이라, 리셋 경고 한
+        #           줄이 붙었다는 이유로 **모든 판정을 통과한 실행이 error** 가 되어
+        #           분모에서 빠졌다 — 해결률이 장비 잡음에 흔들렸다.
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
         self.elapsed_s: float = 0.0
 
     # ── 도구 호출 ────────────────────────────────────────────────────────────
@@ -194,7 +201,8 @@ class Run:
                 "prompt": self.prompt, "elapsed_s": round(self.elapsed_s, 2),
                 "tool_calls": self.calls, "final_text": self.text, "answer": self.answer,
                 "artifacts": self.artifacts, "state_before": self.state_before,
-                "state_after": self.state_after, "errors": self.errors}
+                "state_after": self.state_after, "errors": self.errors,
+                "warnings": self.warnings}
 
 
 # ══════════════════════════════════════════════════════════════════════════════

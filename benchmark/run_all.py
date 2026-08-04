@@ -88,7 +88,7 @@ def check_only(pairs) -> int:
         # 판정 항목이 하나도 안 나오는 문항은 만점이 되어 버린다.
         if "chk." not in src:
             empty.append(task.id)
-        for m in __import__("re").finditer(r'chk\.(?:called|arg|arg_set|arg_not|order)\('
+        for m in __import__("re").finditer(r'chk\.(?:called|arg|arg_pair|arg_set|arg_not|order)\('
                                            r'run,\s*"([a-z_]+)"', src):
             if m.group(1) not in TOOL_NAMES:
                 unknown.append(f"{task.id}: 존재하지 않는 도구 {m.group(1)!r}")
@@ -111,16 +111,38 @@ def check_only(pairs) -> int:
                       if not (HERE / "inputs" / n).is_file()]
     todo = [t.id for m, t in pairs if "[남은 일]" in inspect.getsource(m)]
     undeclared, unused = _check_answer_keys(pairs)
+    stale_gt = _check_stale_gt(pairs)
 
     for label, items in (("판정 항목 없음", empty), ("도구 이름 오류", unknown),
                          ("입력 파일 없음", missing_inputs),
                          ("답 키 미선언", undeclared),
                          ("선언했으나 안 읽는 키", unused),
+                         ("안 쓰이는 GT 파일", stale_gt),
                          ("재계산 이식 대기", todo)):
         if items:
             print(f"  [{label}] {len(items)}개: {', '.join(map(str, items[:20]))}"
                   f"{' ...' if len(items) > 20 else ''}")
     return 1 if (empty or unknown or missing_inputs or undeclared) else 0
+
+
+def _check_stale_gt(pairs) -> list:
+    """gt/<문항>.json 은 채점 경로가 읽지 않는다 — 갈라진 정답의 온상이다.
+
+    실효 GT 는 두 곳뿐이다: tasks/*.py 안의 인라인 값과 gt/arrays/*.csv.
+    gt/<문항>.json 144 개는 예전 구조(정답이 다섯 파일에 흩어져 있던 시절)의 잔재로
+    generate/ 스크립트만 참조한다. 남겨 두는 것 자체는 괜찮지만, 문항 파일의 인라인
+    값과 조용히 어긋나면 어느 쪽이 정답인지 알 수 없게 된다. 대응 문항이 사라진 것만
+    이라도 눈에 띄게 한다(gt/T091.json 은 이미 그렇게 고아가 됐다).
+    """
+    gt_dir = HERE / "gt"
+    if not gt_dir.is_dir():
+        return []
+    have = {t.id for _, t in pairs}
+    # --tasks 로 일부만 돌릴 때는 비교가 무의미하다.
+    if len(have) < len(list(TASKS_DIR.glob("[TN]*.py"))):
+        return []
+    return [f"{p.stem}: 대응 문항 없음" for p in sorted(gt_dir.glob("[TN]*.json"))
+            if p.stem not in have]
 
 
 def _answer_keys_read(src: str) -> set:
@@ -166,19 +188,31 @@ def _check_answer_keys(pairs) -> tuple:
 # 실행
 # ══════════════════════════════════════════════════════════════════════════════
 def run_one(b: Bench, mod, task, run_id: str, axis=None) -> tuple:
-    """(평가 payload, 치명적 사유 or None)"""
-    infra: list[str] = []
+    """(평가 payload, 치명적 사유 or None)
+
+    [치명과 권고를 가르는 기준 — 2026-08-03]
+    fatal 은 '이 문항은 채점이 성립하지 않는다'는 것만 담는다: 입력 파일이 안 올라갔다,
+    사전 세팅이 안 걸렸다(전제 없이 돌았다), 시작 상태를 못 읽었다. 이것들은 결과가
+    result="error" 가 되어 해결률 분모에서 빠진다.
+    warn 은 남겨 둘 값어치는 있지만 채점을 좌우하지 않는 것이다. 리셋이 비치명적으로
+    일부 실패한 경우가 그렇다 — 문항은 정상 전제로 돌았고 답도 받았다. 예전에는 이
+    경고 한 줄이 fatal 과 같은 목록에 들어가, 모든 판정을 통과한 실행이 error 로
+    빠지면서 해결률 분모가 장비 잡음에 흔들렸다.
+    """
+    fatal: list[str] = []
+    warn: list[str] = []
 
     rs = b.reset()
     if rs.get("critical"):
         return None, "리셋 실패(치명적): " + "; ".join(rs["critical"])
     if rs.get("failed"):
-        infra.append("reset warning: " + "; ".join(rs["failed"][:3]))
+        # 비치명적 리셋 실패. 문항 전제는 살아 있으므로 채점은 그대로 한다.
+        warn.append("reset warning: " + "; ".join(rs["failed"][:3]))
 
     if task.inputs:
         up = b.upload(task.inputs)
         if not up.get("ok", True):
-            infra.append(f"input upload failed: {up.get('error')}")
+            fatal.append(f"input upload failed: {up.get('error')}")
 
     setup = getattr(mod, "setup", None)
     if setup and task.mode == "live":
@@ -187,24 +221,25 @@ def run_one(b: Bench, mod, task, run_id: str, axis=None) -> tuple:
         try:
             setup(b)
         except Exception as e:
-            infra.append(f"setup failed: {type(e).__name__}: {e}")
-        # 예외가 안 나도 도구가 ok=false 를 돌려줄 수 있다. 그러면 전제 없이 돌게 되므로
-        # 낮은 점수의 원인을 나중에 구별할 수 있게 결과에 남긴다.
-        infra += [f"setup did not take effect - {e}" for e in b.setup_errors]
+            fatal.append(f"setup failed: {type(e).__name__}: {e}")
+        # 예외가 안 나도 도구가 ok=false 를 돌려줄 수 있다. 그러면 문항이 요구한 전제
+        # 없이 돌게 되므로, 그 실행으로 에이전트를 평가하면 안 된다.
+        fatal += [f"setup did not take effect - {e}" for e in b.setup_errors]
 
     # 시작 상태는 **사전 세팅을 마친 뒤**의 상태다. 그래야 '문항이 시작한 자리에서
     # 무엇이 달라졌는가'가 에이전트의 몫이 된다.
     before = b.state()
     if not before:
-        infra.append("could not read the starting state - every state check will fail")
+        fatal.append("could not read the starting state - every state check will fail")
     run = b.run(task, run_id)
     run.state_before = before
     run.state_after = b.state()
-    return _finish(b, mod, task, run, infra), None
+    return _finish(b, mod, task, run, fatal, warn), None
 
 
-def _finish(b, mod, task, run, infra) -> dict:
-    run.errors = list(run.errors) + infra
+def _finish(b, mod, task, run, fatal, warn) -> dict:
+    run.errors = list(run.errors) + fatal
+    run.warnings = list(getattr(run, "warnings", [])) + warn
     try:
         checks = mod.evaluate(b, run)
     except Exception:

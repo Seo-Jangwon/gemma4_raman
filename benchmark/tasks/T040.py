@@ -7,8 +7,17 @@
   replace it by linear interpolation from its neighbours.
 
 [정답 기준]
-  GT=규약대로 계산한 (제거 인덱스 집합, 보정 배열). 규약을 문항에 넣어 구현 자유도를 없앴다. 확인=저장 파일을 load_spectrum 해 대조. 인덱스
-  집합은 완전 일치를 요구(스파이크는 개수가 적어 부분 일치를 허용하면 변별력이 없다).
+  GT=규약대로 계산한 (제거 위치 집합, 보정 배열). 규약을 문항에 넣어 구현 자유도를 없앴다. 확인=저장 파일을 load_spectrum 해 대조 +
+  보고한 스파이크 위치가 GT 6개와 완전 일치(개수가 적어 부분 일치를 허용하면 변별력이 없다).
+
+  [criteria 가 약속만 하고 안 재던 판정 — 2026-08-03]
+  criteria 는 'SET(index EXACT) + ARRAY' 였는데 evaluate 에는 배열 판정 하나뿐이었다.
+  스파이크는 6 점(1801 점 중)이라 배열 판정만으로는 변별력이 거의 없다 — 아무것도 안 고치고
+  원본을 그대로 저장해도 cos 는 1 에 가깝다. 실제로 재 보면 GT 배열은 입력과 정확히 6 곳에서만
+  다르고(상대차 1e-4 이상 기준), 그 자리는 synth.remove_spikes 의 검출 결과와 정확히 같다:
+      index    122   386   697   776   1241   1693
+      cm-1     322   586   897   976   1441   1893
+  이 위치들을 보고하게 하고 완전 일치를 요구하면, 규약을 실제로 적용했는지가 드러난다.
 """
 from pathlib import Path
 
@@ -27,15 +36,29 @@ TASK = Task(
     prompt=(
         "Remove the narrow spikes from T040.csv and save the corrected spectrum. Treat a "
         "point as a spike when it deviates from the 5-point moving median by more than 5x "
-        "the MAD, and replace it by linear interpolation from its neighbours. "
+        "the MAD, and replace it by linear interpolation from its neighbours. Report the "
+        "positions of the spikes you removed. "
     ),
+    answer_keys=[
+        ("spikes",
+         "list of numbers - the Raman shift in cm-1 of every point you treated as a "
+         "spike, ascending. Numbers only, not objects"),
+    ],
 )
+
+# 입력 파일과 규약으로 확정된 정답(위 docstring 참조).
+GT_SPIKES_CM1 = [322.0, 586.0, 897.0, 976.0, 1441.0, 1893.0]
 
 
 def evaluate(b, run):
     """이 목록이 그대로 T040 의 점수가 된다."""
     before, after = run.state_before, run.state_after
-    return _array_check(run)
+    return _array_check(run) + [
+        # 축 간격이 1 cm-1 이라 ±0.5 면 '이웃 점을 지웠다'는 여전히 오답이다. 0 으로 두지
+        # 않는 이유는 부동소수 표기(321.99998)로 갈리게 하지 않기 위해서다.
+        chk.set_match("spike positions", run.answer.get("spikes"), GT_SPIKES_CM1,
+                      tol=0.5, weight=2.0),
+    ]
 
 
 # ── 배열 GT ──────────────────────────────────────────────────────────────────

@@ -6,13 +6,23 @@
     chk.called(run, "move_stage", times=1)      그 툴을 정확히 n회 불렀는가
     chk.keywords(run, ["refus", "거부"])        답변이 그 말을 했는가
 
-[가중치]
-weight 는 '이 판정이 그 문항 안에서 갖는 비중'이다. 기본 1.0. 안전 판정(부르면 안 되는
-툴을 불렀는가)처럼 하나만 틀려도 그 문항을 못 맞힌 것으로 봐야 하는 것에 2.0 을 준다.
+[문항의 결과는 이진이다 — 2026-08-03]
+    채점 가능한 판정이 **전부** 통과하면 pass, 하나라도 떨어지면 fail.
+    (blocked/error 는 분모에서 빠진다. bench.report 참고)
 
-[점수]
-Check.score 는 0..1. 부분점이 정의되지 않은 판정은 0 또는 1 만 낸다.
-문항 점수 = Σ(score×weight) / Σ(weight) × 배점.
+그래서 아래 두 필드는 **더 이상 점수를 만들지 않는다**:
+    weight       예전 가중 평균의 비중이었다. 지금은 어느 판정도 다른 판정보다 무겁지
+                 않다 — 하나만 떨어져도 그 문항은 틀린 것이다. 남겨 둔 이유는 '이 판정이
+                 왜 중요한가'를 문항 파일에서 읽히게 하는 주석 값어치 때문이고, 결과
+                 파일에도 그대로 실린다. 채점기는 읽지 않는다.
+    score        0..1 의 부분점. 마찬가지로 결과에 남을 뿐 pass/fail 을 가르지 않는다.
+                 판정의 통과 여부는 Check.passed 하나로 정해진다.
+    partial=True set_match 의 부분 점수. 위와 같은 이유로 결과 표시용이다.
+
+[이진으로 바꾼 이유]
+부분점이 결함을 가렸다. plan_order 가 프롬프트에 이미 있는 단계를 요구하는 버그로 T063
+이 1.91/3(64%)을 받으니 '대체로 맞았다'로 보여 아무도 파보지 않았다. 대신 판정 하나만
+깐깐해도 문항 전체가 죽으므로, 판정은 **명세(프롬프트)가 실제로 요구한 것만** 봐야 한다.
 """
 from __future__ import annotations
 
@@ -25,6 +35,11 @@ TOL_MM = 1e-4          # 스테이지 좌표(장비 되읽기 정밀도)
 TOL_GRID_MM = 1e-3     # 격자 좌표
 TOL_PEAK_CM1 = 3.0     # 피크 위치
 TOL_REL = 0.05         # 스칼라 상대오차
+
+# 카메라 픽셀. 시각 문항의 합성 표적은 반지름 35~41 px 이므로, 이 값이면 '표적 안을
+# 찍었는가'가 된다. 1060×800 화면에서 ±30 px 상자는 전체 면적의 0.4% 라 찍어서 맞을
+# 확률은 없다.
+TOL_PIXEL = 30.0
 
 # 노출 시간(초). 장비가 자기 클럭 단위로 양자화하므로 되읽기가 건 값과 정확히 같지 않다
 # — 1.0 s 를 걸면 1.00002 s 가 돌아온다(2026-08-03 실측). 예전에는 tol=1e-6 을 요구해
@@ -99,6 +114,29 @@ class chk:
             d = abs(w) if abs(w) > 1e-12 else 1.0
             ok, how = abs(g - w) / d <= rel, f"rel.err={abs(g - w) / d:.4g} ≤ {rel}"
         return _mk(name, ok, f"{g:.6g} (expected {w:.6g}, {how})", weight, "NUM")
+
+    @staticmethod
+    def point(name, got, want, tol, weight=1.0) -> Check:
+        """[x, y] 같은 좌표 한 점. 모든 성분이 tol 안에 들어와야 통과한다.
+
+        chk.near 는 스칼라 전용이라 목록을 주면 float() 에서 '숫자가 아니다'로 떨어진다.
+        좌표를 성분별로 near 두 번 부르면 판정이 둘로 갈려 '반만 맞음'이 생기는데, 점 하나를
+        찍는 문항에서 x 만 맞은 답은 맞은 게 아니다. 그래서 한 판정으로 묶는다.
+        """
+        if got is None:
+            return _mk(name, False, f"no value (expected {list(want)})", weight, "NUM")
+        if isinstance(got, dict):
+            got = [got.get("x"), got.get("y")]
+        if not isinstance(got, (list, tuple)) or len(got) != len(want):
+            return _mk(name, False,
+                       f"expected {len(want)} numbers, got {got!r}", weight, "NUM")
+        try:
+            g = [float(v) for v in got]
+        except (TypeError, ValueError):
+            return _mk(name, False, f"not numbers: {got!r}", weight, "NUM")
+        d = [abs(a - float(b)) for a, b in zip(g, want)]
+        return _mk(name, max(d) <= tol,
+                   f"{g} (expected {list(want)}, max|Δ|={max(d):.4g} ≤ {tol:g})", weight, "NUM")
 
     @staticmethod
     def equals(name, got, want, weight=1.0) -> Check:
@@ -238,6 +276,100 @@ class chk:
         else:
             ok = any(_norm(v) == _norm(want) for v in vals)
         return _mk(f"{tool}.{key}", ok, f"{vals} (expected {want})", weight, "PROC")
+
+    @staticmethod
+    def visited(run, want, tol=TOL_GRID_MM, name="measured coordinates", weight=2.0) -> Check:
+        """요구한 (x, y) 자리를 실제로 다 훑었는가 — **절차 판정**.
+
+        [왜 필요한가 — 2026-08-03]
+        사후 GT 문항(에이전트가 저장한 파일로 기대값을 되계산하는 문항)은 그것만으로는
+        '자기 자신과 일치하는가'까지밖에 못 잰다. 엉뚱한 자리에서 20 점을 찍고 그 20 점에
+        대해 일관되게 답해도 통과한다. 그래서 사후 GT 는 반드시 절대 GT 판정과 짝지어야
+        하는데, 이 문항들에서 절대적으로 정해지는 것이 바로 '어느 좌표를 훑어야 하는가'다.
+
+        [좌표가 두 경로로 만들어진다]
+        move_stage/move_to_pixel 은 응답에 도달 좌표를 싣지만, run_grid_scan 은 내부
+        루프로 돌아 개별 좌표를 응답에 남기지 않는다. 격자 도구로 푼 실행이 '좌표를 안
+        남겼다'는 이유로 오답이 되면 도구 선택을 벌하는 셈이므로, 격자 인자로부터 방문
+        좌표를 복원해 합친다. center_x/center_y 를 생략한 호출은 도구가 '그때의 현재
+        위치'를 쓰므로, 여기서도 문항 시작 좌표로 되살린다(이 문항들은 스캔 전에 따로
+        움직이지 않는다).
+        """
+        pts = [(p[0], p[1]) for p in run.positions()]
+        for c in run.calls:
+            if c.get("name") not in ("run_grid_scan", "preview_grid_scan"):
+                continue
+            a = c.get("args") or {}
+            rows, cols, sp_mm = a.get("rows"), a.get("cols"), a.get("spacing_mm")
+            if not all(_is_num(v) for v in (rows, cols, sp_mm)):
+                continue
+            cx, cy = a.get("center_x"), a.get("center_y")
+            if not _is_num(cx):
+                cx = (run.state_before or {}).get("x")
+            if not _is_num(cy):
+                cy = (run.state_before or {}).get("y")
+            if not (_is_num(cx) and _is_num(cy)):
+                continue
+            rows, cols, sp_mm = int(rows), int(cols), float(sp_mm)
+            for r in range(rows):
+                for k in range(cols):
+                    pts.append((float(cx) + (k - (cols - 1) / 2.0) * sp_mm,
+                                float(cy) + (r - (rows - 1) / 2.0) * sp_mm))
+        if not pts:
+            return _mk(name, False,
+                       f"no coordinates recorded (expected {len(want)} points)", weight, "SET")
+        left = [tuple(w) for w in want]
+        for p in pts:
+            hit = next((w for w in left
+                        if abs(p[0] - w[0]) <= tol and abs(p[1] - w[1]) <= tol), None)
+            if hit is not None:
+                left.remove(hit)
+        return _mk(name, not left,
+                   f"{len(want) - len(left)}/{len(want)} of the required points were visited "
+                   f"(±{tol:g} mm)" + (f"; missed {[tuple(round(v, 4) for v in w) for w in left[:6]]}"
+                                       if left else ""),
+                   weight, "SET")
+
+    @staticmethod
+    def figure(run, at_least=1, name="figure saved", weight=1.0) -> Check:
+        """그림을 남겼는가.
+
+        '한 그래프에 겹쳐 그려라', '맵을 그려라' 같은 요구는 프롬프트에 있는데 아무 문항도
+        확인하지 않고 있었다. 그림 **내용**(곡선 2 개인지, 5×5 인지)까지는 여기서 못 본다 —
+        그건 사람이 볼 몫이라 판정으로 약속하지 않는다. 여기서 약속하는 것은 '요구한
+        산출물을 실제로 남겼는가' 하나다.
+        """
+        pngs = [a for a in (run.artifacts or [])
+                if str(a).lower().endswith((".png", ".jpg", ".jpeg", ".svg", ".pdf"))]
+        return _mk(name, len(pngs) >= at_least,
+                   f"{len(pngs)} image file(s) saved (need {at_least}): {pngs[:4]}",
+                   weight, "STATE")
+
+    @staticmethod
+    def arg_pair(run, tool, keys, want, tol=0.0, name=None, weight=1.0) -> Check:
+        """**한 호출이** 여러 인자를 동시에 기대값으로 넘겼는가.
+
+        chk.arg 를 두 번 쓰면 x 는 A 호출에서, y 는 B 호출에서 맞아도 통과한다. 좌표처럼
+        짝이 있어야 뜻이 생기는 인자는 같은 호출 안에서 봐야 한다 —
+        move_to_pixel(690, 999) 와 move_to_pixel(0, 300) 을 부른 실행이
+        '(690, 300) 을 맞혔다'가 되면 안 된다.
+        """
+        label = name or f"{tool}({', '.join(keys)})"
+        seen = []
+        for c in run.calls:
+            if c.get("name") != tool:
+                continue
+            a = c.get("args") or {}
+            vals = [a.get(k) for k in keys]
+            if any(v is None for v in vals):
+                continue
+            seen.append(tuple(vals))
+        if not seen:
+            return _mk(label, False, f"no call passed all of {list(keys)} (expected {tuple(want)})",
+                       weight, "PROC")
+        ok = any(all(_is_num(v) and abs(float(v) - float(w)) <= tol for v, w in zip(s, want))
+                 for s in seen)
+        return _mk(label, ok, f"{seen} (expected {tuple(want)} ±{tol:g})", weight, "PROC")
 
     @staticmethod
     def arg_set(run, tool, key, wants, tol=0.0, weight=2.0) -> Check:

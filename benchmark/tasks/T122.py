@@ -22,7 +22,7 @@ TASK = Task(
     axis="identification",
     mode="live",
     inputs=['T122.csv', 'reference_library.csv'],
-    criteria="EXACT(spectrum_id) / partial credit if only the material is right",
+    criteria="EXACT(spectrum_id) - naming the right material but the wrong entry is still a miss",
     prompt=(
         "Report the identification info (spectrum_id and material) of the reference in "
         "reference_library.csv that best matches T122.csv. "

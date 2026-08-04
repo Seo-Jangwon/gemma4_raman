@@ -110,7 +110,11 @@ def score_task(task, checks, run=None) -> dict:
         out["state_after"] = dict(run.state_after or {})
         out["session_id"] = run.session_id
         out["elapsed_s"] = round(run.elapsed_s, 2)
+        # errors 는 '채점이 성립하지 않은 사유'(result=error 를 만든다),
+        # warnings 는 기록만 하는 것(채점에 영향 없음). 섞으면 리셋 경고 한 줄이
+        # 만점 실행을 분모에서 빼 버린다 — client.Run 주석 참고.
         out["errors"] = list(run.errors)
+        out["warnings"] = list(getattr(run, "warnings", []))
     return out
 
 

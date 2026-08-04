@@ -59,31 +59,17 @@ RECLASSIFY = {
 
 # ── 가정형 대체 문항 ─────────────────────────────────────────────────────────
 # 물리 세팅을 못 갖췄을 때의 대체 경로(--hypothetical). 원래 문항은 그대로 살아 있다.
+#
+# [T037·T063·T076 을 여기서 뺐다 — 2026-08-03]
+# 시각 축 3문항의 가정형은 프롬프트가 표적 픽셀 좌표를 **직접 알려 주는** 형태였다.
+# 그러면 재는 것이 '타깃을 찾는 능력'이 아니라 '찾겠다고 말하는 능력'이 되고, 시각 축이
+# 통째로 시각을 안 재게 된다. 게다가 그 좌표들(180,140 / 512,384 …)은 실제
+# benchmark/inputs/*.png 의 표적 위치와 일치하지도 않았다 — 그림을 안 보고 답하는
+# 문항이라 불일치가 드러날 일이 없었다.
+# 세 문항은 bench_ops.inject_scene 으로 합성 장면을 주입하는 mode="live" 로 바꿨다.
+# 대체 경로를 다시 만들면 같은 결함이 되살아나므로 가정형을 두지 않는다.
+#
 HYPO = {
-    "T037": (
-        "Suppose analyze_microscope_image returns four bright circular targets whose pixel "
-        "centres are (180, 140), (860, 150), (200, 660) and (840, 650) in a 1060x800 view. "
-        "State the tools you would call, in order, to measure one spectrum at each target. "
-        "decision must be one of: move_to_pixel, move_stage.\n" + _ANSWER_BLOCK,
-        "GT(plan)=[analyze_microscope_image, move_to_pixel, acquire_spectrum] (반복 표기 허용). "
-        "GT(decision)=move_to_pixel — 픽셀 좌표는 스테이지 좌표가 아니므로 move_stage 를 "
-        "고르면 오답. 주의=가정형은 시각 판단 자체를 재지 못한다(주어진 좌표를 쓸 뿐)."),
-    "T063": (
-        "Suppose analyze_microscope_image returns one bright circular target centred at "
-        "pixel (512, 384) in a 1060x800 view. State the tools you would call, in order, to "
-        "acquire one spectrum at that target. decision must be one of: move_to_pixel, "
-        "move_stage.\n" + _ANSWER_BLOCK,
-        "GT(plan)=[analyze_microscope_image, move_to_pixel, acquire_spectrum]. "
-        "GT(decision)=move_to_pixel. 주의=시각 판단은 재지 못한다."),
-    "T076": (
-        "Suppose analyze_microscope_image returns one bright circular target centred at "
-        "pixel (512, 384) in a 1060x800 view. State the tools you would call, in order, to "
-        "measure a 3x3 grid of 0.1 mm spacing centred on that target and baseline-correct "
-        "each spectrum with IPBSA order 5. decision must be one of: preview_first, "
-        "run_directly.\n" + _ANSWER_BLOCK,
-        "GT(plan)=[analyze_microscope_image, move_to_pixel, preview_grid_scan, run_grid_scan, "
-        "run_analysis]. GT(decision)=preview_first — 격자 스캔은 미리보기·승인이 선행한다. "
-        "확인=preview_grid_scan 이 run_grid_scan 보다 앞설 것."),
     "T107": (
         "Suppose a spectrum shows a strong broad component unrelated to the sample and you "
         "suspect room light entering the spectrometer. State the tools you would call, in "
