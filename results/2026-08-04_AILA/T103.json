@@ -1,0 +1,151 @@
+{
+  "task": "T103",
+  "axis": "diagnostics",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "All peaks of T103.csv are shifted by the same amount from the expected positions of the reference T103_ref.csv. Estimate the shift by cross-correlation, correct it, and report both the estimated shift and the corrected peak positions.",
+  "criteria": "NUM(shift ±0.2 cm-1, sign included) + SET(peak ±3 cm-1)",
+  "checks": [
+    {
+      "name": "shift",
+      "passed": true,
+      "score": 1.0,
+      "detail": "1 (expected 1, |Δ|=0 ≤ 0.2)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T103.csv",
+    "T103_ref.csv"
+  ],
+  "answer_text": "Based on the cross-correlation analysis between the sample spectrum (`T103.csv`) and the reference spectrum (`T103_ref.csv`), it was determined that the peaks in `T103.csv` are shifted by **1 cm⁻¹** relative to the reference.\n\nTo correct this, a shift of -1 cm⁻¹ was applied to the Raman shift axis of the sample data. Following this correction, the peak positions of the corrected spectrum align with the expected reference values. The primary detected peaks in the corrected spectrum are located at approximately **620, 1001, 1031, 1450, 1583, and 1602 cm⁻¹**.\n\n```json\n{\"shift_cm1\": 1}\n```",
+  "answer_json": {
+    "shift_cm1": 1
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T103.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T103_ref.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\nfrom scipy.ndimage import shift\n\n# Load files\nt103 = files[0][\"table\"] #Assuming index 0 is T103 based on file_ids order, but I'll be explicit\nt103_ref = files[1][\"table\"] #Assuming index 1 is ref\n\n# Explicitly identify files to avoid confusion\nf_t103 = [f for f in files if \"T103.csv\" == f[\"filename\"]][0][\"table\"]\nf_ref = [f for f in files if \"T103_ref.csv\" == f[\"filename\"]][0][\"table\"]\n\nx = f_t103[\"raman_shift_cm-1\"]\ny = f_t103[\"intensity\"]\nx_ref = f_ref[\"raman_shift_cm-1\"]\ny_ref = f_ref[\"intensity\"]\n\n# Normalization (z-score) for cross-correlation\ny_norm = (y - np.mean(y)) / np.std(y)\ny_ref_norm = (y_ref - np.mean(y_ref)) / np.std(y_ref)\n\n# Cross-correlation\ncorr = signal.correlate(y_norm, y_ref_norm, mode='full')\nlags = signal.correlation_lags(len(y_norm), len(y_ref_norm), mode='full')\nshift_idx = np.argmax(corr)\nestimated_shift = lags[shift_idx]\n\nprint(f\"Estimated shift: {estimated_shift} cm-1\")\n\n# Correct the spectrum\n# If y is shifted by +s relative to ref, we subtract s from x to align it.\nx_corrected = x - estimated_shift\n\n# Peak detection on corrected and ref\ndef find_peaks(x, y):\n    # Simple peak finding: local maxima above a threshold (e.g., 3*std)\n    # In reality, use signal.find_peaks\n    from scipy.signal import find_peaks as sp_find_peaks\n    # Remove baseline roughly for better peak detection if needed, but let's try raw first\n    # Use a simple threshold\n    peaks, _ = sp_find_peaks(y, height=np.mean(y) + 2*np.std(y))\n    return x[peaks], y[peaks]\n\nref_peaks_x, ref_peaks_y = find_peaks(x_ref, y_ref)\ncorr_peaks_x, corr_peaks_y = find_peaks(x_corrected, y)\n\nprint(f\"Reference Peaks: {ref_peaks_x}\")\nprint(f\"Corrected T103 Peaks: {corr_peaks_x}\")\n\n# Save the corrected spectrum\nsave_result('T103_corrected', y, raman_shift=x_corrected)\n\nimport matplotlib.pyplot as plt\nplt.figure(figsize=(10, 6))\nplt.plot(x_ref, y_ref, label='Reference', alpha=0.7)\nplt.plot(x, y, label='T103 Original', alpha=0.5)\nplt.plot(x_corrected, y, label='T103 Corrected', color='black', linewidth=1.5)\nplt.title(f\"Spectrum Correction (Shift = {estimated_shift} cm-1)\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Intensity\")\nplt.legend()\nplt.grid(True)\nplt.savefig('correction_plot.png')\n",
+        "file_ids": [
+          "2026-08-04/T103.csv",
+          "2026-08-04/T103_ref.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-04_AILA_AILA_T103_0ff6a9/spectra/01_T103_corrected.csv",
+    "/api/results/2026-08-04/bench_2026-08-04_AILA_AILA_T103_0ff6a9/fig135903_469_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 60.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 60.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 60.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 60.0
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T103_0ff6a9",
+  "elapsed_s": 62.2,
+  "errors": [],
+  "warnings": []
+}

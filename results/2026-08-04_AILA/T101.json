@@ -1,0 +1,166 @@
+{
+  "task": "T101",
+  "axis": "diagnostics",
+  "mode": "live",
+  "result": "fail",
+  "reason": "result array: max deviation=127.4 (tolerance 0.001)",
+  "checks_passed": 1,
+  "checks_total": 2,
+  "question": "T101.csv contains three repeated measurements (column frame_index 0,1,2) in which sharp spikes appear at inconsistent positions. Name the cause, remove the spikes (5-point moving median, 5x MAD, linear interpolation) from each frame, and report the peaks of the cleaned mean spectrum.",
+  "criteria": "KEYWORD(cosmic ray) + SET(index EXACT ×3) + SET(peak ±3 cm-1)",
+  "checks": [
+    {
+      "name": "peak positions",
+      "passed": true,
+      "score": 1.0,
+      "detail": "9/9 matched (submitted 9) [620.0, 796.0, 1000.0, 1032.0, 1155.0, 1183.0]... vs [620.0, 796.0, 1001.0, 1031.0, 1154.0, 1183.0]...",
+      "weight": 1.0,
+      "kind": "SET"
+    },
+    {
+      "name": "result array",
+      "passed": false,
+      "score": 0.0,
+      "detail": "max deviation=127.4 (tolerance 0.001)",
+      "weight": 2.0,
+      "kind": "ARRAY"
+    }
+  ],
+  "failures": [
+    {
+      "check": "result array",
+      "kind": "ARRAY",
+      "reason": "max deviation=127.4 (tolerance 0.001)"
+    }
+  ],
+  "blocked": [],
+  "input_files": [
+    "T101.csv"
+  ],
+  "answer_text": "The sharp spikes observed at inconsistent positions across the three measurements are caused by **cosmic rays** (high-energy particles striking the CCD detector during acquisition).\n\nTo clean the data, a 5-point moving median filter was used to identify outliers. Points exceeding $5 \\times$ the Median Absolute Deviation (MAD) relative to the median were flagged as spikes and replaced using linear interpolation between adjacent valid points. This process removed 91, 69, and 88 spikes from frames 0, 1, and 2, respectively.\n\nThe peaks of the resulting cleaned mean spectrum were identified after applying a linear baseline correction.\n\n```json\n{\"peaks\": [620.0, 796.0, 1000.0, 1032.0, 1155.0, 1183.0, 1450.0, 1583.0, 1601.0]}\n```",
+  "answer_json": {
+    "peaks": [
+      620.0,
+      796.0,
+      1000.0,
+      1032.0,
+      1155.0,
+      1183.0,
+      1450.0,
+      1583.0,
+      1601.0
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T101.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\nfrom scipy.ndimage import median_filter\nfrom scipy.signal import find_peaks\n\ndef remove_spikes(y, window=5, threshold_factor=5):\n    # 5-point moving median\n    median = median_filter(y, size=window)\n    diff = np.abs(y - median)\n    # 5x MAD\n    mad = np.median(np.abs(diff - np.median(diff)))\n    threshold = threshold_factor * mad\n    \n    spikes = diff > threshold\n    n_spikes = np.sum(spikes)\n    \n    # Linear interpolation for spikes\n    y_clean = y.copy()\n    indices = np.arange(len(y))\n    y_clean[spikes] = np.interp(indices[spikes], indices[~spikes], y[~spikes])\n    \n    return y_clean, n_spikes\n\n# Data preparation\ndata = files[0][\"table\"]\nshifts = data[\"raman_shift_cm-1\"]\nintensities = data[\"intensity\"]\nframes_idx = data[\"frame_index\"]\n\nunique_frames = np.unique(frames_idx)\ncleaned_spectra = []\n\nfor f in unique_frames:\n    mask = (frames_idx == f)\n    y = intensities[mask]\n    x = shifts[mask]\n    \n    y_clean, n_s = remove_spikes(y)\n    cleaned_spectra.append(y_clean)\n    print(f\"Frame {f}: removed {n_s} spikes\")\n\n# Mean spectrum\nmean_intensity = np.mean(cleaned_spectra, axis=0)\nx_axis = shifts[frames_idx == unique_frames[0]]\n\n# Peak detection\n# We need to be careful about the baseline. The data might have a slope or offset.\n# For peak reporting, let's find prominent peaks. \n# I'll subtract a simple mean or use find_peaks with a height/prominence.\n# Since the prompt just asks for 'the peaks', I will look for significant ones.\n# I will first normalize and remove a basic baseline to make it cleaner.\n\n# Simple baseline subtraction (linear)\nz = np.polyfit(x_axis, mean_intensity, 1)\np = np.poly1d(z)\nbaseline_removed = mean_intensity - p(x_axis)\n\npeaks, properties = find_peaks(baseline_removed, prominence=50) # Heuristic prominence\npeak_shifts = x_axis[peaks]\n\nprint(\"Peak positions:\", peak_shifts)\n\n# Visualization\nplt.figure(figsize=(10, 6))\nplt.plot(x_axis, mean_intensity, label='Mean Spectrum (Cleaned)')\nplt.plot(x_axis, baseline_removed, label='Baseline Removed', alpha=0.7)\nplt.scatter(peak_shifts, mean_intensity[peaks], color='red', marker='x', label='Peaks')\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Intensity')\nplt.legend()\nplt.title('Cleaned Mean Spectrum and Detected Peaks')\nplt.grid(True)\nplt.savefig('cleaned_mean_spectrum.png')\n\n# Save the cleaned mean spectrum for record\nsave_result('T101_cleaned_mean', mean_intensity, raman_shift=x_axis)\n",
+        "file_ids": [
+          "2026-08-04/T101.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-04_AILA_AILA_T101_668fe9/spectra/01_T101_cleaned_mean.csv",
+    "/api/results/2026-08-04/bench_2026-08-04_AILA_AILA_T101_668fe9/fig134945_026_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T101_668fe9",
+  "elapsed_s": 59.34,
+  "errors": [],
+  "warnings": []
+}

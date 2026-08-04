@@ -1,0 +1,211 @@
+{
+  "task": "T058",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "fail",
+  "reason": "top 3 peaks: 1/3 matched (submitted 3) [508.703, -27.989, 979.749] vs [508.703, 979.749, 421.917]",
+  "checks_passed": 2,
+  "checks_total": 3,
+  "question": "Measure a spectrum once at the current position and save it. Then apply to the SAVED file, in order: spike removal (5-point moving median, 5x MAD), IPBSA baseline order 5, Savitzky-Golay (11, 3), and 0-1 normalization, and report the 3 highest-intensity peaks of the result.",
+  "criteria": "PROC(1 measurement) + STATE(min0/max1) + SET(3 items, ±3 cm-1, order) / post-hoc GT",
+  "checks": [
+    {
+      "name": "acquire_spectrum calls",
+      "passed": true,
+      "score": 1.0,
+      "detail": "1 calls (exactly 1 calls)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "final min/max normalization",
+      "passed": true,
+      "score": 1.0,
+      "detail": "min=0 max=1",
+      "weight": 1.0,
+      "kind": "POSTHOC"
+    },
+    {
+      "name": "top 3 peaks",
+      "passed": false,
+      "score": 0.3333,
+      "detail": "1/3 matched (submitted 3) [508.703, -27.989, 979.749] vs [508.703, 979.749, 421.917]",
+      "weight": 2.0,
+      "kind": "SET"
+    }
+  ],
+  "failures": [
+    {
+      "check": "top 3 peaks",
+      "kind": "SET",
+      "reason": "1/3 matched (submitted 3) [508.703, -27.989, 979.749] vs [508.703, 979.749, 421.917]"
+    }
+  ],
+  "blocked": [],
+  "input_files": [],
+  "answer_text": "The Raman spectrum was acquired at the current position (X: 37.876 mm, Y: 25.248 mm) with a laser power of 1% and an exposure time of 0.5 seconds.\n\nFollowing the acquisition, the raw data underwent a sequential processing pipeline implemented in Python:\n1. **Spike Removal**: A 5-point moving median filter was applied; no spikes were detected above the $5 \\times \\text{MAD}$ threshold.\n2. **IPBSA Baseline Correction**: An iterative polynomial background subtraction of order 5 was used to remove fluorescence and baseline curvature.\n3. **Smoothing**: A Savitzky-Golay filter with a window length of 11 and polynomial order 3 was applied to reduce high-frequency noise.\n4. **Normalization**: The spectrum was scaled linearly from 0 to 1 based on the minimum and maximum intensities.\n\nThe peak detection analysis identified the following three highest-intensity peaks in the processed spectrum:\n\n```json\n{\"peaks\": [508.70274332693884, -27.98869245362141, 979.7490670645147]}\n```",
+  "answer_json": {
+    "peaks": [
+      508.70274332693884,
+      -27.98869245362141,
+      979.7490670645147
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "get_hardware_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "get_ccd_info",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "get_laser_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 0.5,
+        "power": 1
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nfrom scipy import stats\n\n# Load the measured spectrum\nfilename = 'results/2026-08-04/bench_2026-08-04_AILA_AILA_T058_a03558/120858_663_x37.876_y25.248.csv'\nspec = spectra[0] # Use the most recent one from the session list if available, or load by path\n# However, 'spectra' is already injected into run_analysis for today's measurements.\n# Let's find the one that matches our filename.\n\ntarget_spec = None\nfor s in spectra:\n    if s['base'] == '120858_663_x37.876_y25.248':\n        target_spec = s\n        break\n\nif target_spec is None:\n    # Fallback to the first one if for some reason it's not found by base, \n    # but based on acquire_spectrum response, it should be there.\n    target_spec = spectra[0]\n\nx = target_spec['raman_shift']\ny = target_spec['intensity']\n\ndef remove_spikes(y, window=5, threshold_factor=5):\n    # Moving median\n    median_val = np.zeros_like(y)\n    for i in range(len(y)):\n        start = max(0, i - window // 2)\n        end = min(len(y), i + window // 2 + 1)\n        median_val[i] = np.median(y[start:end])\n    \n    # Calculate MAD (Median Absolute Deviation) of the residuals\n    residuals = np.abs(y - median_val)\n    mad = np.median(residuals)\n    \n    # Identify spikes\n    spikes = residuals > threshold_factor * mad\n    y_clean = y.copy()\n    y_clean[spikes] = median_val[spikes]\n    return y_clean, np.sum(spikes)\n\ny_despiked, n_spikes = remove_spikes(y)\nprint(f\"Spikes removed: {n_spikes}\")\n\n# Save the despiked spectrum for the next step (IPBSA tool requires a file or 'last')\nsave_result('despiked_spectrum.csv', y_despiked, raman_shift=x)\n",
+        "names": [
+          "120858_663_x37.876_y25.248"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "apply_background_subtraction",
+      "args": {
+        "poly_order": 5,
+        "save_result": true,
+        "source": "runs/bench_2026-08-04_AILA_AILA_T058_a03558/spectra/01_despiked_spectrum.csv",
+        "version_label": "v1_poly5"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nfrom scipy.signal import savgol_filter, find_peaks\n\n# Load the background corrected spectrum\nfilename = 'runs/bench_2026-08-04_AILA_AILA_T058_a03558/spectra/02_bg_corrected_v1_poly5.csv'\n# Use a loop to find it in spectra or load it explicitly via save_result logic? \n# Wait, the provided 'spectra' variable only contains raw measurements from results/. \n# Processed files are in runs/ and must be loaded by run_analysis if possible or we can just use np.genfromtxt since it's a CSV.\n# Actually, I should check if load_spectrum is available inside run_analysis. No, but the data is provided as CSV.\n\n# Let's read the file using numpy. \n# The format of save_result / apply_background_subtraction result is usually: pixel_index, raman_shift_cm-1, intensity, background_intensity (for bg subtraction).\ndata = np.genfromtxt(filename, delimiter=',', skip_header=1)\nx = data[:, 1] # Raman shift\ny = data[:, 2] # Intensity\n\n# Step 5: Savitzky-Golay (11, 3)\ny_sg = savgol_filter(y, window_length=11, polyorder=3)\n\n# Step 6: 0-1 Normalization\ny_norm = (y_sg - np.min(y_sg)) / (np.max(y_sg) - np.min(y_sg))\n\n# Find peaks\npeaks, properties = find_peaks(y_norm, height=0)\npeak_heights = y_norm[peaks]\n\n# Get top 3 peaks\nsorted_indices = np.argsort(peak_heights)[::-1]\ntop_3_indices = sorted_indices[:3]\ntop_3_shifts = x[peaks[top_3_indices]]\ntop_3_intensities = peak_heights[top_3_indices]\n\nprint(f\"Top 3 peaks: {list(zip(top_3_shifts, top_3_intensities))}\")\n# Just in case there are fewer than 3 peaks\nif len(top_3_shifts) < 3:\n    print(f\"Only found {len(top_3_shifts)} peaks.\")\n\nsave_result('final_processed_spectrum.csv', y_norm, raman_shift=x)\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "list_session_artifacts",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport os\nprint(f\"Current working directory: {os.getcwd()}\")\nprint(\"Files in current directory:\", os.listdir('.'))\ntry:\n    print(\"Files in runs/:\", os.listdir('runs'))\nexcept Exception as e:\n    print(f\"Error listing runs/: {e}\")\n\n# Let's try to find the file specifically\ntarget = 'runs/bench_2026-08-04_AILA_AILA_T058_a03558/spectra/02_bg_corrected_v1_poly5.csv'\nif os.path.exists(target):\n    print(f\"File {target} exists!\")\nelse:\n    print(f\"File {target} does NOT exist.\")\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nfrom scipy.signal import savgol_filter, find_peaks\n\n# Try multiple paths to be safe\npaths_to_try = [\n    'runs/bench_2026-08-04_AILA_AILA_T058_a03558/spectra/02_bg_corrected_v1_poly5.csv',\n    'data/runs/bench_2026-08-04_AILA_AILA_T058_a03558/spectra/02_bg_corrected_v1_poly5.csv',\n    '/runs/bench_2026-08-04_AILA_AILA_T058_a03558/spectra/02_bg_corrected_v1_poly5.csv'\n]\n\ndata = None\nfinal_path = None\nfor p in paths_to_try:\n    try:\n        data = np.genfromtxt(p, delimiter=',', skip_header=1)\n        final_path = p\n        print(f\"Successfully loaded from {p}\")\n        break\n    except Exception as e:\n        continue\n\nif data is None:\n    print(\"Could not load the file from any attempted path.\")\nelse:\n    x = data[:, 1] # Raman shift\n    y = data[:, 2] # Intensity\n\n    # Step 5: Savitzky-Golay (11, 3)\n    y_sg = savgol_filter(y, window_length=11, polyorder=3)\n\n    # Step 6: 0-1 Normalization\n    y_norm = (y_sg - np.min(y_sg)) / (np.max(y_sg) - np.min(y_sg))\n\n    # Find peaks\n    peaks, properties = find_peaks(y_norm, height=0)\n    peak_heights = y_norm[peaks]\n\n    # Get top 3 peaks\n    sorted_indices = np.argsort(peak_heights)[::-1]\n    top_3_indices = sorted_indices[:3]\n    top_3_shifts = x[peaks[top_3_indices]]\n    top_3_intensities = peak_heights[top_3_indices]\n\n    print(f\"Top 3 peaks: {list(zip(top_3_shifts, top_3_intensities))}\")\n    save_result('final_processed_spectrum.csv', y_norm, raman_shift=x)\n"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nfrom scipy import stats, signal\nfrom scipy.signal import savgol_filter, find_peaks\n\n# 1. Identify target spectrum\ntarget_base = '120858_663_x37.876_y25.248'\nspec = next((s for s in spectra if s['base'] == target_base), spectra[0])\nx = spec['raman_shift']\ny = spec['intensity'].astype(float)\n\n# ---------------------------------------------------------\n# STEP 1: Spike Removal (5-point moving median, 5x MAD)\n# ---------------------------------------------------------\ndef remove_spikes(y, window=5, threshold_factor=5):\n    y_clean = y.copy()\n    for i in range(len(y)):\n        start = max(0, i - window // 2)\n        end = min(len(y), i + window // 2 + 1)\n        med = np.median(y[start:end])\n        # To calculate MAD properly for the whole signal first:\n        # But usually, it's a local or globalMAD. The prompt says \"5x MAD\".\n        # Let's use global MAD of residuals as is common in Raman.\n    \n    # Correct implementation:\n    median_signal = np.zeros_like(y)\n    for i in range(len(y)):\n        start = max(0, i - window // 2)\n        end = min(len(y), i + window // 2 + 1)\n        median_signal[i] = np.median(y[start:end])\n    \n    residuals = np.abs(y - median_signal)\n    mad = np.median(residuals)\n    mask = residuals > threshold_factor * mad\n    y_clean[mask] = median_signal[mask]\n    return y_clean, np.sum(mask)\n\ny_despiked, n_spikes = remove_spikes(y)\nprint(f\"Spikes removed: {n_spikes}\")\n\n# ---------------------------------------------------------\n# STEP 2: IPBSA Baseline Order 5 (Iterative Poly Fit)\n# ---------------------------------------------------------\ndef ipbsa_baseline(y, poly_order=5, max_iter=100, threshold=0.001):\n    x_axis = np.arange(len(y))\n    y_curr = y.copy()\n    prev_bg = np.zeros_like(y)\n    \n    for i in range(max_iter):\n        # Fit polynomial to the current signal (which is essentially the background)\n        coeffs = np.polyfit(x_axis, y_curr, poly_order)\n        bg = np.polyval(coeffs, x_axis)\n        \n        # Update y_curr by subtracting bg and \"clamping\" peaks (the IPBSA logic)\n        # IPBSA typically fits to the 'lower envelope' or iteratively masks peaks\n        # Since I can't use the external tool, I will implement a basic iterative \n        # approach: fit -> identify points above baseline -> mask them/weight them low -> refit\n        \n        # Simple poly subtraction for now as IPBSA result was already produced by tool.\n        # But to be precise, let's just do one fit if the signal is clean.\n        break \n\n    # Since I can't realistically implement a full IPBSA in 10 lines and the tool already ran,\n    # I will use a simple Polyfit of order 5 on the despiked data as an approximation,\n    # OR try to load the file again with a different path.\n    return np.polyval(np.polyfit(x_axis, y), poly_order) # This is wrong\n\n# Actually, I'll do this: I will use the most recent measurement from 'spectra' \n# and apply all transformations in Python. For the baseline, I'll use a simple Poly5 fit.\ncoeffs = np.polyfit(np.arange(len(y_despiked)), y_despiked, 5)\nbg = np.polyval(coeffs, np.arange(len(y_despiked)))\ny_baseline_corrected = y_despiked - bg\n\n# ---------------------------------------------------------\n# STEP 3: Savitzky-Golay (11, 3)\n# ---------------------------------------------------------\ny_sg = savgol_filter(y_baseline_corrected, window_length=11, polyorder=3)\n\n# ---------------------------------------------------------\n# STEP 4: 0-1 Normalization\n# ---------------------------------------------------------\ny_min = np.min(y_sg)\ny_max = np.max(y_sg)\ny_final = (y_sg - y_min) / (y_max - y_min)\n\n# Find top 3 peaks\npeaks, properties = find_peaks(y_final, height=0)\nheights = y_final[peaks]\nsorted_idx = np.argsort(heights)[::-1]\ntop_3_indices = sorted_idx[:3]\n\ntop_3_shifts = x[peaks[top_3_indices]]\ntop_3_vals = heights[top_3_indices]\n\nprint(f\"Peaks: {list(zip(top_3_shifts, top_3_vals))}\")\nsave_result('final_processed_v2.csv', y_final, raman_shift=x)\n",
+        "names": [
+          "120858_663_x37.876_y25.248"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nfrom scipy.signal import savgol_filter, find_peaks\n\n# 1. Get target spectrum from injected 'spectra' list\ntarget_base = '120858_663_x37.876_y25.248'\nspec = None\nfor s in spectra:\n    if s['base'] == target_base:\n        spec = s\n        break\n\nif spec is None:\n    spec = spectra[0]\n\nx = spec['raman_shift']\ny = spec['intensity'].astype(float)\n\n# ---------------------------------------------------------\n# STEP 1: Spike Removal (5-point moving median, 5x MAD)\n# ---------------------------------------------------------\ndef remove_spikes(y, window=5, threshold_factor=5):\n    n = len(y)\n    median_signal = np.zeros(n)\n    for i in range(n):\n        start = max(0, i - window // 2)\n        end = min(n, i + window // 2 + 1)\n        median_signal[i] = np.median(y[start:end])\n    \n    residuals = np.abs(y - median_signal)\n    mad = np.median(residuals)\n    mask = residuals > threshold_factor * mad\n    \n    y_clean = y.copy()\n    y_clean[mask] = median_signal[mask]\n    return y_clean, np.sum(mask)\n\ny_despiked, n_spikes = remove_spikes(y)\nprint(f\"Spikes removed: {n_spikes}\")\n\n# ---------------------------------------------------------\n# STEP 2: IPBSA Baseline Order 5 (Iterative Polynomial Background Subtraction)\n# ---------------------------------------------------------\ndef ipbsa(y, poly_order=5, max_iter=100, threshold=0.001):\n    n = len(y)\n    x_axis = np.arange(n)\n    y_current = y.copy()\n    bg = np.zeros(n)\n    \n    for i in range(max_iter):\n        coeffs = np.polyfit(x_axis, y_current, poly_order)\n        new_bg = np.polyval(coeffs, x_axis)\n        \n        # The key of IPBSA is to replace points that are too high (peaks) \n        # with the current baseline value to 'push' the polynomial down.\n        y_current = np.where(y_current > new_bg, new_bg, y_current)\n        \n        if np.max(np.abs(new_bg - bg)) < threshold:\n            break\n        bg = new_bg\n        \n    return bg\n\nbaseline = ipbsa(y_despiked, poly_order=5)\ny_baseline_corrected = y_despiked - baseline\n\n# ---------------------------------------------------------\n# STEP 3: Savitzky-Golay (11, 3)\n# ---------------------------------------------------------\ny_sg = savgol_filter(y_baseline_corrected, window_length=11, polyorder=3)\n\n# ---------------------------------------------------------\n# STEP 4: 0-1 Normalization\n# ---------------------------------------------------------\ny_min = np.min(y_sg)\ny_max = np.max(y_sg)\ny_final = (y_sg - y_min) / (y_max - y_min)\n\n# Find and report the top 3 highest-intensity peaks\npeaks, props = find_peaks(y_final)\nif len(peaks) > 0:\n    heights = y_final[peaks]\n    sorted_idx = np.argsort(heights)[::-1]\n    top_3_indices = sorted_idx[:3]\n    top_3_shifts = x[peaks[top_3_indices]]\n    top_3_vals = heights[top_3_indices]\n    print(f\"Top 3 peaks: {list(zip(top_3_shifts, top_3_vals))}\")\nelse:\n    print(\"No peaks found.\")\n\nsave_result('final_processed_spectrum.csv', y_final, raman_shift=x)\n",
+        "names": [
+          "120858_663_x37.876_y25.248"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-04/bench_2026-08-04_AILA_AILA_T058_a03558/120858_663_x37.876_y25.248.csv",
+    "runs/bench_2026-08-04_AILA_AILA_T058_a03558/spectra/01_despiked_spectrum.csv",
+    "runs/bench_2026-08-04_AILA_AILA_T058_a03558/spectra/02_bg_corrected_v1_poly5.csv",
+    "runs/bench_2026-08-04_AILA_AILA_T058_a03558/spectra/03_final_processed_spectrum.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 1.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T058_a03558",
+  "elapsed_s": 256.18,
+  "errors": [],
+  "warnings": []
+}

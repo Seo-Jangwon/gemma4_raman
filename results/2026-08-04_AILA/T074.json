@@ -1,0 +1,191 @@
+{
+  "task": "T074",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "In the map T074.csv, compute the element-wise median spectrum, judge the positions whose cosine similarity to it (after L2 normalization) is below 0.80 as anomalous, and re-measure a spectrum once at those positions only.",
+  "criteria": "SET(coords EXACT) + PROC",
+  "checks": [
+    {
+      "name": "re-measured positions",
+      "passed": true,
+      "score": 1.0,
+      "detail": "2/2 matched (submitted 2) [[37.8, 25.4], [38.0, 25.2]] vs [[37.8, 25.4], [38.0, 25.2]]",
+      "weight": 2.0,
+      "kind": "SET"
+    },
+    {
+      "name": "acquire_spectrum calls",
+      "passed": true,
+      "score": 1.0,
+      "detail": "2 calls (exactly 2 calls)",
+      "weight": 2.0,
+      "kind": "PROC"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T074.csv"
+  ],
+  "answer_text": "I have analyzed the map `T074.csv` and identified the anomalous positions by calculating the element-wise median spectrum and computing the cosine similarity (with L2 normalization) for each point. Two positions were found to have a cosine similarity below 0.80: (37.8, 25.4) and (38.0, 25.2).\n\nI re-measured spectra at these two locations using a laser power of 1% and an exposure time of 0.5 seconds.\n\n```json\n{\"anomalous_positions\": [[37.8, 25.4], [38.0, 25.2]]}\n```",
+  "answer_json": {
+    "anomalous_positions": [
+      [
+        37.8,
+        25.4
+      ],
+      [
+        38.0,
+        25.2
+      ]
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T074.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load data from files[0]\ndata = files[0][\"table\"]\nx_coords = data[\"x\"]\ny_coords = data[\"y\"]\nshifts = data[\"raman_shift_cm-1\"]\nintensities = data[\"intensity\"]\n\n# Unique positions and their associated spectra\nunique_pos = np.unique(np.stack([x_coords, y_coords], axis=1), axis=0)\nn_pos = len(unique_pos)\nn_points = len(shifts) // n_pos # Assuming equal length per spectrum\n\n# Reshape intensities into (n_pos, n_points)\n# We need to be careful about the ordering. Let's reconstruct a matrix properly.\nspectra_matrix = []\nfor pos in unique_pos:\n    mask = (x_coords == pos[0]) & (y_coords == pos[1])\n    spectra_matrix.append(intensities[mask])\n\nspectra_matrix = np.array(spectra_matrix) # Shape: (n_pos, n_points)\n\n# 1. Compute element-wise median spectrum\nmedian_spectrum = np.median(spectra_matrix, axis=0)\n\n# 2. Cosine Similarity after L2 normalization\ndef l2_norm(v):\n    norm = np.linalg.norm(v)\n    return v / norm if norm > 0 else v\n\nnorm_median = l2_norm(median_spectrum)\nsimilarities = []\n\nfor i in range(n_pos):\n    norm_spec = l2_norm(spectra_matrix[i])\n    sim = np.dot(norm_spec, norm_median)\n    similarities.append(sim)\n\nsimilarities = np.array(similarities)\n\n# 3. Identify anomalous positions (similarity < 0.80)\nanomalous_mask = similarities < 0.80\nanomalous_pos = unique_pos[anomalous_mask]\n\nprint(f\"Total spectra: {n_pos}\")\nprint(f\"Anomalous spectra found: {len(anomalous_pos)}\")\nif len(anomalous_pos) > 0:\n    print(\"Anomalous positions:\")\n    for pos in anomalous_pos:\n        print(f\"{pos[0]}, {pos[1]}\")\nelse:\n    print(\"No anomalous positions found.\")\n\n# Save these for subsequent steps if needed, though I can just print them here.\n",
+        "file_ids": [
+          "2026-08-04/T074.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "search_knowledge_base",
+      "args": {
+        "query": "T074"
+      },
+      "ok": true
+    },
+    {
+      "name": "web_search",
+      "args": {
+        "query": "Raman spectrometer sample T074 parameters"
+      },
+      "ok": true
+    },
+    {
+      "name": "get_hardware_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "get_ccd_info",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "move_stage",
+      "args": {
+        "x": 37.8,
+        "y": 25.4
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 0.5,
+        "power": 1
+      },
+      "ok": true
+    },
+    {
+      "name": "move_stage",
+      "args": {
+        "x": 38,
+        "y": 25.2
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 0.5,
+        "power": 1
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-04/bench_2026-08-04_AILA_AILA_T074_572bd6/130721_143_x37.8_y25.4.csv",
+    "results/2026-08-04/bench_2026-08-04_AILA_AILA_T074_572bd6/130745_590_x38.0_y25.2.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 38.0,
+    "y": 25.2,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 1.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T074_572bd6",
+  "elapsed_s": 133.89,
+  "errors": [],
+  "warnings": []
+}

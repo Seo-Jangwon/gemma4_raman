@@ -1,0 +1,170 @@
+{
+  "task": "T116",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Compare T116.csv with reference_library.csv on the reference axis (L2, cosine). If the highest similarity is below 0.75, conclude that there is no reliable match and do not name a material.",
+  "criteria": "NUM(±0.01) + EXACT(out-of-library verdict) + PROC(must not name a material)",
+  "checks": [
+    {
+      "name": "best similarity",
+      "passed": true,
+      "score": 1.0,
+      "detail": "0.038356 (expected 0.038356, |Δ|=8.708e-12 ≤ 0.01)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T116.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "Based on the comparison between `T116.csv` and the spectra in `reference_library.csv`, the highest cosine similarity achieved was approximately 0.038. Since this value is significantly below the required threshold of 0.75, there is no reliable match for the material in the provided reference library.\n\n```json\n{\"best_score\": 0.03835599757682154}\n```",
+  "answer_json": {
+    "best_score": 0.03835599757682154
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T116.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Identify files\nt116_id = '2026-08-04/T116.csv'\nref_lib_id = '2026-08-04/reference_library.csv'\n\n# Extract T116 data\nt116_x = files[0][\"table\"][\"raman_shift_cm-1\"] if files[0][\"filename\"] == \"T116.csv\" else files[1][\"table\"][\"raman_shift_cm-1\"]\nt116_y = files[0][\"table\"][\"intensity\"] if files[0][\"filename\"] == \"T116.csv\" else files[1][\"table\"][\"intensity\"]\n\n# Extract Reference data\nref_data = None\nfor f in files:\n    if f[\"filename\"] == \"reference_library.csv\":\n        ref_data = f[\"table\"]\n        break\n\nref_x = ref_data[\"raman_shift_cm-1\"]\nref_y = ref_data[\"intensity\"]\nref_ids = ref_data[\"spectrum_id\"]\nref_mats = ref_data[\"material\"]\n\n# Get unique spectra in library\nunique_ids = np.unique(ref_ids)\nbest_score = -1.0\nbest_mat = None\n\n# Pre-normalize T116\nt116_norm = t116_y / np.linalg.norm(t116_y)\n\nfor uid in unique_ids:\n    mask = (ref_ids == uid)\n    curr_x = ref_x[mask]\n    curr_y = ref_y[mask]\n    \n    # Check axis alignment (should be 200-2000)\n    if len(curr_y) != len(t116_y):\n        continue\n    \n    # Normalize reference spectrum\n    ref_norm = curr_y / np.linalg.norm(curr_y)\n    \n    # Cosine similarity is dot product of L2 normalized vectors\n    score = np.dot(t116_norm, ref_norm)\n    \n    if score > best_score:\n        best_score = score\n        best_mat = ref_mats[mask][0]\n\nprint(f\"Best Score: {best_score}\")\nprint(f\"Best Material: {best_mat}\")\n",
+        "file_ids": [
+          "2026-08-04/T116.csv",
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Explicitly map files by filename\ndata = {}\nfor f in files:\n    data[f[\"filename\"]] = f[\"table\"]\n\nt116 = data[\"T116.csv\"]\nref = data[\"reference_library.csv\"]\n\ntx = t116[\"raman_shift_cm-1\"]\nty = t116[\"intensity\"]\n\nrx = ref[\"raman_shift_cm-1\"]\nry = ref[\"intensity\"]\nrids = ref[\"spectrum_id\"]\nrmats = ref[\"material\"]\n\nunique_ids = np.unique(rids)\nbest_score = -1.0\nbest_mat = None\n\n# L2 normalize T116\nty_norm = ty / np.linalg.norm(ty)\n\nprint(f\"T116 length: {len(ty)}\")\n\nfor uid in unique_ids:\n    mask = (rids == uid)\n    curr_y = ry[mask]\n    \n    if len(curr_y) != len(ty):\n        print(f\"ID {uid} length mismatch: {len(curr_y)} vs {len(ty)}\")\n        continue\n    \n    # L2 normalize reference spectrum\n    ry_norm = curr_y / np.linalg.norm(curr_y)\n    \n    # Cosine similarity (dot product of L2 normalized vectors)\n    score = np.dot(ty_norm, ry_norm)\n    \n    if score > best_score:\n        best_score = score\n        best_mat = rmats[mask][0]\n\nprint(f\"Final Best Score: {best_score}\")\nprint(f\"Final Best Material: {best_mat}\")\n",
+        "file_ids": [
+          "2026-08-04/T116.csv",
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Extract files\nt116_file = None\nref_file = None\nfor f in files:\n    if f[\"filename\"] == \"T116.csv\": t116_file = f\n    if f[\"filename\"] == \"reference_library.csv\": ref_file = f\n\ntx = np.array(t116_file[\"table\"][\"raman_shift_cm-1\"])\nty = np.array(t116_file[\"table\"][\"intensity\"])\n\nrx = np.array(ref_file[\"table\"][\"raman_shift_cm-1\"])\nry = np.array(ref_file[\"table\"][\"intensity\"])\nrids = np.array(ref_file[\"table\"][\"spectrum_id\"])\nrmats = np.array(ref_file[\"table\"][\"material\"])\n\nprint(f\"T116 x range: {tx[0]} to {tx[-1]}, length: {len(tx)}\")\nprint(f\"Ref x range: {rx[0]} to {rx[-1]}, length: {len(rx)}\")\nprint(f\"Unique IDs in ref: {np.unique(rids)}\")\n\nbest_score = -1.0\nbest_mat = None\n\n# Normalize T116 (L2)\nty_norm = ty / np.linalg.norm(ty)\n\nfor uid in np.unique(rids):\n    mask = (rids == uid)\n    curr_y = ry[mask]\n    \n    if len(curr_y) != len(ty):\n        print(f\"Length mismatch for {uid}: {len(curr_y)} vs {len(ty)}\")\n        continue\n        \n    # Normalize reference spectrum (L2)\n    ry_norm = curr_y / np.linalg.norm(curr_y)\n    \n    score = np.dot(ty_norm, ry_norm)\n    if score > best_score:\n        best_score = score\n        best_mat = rmats[mask][0]\n\nprint(f\"Best Score: {best_score}\")\nprint(f\"Best Material: {best_mat}\")\n",
+        "file_ids": [
+          "2026-08-04/T116.csv",
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T116_c30fdf",
+  "elapsed_s": 63.54,
+  "errors": [],
+  "warnings": []
+}

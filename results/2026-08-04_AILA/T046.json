@@ -1,0 +1,173 @@
+{
+  "task": "T046",
+  "axis": "data processing",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Compare the peaks of T046_sample.csv with the polystyrene reference T046_ref.csv and compute the match ratio. Detect peaks with prominence at 5% of range, pair them 1:1 by nearest neighbour within 3 cm-1, and define the ratio as matched peaks / reference peaks.",
+  "criteria": "NUM(±0.02) + SET(pairs EXACT)",
+  "checks": [
+    {
+      "name": "match ratio",
+      "passed": true,
+      "score": 1.0,
+      "detail": "1 (expected 1, |Δ|=0 ≤ 0.02)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T046_sample.csv",
+    "T046_ref.csv"
+  ],
+  "answer_text": "The peak comparison between the sample spectrum (`T046_sample.csv`) and the polystyrene reference spectrum (`T046_ref.csv`) was performed. Peaks were detected using a prominence threshold of 5% of the intensity range for each spectrum.\n\nFor both the reference and the sample, 9 peaks were detected. The identified peak positions are as follows:\n- **Reference peaks (cm⁻¹):** 620, 795, 1001, 1031, 1155, 1183, 1450, 1583, 1602.\n- **Sample peaks (cm⁻¹):** 620, 796, 1001, 1031, 1154, 1183, 1451, 1583, 1602.\n\nMatching the peaks 1:1 based on the nearest neighbor within a window of $\\pm 3\\text{ cm}^{-1}$, all 9 reference peaks were successfully matched to corresponding sample peaks.\n\nThe match ratio is computed as $\\frac{\\text{matched peaks}}{\\text{reference peaks}} = \\frac{9}{9} = 1.0$.\n\n```json\n{\"match_ratio\": 1.0}\n```",
+  "answer_json": {
+    "match_ratio": 1.0
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T046_ref.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T046_sample.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_peaks(shift, intensity):\n    # Prominence = 5% of range\n    prominence_val = 0.05 * (np.max(intensity) - np.min(intensity))\n    peaks, properties = find_peaks(intensity, prominence=prominence_val)\n    return shift[peaks]\n\n# Load data from files\nref_data = files['2026-08-04/T046_ref.csv']['table']\nsamp_data = files['2026-08-04/T046_sample.csv']['table']\n\nref_x = ref_data['raman_shift_cm-1']\nref_y = ref_data['intensity']\nsamp_x = samp_data['raman_shift_cm-1']\nsamp_y = samp_data['intensity']\n\n# Detect peaks\nref_peaks = get_peaks(ref_x, ref_y)\nsamp_peaks = get_peaks(samp_x, samp_y)\n\nprint(f\"Reference peaks detected: {len(ref_peaks)}\")\nprint(f\"Sample peaks detected: {len(samp_peaks)}\")\nprint(f\"Reference peak positions: {ref_peaks}\")\nprint(f\"Sample peak positions: {samp_peaks}\")\n\n# Matching 1:1 by nearest neighbor within 3 cm-1\nmatched_count = 0\nused_samp = set()\n\nfor rp in ref_peaks:\n    # Find all sample peaks within 3 cm-1\n    candidates = [sp for sp in samp_peaks if abs(rp - sp) <= 3 and sp not in used_samp]\n    if candidates:\n        # Pick the nearest one\n        best_match = min(candidates, key=lambda x: abs(x - rp))\n        used_samp.add(best_match)\n        matched_count += 1\n\nmatch_ratio = matched_count / len(ref_peaks) if len(ref_peaks) > 0 else 0\nprint(f\"Matched count: {matched_count}\")\nprint(f\"Match ratio: {match_ratio}\")\n\n# Plot for visual confirmation (though I can't see it, I can save it)\nimport matplotlib.pyplot as plt\nplt.figure(figsize=(10, 6))\nplt.plot(ref_x, ref_y, label='Reference', alpha=0.7)\nplt.plot(samp_x, samp_y, label='Sample', alpha=0.7)\nplt.scatter(ref_peaks, ref_y[np.where(np.isin(ref_x, ref_peaks))[0]], color='red', marker='x', label='Ref Peaks')\nplt.scatter(samp_peaks, samp_y[np.where(np.isin(samp_x, samp_peaks))[0]], color='blue', marker='o', label='Samp Peaks')\nplt.legend()\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Intensity')\nplt.title('Peak Comparison')\nplt.savefig('peak_comparison.png')\n\n# Save results to a file just in case\nsave_result('match_results.csv', np.array([match_ratio]), raman_shift=np.array([0]))\n",
+        "file_ids": [
+          "2026-08-04/T046_ref.csv",
+          "2026-08-04/T046_sample.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\nimport matplotlib.pyplot as plt\n\ndef get_peaks(shift, intensity):\n    # Prominence = 5% of range\n    prominence_val = 0.05 * (np.max(intensity) - np.min(intensity))\n    peaks, properties = find_peaks(intensity, prominence=prominence_val)\n    return shift[peaks]\n\n# Find files by filename in the 'files' list\nref_file = next(f for f in files if f['filename'] == 'T046_ref.csv')\nsamp_file = next(f for f in files if f['filename'] == 'T046_sample.csv')\n\nref_x = ref_file['table']['raman_shift_cm-1']\nref_y = ref_file['table']['intensity']\nsamp_x = samp_file['table']['raman_shift_cm-1']\nsamp_y = samp_file['table']['intensity']\n\n# Detect peaks\nref_peaks = get_peaks(ref_x, ref_y)\nsamp_peaks = get_peaks(samp_x, samp_y)\n\nprint(f\"Reference peaks detected: {len(ref_peaks)}\")\nprint(f\"Sample peaks detected: {len(samp_peaks)}\")\nprint(f\"Reference peak positions: {ref_peaks}\")\nprint(f\"Sample peak positions: {samp_peaks}\")\n\n# Matching 1:1 by nearest neighbor within 3 cm-1\nmatched_count = 0\nused_samp = set()\n\n# Sort peaks to ensure consistent matching if needed, though not strictly required for nearest neighbor\nref_peaks_sorted = np.sort(ref_peaks)\nsamp_peaks_sorted = np.sort(samp_peaks)\n\nfor rp in ref_peaks_sorted:\n    candidates = [sp for sp in samp_peaks_sorted if abs(rp - sp) <= 3 and sp not in used_samp]\n    if candidates:\n        best_match = min(candidates, key=lambda x: abs(x - rp))\n        used_samp.add(best_match)\n        matched_count += 1\n\nmatch_ratio = matched_count / len(ref_peaks) if len(ref_peaks) > 0 else 0\nprint(f\"Matched count: {matched_count}\")\nprint(f\"Match ratio: {match_ratio}\")\n\n# Plot for visual confirmation\nplt.figure(figsize=(10, 6))\nplt.plot(ref_x, ref_y, label='Reference', alpha=0.7)\nplt.plot(samp_x, samp_y, label='Sample', alpha=0.7)\nplt.scatter(ref_peaks, ref_y[np.where(np.isin(ref_x, ref_peaks))[0]], color='red', marker='x', label='Ref Peaks')\nplt.scatter(samp_peaks, samp_y[np.where(np.isin(samp_x, samp_peaks))[0]], color='blue', marker='o', label='Samp Peaks')\nplt.legend()\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Intensity')\nplt.title('Peak Comparison')\nplt.savefig('peak_comparison.png')\n\nsave_result('match_results.csv', np.array([match_ratio]), raman_shift=np.array([0]))\n",
+        "file_ids": [
+          "2026-08-04/T046_ref.csv",
+          "2026-08-04/T046_sample.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\nimport matplotlib.pyplot as plt\n\ndef get_peaks(shift, intensity):\n    # Prominence = 5% of range\n    prom_val = 0.05 * (np.max(intensity) - np.min(intensity))\n    peaks, _ = find_peaks(intensity, prominence=prom_val)\n    return shift[peaks]\n\nref_data = None\nsamp_data = None\n\nfor f in files:\n    if f['file_id'] == '2026-08-04/T046_ref.csv':\n        ref_data = f['table']\n    elif f['file_id'] == '2026-08-04/T046_sample.csv':\n        samp_data = f['table']\n\nif ref_data is None or samp_data is None:\n    print(\"Error: One or both files not found in the files list.\")\nelse:\n    ref_x = ref_data['raman_shift_cm-1']\n    ref_y = ref_data['intensity']\n    samp_x = samp_data['raman_shift_cm-1']\n    samp_y = samp_data['intensity']\n\n    # Detect peaks\n    ref_peaks = get_peaks(ref_x, ref_y)\n    samp_peaks = get_peaks(samp_x, samp_y)\n\n    print(f\"Reference peaks detected: {len(ref_peaks)}\")\n    print(f\"Sample peaks detected: {len(samp_peaks)}\")\n    print(f\"Reference peak positions: {ref_peaks}\")\n    print(f\"Sample peak positions: {samp_peaks}\")\n\n    # Matching 1:1 by nearest neighbor within 3 cm-1\n    matched_count = 0\n    used_samp = set()\n    \n    # Sorting just in case\n    rp_sorted = np.sort(ref_peaks)\n    sp_sorted = np.sort(samp_peaks)\n\n    for rp in rp_sorted:\n        candidates = []\n        for sp in sp_sorted:\n            if abs(rp - sp) <= 3 and sp not in used_samp:\n                candidates.append(sp)\n        \n        if candidates:\n            best_match = candidates[0]\n            min_dist = abs(best_match - rp)\n            for c in candidates[1:]:\n                d = abs(c - rp)\n                if d < min_dist:\n                    min_dist = d\n                    best_match = c\n            used_samp.add(best_match)\n            matched_count += 1\n\n    match_ratio = matched_count / len(ref_peaks) if len(ref_peaks) > 0 else 0\n    print(f\"Matched count: {matched_count}\")\n    print(f\"Match ratio: {match_ratio}\")\n\n    # Plot for record\n    plt.figure(figsize=(10, 6))\n    plt.plot(ref_x, ref_y, label='Reference', alpha=0.7)\n    plt.plot(samp_x, samp_y, label='Sample', alpha=0.7)\n    # Using find indices manually for plotting to avoid isin issues in some versions\n    ref_indices = np.where(np.isin(ref_x, ref_peaks))[0]\n    samp_indices = np.where(np.isin(samp_x, samp_peaks))[0]\n    plt.scatter(ref_peaks, ref_y[ref_indices], color='red', marker='x', label='Ref Peaks')\n    plt.scatter(samp_peaks, samp_y[samp_indices], color='blue', marker='o', label='Samp Peaks')\n    plt.legend()\n    plt.xlabel('Raman Shift (cm-1)')\n    plt.ylabel('Intensity')\n    plt.title('Peak Comparison')\n    plt.savefig('peak_comparison.png')\n\n    save_result('match_results.csv', np.array([match_ratio]), raman_shift=np.array([0]))\n",
+        "file_ids": [
+          "2026-08-04/T046_ref.csv",
+          "2026-08-04/T046_sample.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-04_AILA_AILA_T046_406806/spectra/01_match_results.csv",
+    "/api/results/2026-08-04/bench_2026-08-04_AILA_AILA_T046_406806/fig115544_461_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T046_406806",
+  "elapsed_s": 94.29,
+  "errors": [],
+  "warnings": []
+}

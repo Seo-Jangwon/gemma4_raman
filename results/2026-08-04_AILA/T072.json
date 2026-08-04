@@ -1,0 +1,151 @@
+{
+  "task": "T072",
+  "axis": "data processing",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "Apply IPBSA baseline order 5 and L2 normalization to each spectrum of the map T072.csv, mean-center the resulting matrix, run PCA with 3 components and report each component's explained variance ratio.",
+  "criteria": "NUM(±0.01) ×3",
+  "checks": [
+    {
+      "name": "3 explained variance ratios",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3/3 matched (submitted 3) [0.984, 0.001, 0.001] vs [0.984, 0.001, 0.001]",
+      "weight": 2.0,
+      "kind": "SET"
+    },
+    {
+      "name": "descending and sums to <= 1",
+      "passed": true,
+      "score": 1.0,
+      "detail": "[0.9845, 0.0009, 0.0009] sum=0.9863",
+      "weight": 1.0,
+      "kind": "REL"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T072.csv"
+  ],
+  "answer_text": "The analysis of the spectral map T072.csv was performed as follows: first, each individual spectrum was background-corrected using the Iterative Polynomial Background Subtraction Algorithm (IPBSA) with a polynomial order of 5. This was followed by L2 normalization to ensure consistent scaling across the dataset. The resulting processed spectra were organized into a matrix and mean-centered to remove the common average signal. Principal Component Analysis (PCA) was then applied using Singular Value Decomposition (SVD) on the centered matrix to extract the first three principal components.\n\nThe explained variance ratio for each component indicates how much of the total dataset variability is captured by that specific axis. In this case, the first component captures the vast majority of the variance (~98.4%), while the second and third components capture very small fractions (each ~0.09%).\n\n```json\n{\"explained_variance_ratio\": [0.984451282, 0.000913917, 0.000908429]}\n```",
+  "answer_json": {
+    "explained_variance_ratio": [
+      0.984451282,
+      0.000913917,
+      0.000908429
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T072.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import linalg\n\ndef ipbsa(x, y, order=5, max_iter=100, tol=1e-4):\n    \"\"\"\n    Iterative Polynomial Background Subtraction Algorithm (IPBSA).\n    Fits a polynomial to the lower envelope of the spectrum.\n    \"\"\"\n    y_fit = np.polyval(np.polyfit(x, y, order), x)\n    \n    for i in range(max_iter):\n        # Weighting: points significantly above the fit get low weight\n        # We want to fit the 'bottom' of the spectrum\n        diff = y - y_fit\n        # Use a soft threshold for weights based on the positive difference\n        weights = np.where(diff < 0, 1.0, np.exp(-diff / (2 * np.std(y))))\n        \n        # Weighted least squares polynomial fit\n        # WLS: beta = (X^T W X)^-1 X^T W y\n        A = np.vander(x, order + 1)\n        W = np.diag(weights)\n        try:\n            coeffs = np.linalg.solve(A.T @ W @ A, A.T @ W @ y)\n        except np.linalg.LinAlgError:\n            break\n            \n        new_fit = np.polyval(coeffs, x)\n        if np.linalg.norm(new_fit - y_fit) < tol:\n            y_fit = new_fit\n            break\n        y_fit = new_fit\n        \n    return y - y_fit\n\n# Load data\ndata = files[0][\"table\"]\nx_coords = data[\"x\"]\ny_coords = data[\"y\"]\nshifts = data[\"raman_shift_cm-1\"]\nintensities = data[\"intensity\"]\n\n# Identify unique points (spectra)\nunique_points = []\nseen = set()\nfor i in range(len(x_coords)):\n    pt = (x_coords[i], y_coords[i])\n    if pt not in seen:\n        unique_points.append(pt)\n        seen.add(pt)\n\nn_spectra = len(unique_points)\n# Assuming all spectra have same shifts\nsample_shifts = np.unique(shifts)\nn_pixels = len(sample_shifts)\n\nmatrix = []\nfor pt in unique_points:\n    # Extract spectrum for this point\n    mask = (x_coords == pt[0]) & (y_coords == pt[1])\n    # Sort by shift to ensure consistency\n    s_shift = shifts[mask]\n    s_int = intensities[mask]\n    idx = np.argsort(s_shift)\n    \n    x = s_shift[idx]\n    y = s_int[idx]\n    \n    # 1. IPBSA baseline order 5\n    baseline_corrected = ipbsa(x, y, order=5)\n    \n    # 2. L2 Normalization\n    norm = np.linalg.norm(baseline_corrected)\n    if norm > 0:\n        normalized = baseline_corrected / norm\n    else:\n        normalized = baseline_corrected\n        \n    matrix.append(normalized)\n\nM = np.array(matrix) # Shape (n_spectra, n_pixels)\n\n# 3. Mean-centering\nM_centered = M - np.mean(M, axis=0)\n\n# 4. PCA with 3 components using SVD\n# X = U Sigma V^T\n# Explained variance is related to singular values squared\nU, s, Vh = linalg.svd(M_centered, full_matrices=False)\nvar_exp = s**2 / (n_spectra - 1)\ntotal_var = np.sum(var_exp)\nexplained_variance_ratio = var_exp / total_var\n\nprint(f\"Number of spectra: {n_spectra}\")\nprint(f\"Explained variance ratio: {explained_variance_ratio[:3]}\")\n",
+        "file_ids": [
+          "2026-08-04/T072.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T072_9359fb",
+  "elapsed_s": 65.93,
+  "errors": [],
+  "warnings": []
+}

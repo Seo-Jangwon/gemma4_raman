@@ -1,0 +1,167 @@
+{
+  "task": "T062",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "fail",
+  "reason": "SNR increases monotonically: [94.8454, 102.3329, 93.0303]",
+  "checks_passed": 3,
+  "checks_total": 4,
+  "question": "At the same position measure once at laser power 20%, 40% and 60%. Compute the SNR of each with the T050 definition (signal = max in 990-1012, noise = std ddof=1 in 1800-1900) and plot SNR versus laser power.",
+  "criteria": "PROC(power EXACT) + NUM(5%) + REL(monotonic increase) / post-hoc GT",
+  "checks": [
+    {
+      "name": "acquire_spectrum calls",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3 calls (exactly 3 calls)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "acquire_spectrum.power set",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3/3 matched (submitted 3) [20.0, 40.0, 60.0] vs [20.0, 40.0, 60.0]",
+      "weight": 2.0,
+      "kind": "SET"
+    },
+    {
+      "name": "SNR increases monotonically",
+      "passed": false,
+      "score": 0.0,
+      "detail": "[94.8454, 102.3329, 93.0303]",
+      "weight": 2.0,
+      "kind": "REL"
+    },
+    {
+      "name": "reported 3 SNR values",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3/3 matched (submitted 3) [94.845, 102.333, 93.03] vs [94.845, 102.333, 93.03]",
+      "weight": 2.0,
+      "kind": "SET"
+    }
+  ],
+  "failures": [
+    {
+      "check": "SNR increases monotonically",
+      "kind": "REL",
+      "reason": "[94.8454, 102.3329, 93.0303]"
+    }
+  ],
+  "blocked": [],
+  "input_files": [],
+  "answer_text": "I have measured the Raman spectra at the current position with laser powers of 20%, 40%, and 60% (exposure time = 1s).\n\nFollowing the T050 definition, I calculated the Signal-to-Noise Ratio (SNR) for each measurement by taking the maximum intensity in the range $990\\text{--}1012 \\text{ cm}^{-1}$ as the signal and the standard deviation (ddof=1) of the intensity in the range $1800\\text{--}1900 \\text{ cm}^{-1}$ as the noise.\n\nThe calculated SNR values are:\n- **20% Power**: $\\approx 94.85$\n- **40% Power**: $\\approx 102.33$\n- **60% Power**: $\\approx 93.03$\n\nA plot showing the SNR versus laser power has been generated and saved.\n\n```json\n{\"snr\": [94.84536286578725, 102.33288363174557, 93.0303061658474]}\n```",
+  "answer_json": {
+    "snr": [
+      94.84536286578725,
+      102.33288363174557,
+      93.0303061658474
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "get_hardware_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 1,
+        "power": 20
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 1,
+        "power": 40
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 1,
+        "power": 60
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\nsnrs = []\npowers = [20, 40, 60]\n\n# Order spectra by power to match powers list\nspectra_sorted = sorted(spectra, key=lambda s: s['power'])\n\nfor spec in spectra_sorted:\n    x = spec['raman_shift']\n    y = spec['intensity']\n    \n    # Signal mask: 990-1012\n    sig_mask = (x >= 990) & (x <= 1012)\n    signal = np.max(y[sig_mask])\n    \n    # Noise mask: 1800-1900\n    noise_mask = (x >= 1800) & (x <= 1900)\n    noise = np.std(y[noise_mask], ddof=1)\n    \n    snr = signal / noise\n    snrs.append(snr)\n    print(f\"Power {spec['power']}%: Signal={signal:.2f}, Noise={noise:.2f}, SNR={snr:.4f}\")\n\n# Plotting\nplt.figure(figsize=(6, 4))\nplt.plot(powers, snrs, marker='o', linestyle='-', color='b')\nplt.xlabel('Laser Power (%)')\nplt.ylabel('SNR (T050)')\nplt.title('SNR vs Laser Power')\nplt.grid(True)\nplt.savefig('snr_vs_power.png')\n\nprint(f\"Final SNRs: {snrs}\")",
+        "title": "SNR versus Laser Power"
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-04/bench_2026-08-04_AILA_AILA_T062_24d496/122522_714_x37.876_y25.248.csv",
+    "results/2026-08-04/bench_2026-08-04_AILA_AILA_T062_24d496/122530_755_x37.876_y25.248.csv",
+    "results/2026-08-04/bench_2026-08-04_AILA_AILA_T062_24d496/122539_005_x37.876_y25.248.csv",
+    "/api/results/2026-08-04/bench_2026-08-04_AILA_AILA_T062_24d496/fig122555_696_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 60.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 60.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T062_24d496",
+  "elapsed_s": 76.47,
+  "errors": [],
+  "warnings": []
+}

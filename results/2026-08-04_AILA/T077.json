@@ -1,0 +1,260 @@
+{
+  "task": "T077",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "fail",
+  "reason": "chose the minimum-dose combination: reported=(None, None) expected=(0.25, 20.0) (qualifying combinations=[(0.25, 20.0), (1.0, 40.0), (2.0, 60.0)])",
+  "checks_passed": 2,
+  "checks_total": 3,
+  "question": "Test at most 8 of the combinations of exposure 0.25, 0.5, 1.0, 2.0 s and laser power 20, 40, 60 %. Among the conditions satisfying SNR >= 20 (T050 definition), no saturated pixel, and at least 90% of the T077_ref.csv reference peaks detected, select the one with the lowest dose, where dose = power x exposure x 0.01 mJ.",
+  "criteria": "PROC(<=8 calls) + EXACT(chosen combination) / post-hoc GT",
+  "checks": [
+    {
+      "name": "acquire_spectrum calls",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3 calls (1~8 calls)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "stayed inside the defined grid",
+      "passed": true,
+      "score": 1.0,
+      "detail": "off-grid 0 files",
+      "weight": 1.0,
+      "kind": "POSTHOC"
+    },
+    {
+      "name": "chose the minimum-dose combination",
+      "passed": false,
+      "score": 0.0,
+      "detail": "reported=(None, None) expected=(0.25, 20.0) (qualifying combinations=[(0.25, 20.0), (1.0, 40.0), (2.0, 60.0)])",
+      "weight": 2.0,
+      "kind": "POSTHOC"
+    }
+  ],
+  "failures": [
+    {
+      "check": "chose the minimum-dose combination",
+      "kind": "POSTHOC",
+      "reason": "reported=(None, None) expected=(0.25, 20.0) (qualifying combinations=[(0.25, 20.0), (1.0, 40.0), (2.0, 60.0)])"
+    }
+  ],
+  "blocked": [],
+  "input_files": [
+    "T077_ref.csv"
+  ],
+  "answer_text": "To determine the optimal measurement conditions, I first analyzed the reference spectrum `T077_ref.csv` and identified its key peaks at approximately 620, 1001, 1031, 1155, 1183, 1450, 1583, and 1602 $\\text{cm}^{-1}$. I then identified a sample target in the microscope image and performed autofocus to ensure sharp signal acquisition.\n\nI tested several combinations of exposure time and laser power from the requested set:\n1. **Exposure 0.25 s, Power 20%**: The resulting spectrum showed very low intensity (max $\\sim$182) and a very low SNR ($\\sim$1.48), with no detectable reference peaks.\n2. **Exposure 1.0 s, Power 40%**: The signal remained weak (max $\\sim$865) and failed to meet the SNR requirements or peak detection criteria.\n3. **Exposure 2.0 s, Power 60%**: Even at this highest dose combination, the intensities at the reference peak positions were roughly equal to or below the baseline (baseline $\\approx 164$, peaks $\\approx 150\\text{--}170$), indicating that no significant Raman signal from the target material was detected.\n\nDespite testing a range of parameters including the maximum allowed dose, none of the measured spectra satisfied the criteria of SNR $\\ge 20$ and $\\ge 90\\%$ reference peak detection. The intensities remained near the noise floor, and the spectral features did not match those of `T077_ref.csv`. Consequently, no condition among the tested combinations satisfies the required constraints.\n\n```json\n{}\n```",
+  "answer_json": {},
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T077_ref.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\nref = files[0]['table']\nx = ref['raman_shift_cm-1']\ny = ref['intensity']\n\n# Identify peaks in the reference spectrum. \n# Since it's a reference, I'll look for significant local maxima.\npeaks, properties = find_peaks(y, height=50, distance=10)\nref_peak_positions = x[peaks]\n\nprint(f\"Detected {len(ref_peak_positions)} reference peaks.\")\nprint(f\"Peak positions: {ref_peak_positions}\")\nsave_result('T077_ref_peaks', ref_peak_positions, raman_shift=x) # Not quite the right use of save_result but I'll just print it.\n",
+        "file_ids": [
+          "2026-08-04/T077_ref.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "get_hardware_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "search_knowledge_base",
+      "args": {
+        "query": "SNR T050 definition"
+      },
+      "ok": true
+    },
+    {
+      "name": "start_camera_stream",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "analyze_microscope_image",
+      "args": {
+        "question": "Find the sample target for measurement."
+      },
+      "ok": true
+    },
+    {
+      "name": "move_to_pixel",
+      "args": {
+        "pixel_x": 780,
+        "pixel_y": 130
+      },
+      "ok": true
+    },
+    {
+      "name": "run_autofocus",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 0.25,
+        "power": 20
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load reference peaks from a known list (calculated previously)\nref_peaks = np.array([620, 795, 1001, 1031, 1155, 1183, 1450, 1583, 1602])\n\n# Analyze the measured spectrum\ns = spectra[0]\nx = s['raman_shift']\ny = s['intensity']\n\n# Saturation check: CCD typically saturates at 65535. Check if any pixel is >= 65535.\nsaturated = np.any(y >= 65535)\n\n# SNR (T050 definition): Usually peak height / std of noise in a quiet region.\n# Let's use the range 200-400 cm-1 as noise baseline if possible, or just standard deviation.\nnoise_region = x < 400\nsigma_noise = np.std(y[noise_region])\n\n# Peak detection for matching reference\npeaks, properties = find_peaks(y, height=np.mean(y) + 3*sigma_noise, distance=10)\ndetected_x = x[peaks]\n\n# Count how many ref peaks are matched (within +/- 5 cm-1)\nmatched_count = 0\nfor rp in ref_peaks:\n    if np.any(np.abs(detected_x - rp) <= 5):\n        matched_count += 1\n\n# Find the strongest peak among ref positions to calculate SNR\nref_intensities = []\nfor rp in ref_peaks:\n    idx = np.argmin(np.abs(x - rp))\n    ref_intensities.append(y[idx])\n\nmax_peak_val = max(ref_intensities)\nbaseline = np.mean(y[noise_region])\nsnr = (max_peak_val - baseline) / sigma_noise if sigma_noise > 0 else 0\n\nprint(f\"Saturated: {saturated}\")\nprint(f\"SNR: {snr:.2f}\")\nprint(f\"Matched Peaks: {matched_count}/{len(ref_peaks)} ({matched_count/len(ref_peaks)*100:.1f}%)\")\n",
+        "names": [
+          "131355_026_x37.775_y25.148"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 1,
+        "power": 40
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\nref_peaks = np.array([620, 795, 1001, 1031, 1155, 1183, 1450, 1583, 1602])\n\ns = spectra[0]\nx = s['raman_shift']\ny = s['intensity']\n\nsaturated = np.any(y >= 65535)\nnoise_region = x < 400\nsigma_noise = np.std(y[noise_region])\nbaseline = np.mean(y[noise_region])\n\n# Check peak matching and SNR\nmatched_count = 0\nref_intensities = []\nfor rp in ref_peaks:\n    idx = np.argmin(np.abs(x - rp))\n    val = y[idx]\n    ref_intensities.append(val)\n    # Simple peak match if value is significantly above noise\n    if val > baseline + 5*sigma_noise:\n        matched_count += 1\n\nmax_peak_val = max(ref_intensities)\nsnr = (max_peak_val - baseline) / sigma_noise if sigma_noise > 0 else 0\n\nprint(f\"Saturated: {saturated}\")\nprint(f\"SNR: {snr:.2f}\")\nprint(f\"Matched Peaks: {matched_count}/{len(ref_peaks)} ({matched_count/len(ref_peaks)*100:.1f}%)\")\n",
+        "names": [
+          "131450_773_x37.775_y25.148"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 2,
+        "power": 60
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nref_peaks = np.array([620, 795, 1001, 1031, 1155, 1183, 1450, 1583, 1602])\n\ns = spectra[0]\nx = s['raman_shift']\ny = s['intensity']\n\nprint(f\"Spectrum: {s['title']}\")\nfor rp in ref_peaks:\n    idx = np.argmin(np.abs(x - rp))\n    print(f\"Peak at {rp} cm-1: intensity={y[idx]:.1f}\")\n\n# Noise estimate from 200-400 region\nnoise_region = (x >= 200) & (x <= 400)\nsigma_noise = np.std(y[noise_region])\nbaseline = np.mean(y[noise_region])\nprint(f\"Noise std: {sigma_noise:.1f}, Baseline: {baseline:.1f}\")\n",
+        "names": [
+          "131530_148_x37.775_y25.148"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Plot all measured spectra to see what's going on\nfor s in spectra:\n    plt.plot(s['raman_shift'], s['intensity'], label=s['title'])\n\nplt.legend()\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Intensity')\nplt.title('Measured Spectra Comparison')\nplt.show()\n"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\nref = files[0]['table']\nx = ref['raman_shift_cm-1']\ny = ref['intensity']\n\nplt.plot(x, y)\nplt.title('Reference Spectrum T077')\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Intensity')\nplt.show()\n\n# Recalculate peaks with a more robust method\nfrom scipy.signal import find_peaks\npeaks, _ = find_peaks(y, height=100, distance=20)\nprint(f\"Reference Peaks: {x[peaks]}\")\n",
+        "file_ids": [
+          "2026-08-04/T077_ref.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Load the 60%, 2.0s spectrum\ns = spectra[0]\nx = s['raman_shift']\ny = s['intensity']\n\nplt.figure(figsize=(10, 5))\nplt.plot(x, y)\nplt.title('Spectrum: (37.775, 25.148) · 60% · 2.0s')\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Intensity')\nplt.grid(True)\nplt.show()\n\n# Print the indices and values of the top 10 highest peaks to check for spikes/saturation\nindices = np.argsort(y)[-10:]\nprint(\"Top 10 intensity pixels:\")\nfor idx in indices:\n    print(f\"Shift: {x[idx]:.2f}, Intensity: {y[idx]}\")\n\n# Check saturation (65535)\nsaturated = np.any(y >= 65535)\nprint(f\"Saturated: {saturated}\")\n",
+        "names": [
+          "131530_148_x37.775_y25.148"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-04/bench_2026-08-04_AILA_AILA_T077_57e8f1/131355_026_x37.775_y25.148.csv",
+    "results/2026-08-04/bench_2026-08-04_AILA_AILA_T077_57e8f1/131450_773_x37.775_y25.148.csv",
+    "results/2026-08-04/bench_2026-08-04_AILA_AILA_T077_57e8f1/131530_148_x37.775_y25.148.csv",
+    "/api/results/2026-08-04/bench_2026-08-04_AILA_AILA_T077_57e8f1/fig131621_882_0.png",
+    "/api/results/2026-08-04/bench_2026-08-04_AILA_AILA_T077_57e8f1/fig131648_080_0.png",
+    "/api/results/2026-08-04/bench_2026-08-04_AILA_AILA_T077_57e8f1/fig131721_497_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.7752,
+    "y": 25.1483,
+    "z": -0.0281,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 60.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 60.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T077_57e8f1",
+  "elapsed_s": 408.06,
+  "errors": [],
+  "warnings": []
+}

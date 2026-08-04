@@ -1,0 +1,246 @@
+{
+  "task": "T126",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Identify the material of each of T126_1.csv through T126_5.csv against reference_library.csv, and report them in that order.",
+  "criteria": "EXACT(5 materials, in order) - all five must be right",
+  "checks": [
+    {
+      "name": "5 materials",
+      "passed": true,
+      "score": 1.0,
+      "detail": "5/5 matched (submitted 5) ['polystyrene', 'silicon', 'PET', 'calcite', 'PMMA'] vs ['polystyrene', 'silicon', 'PET', 'calcite', 'PMMA']",
+      "weight": 2.0,
+      "kind": "SET"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T126_1.csv",
+    "T126_2.csv",
+    "T126_3.csv",
+    "T126_4.csv",
+    "T126_5.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "The material identification for each sample was performed by comparing the measured Raman spectra in `T126_1.csv` through `T126_5.csv` against the reference spectra provided in `reference_library.csv`. \n\nTo ensure a robust comparison, both the sample and reference spectra were min-max normalized to account for differences in absolute intensity. The material identification was based on the maximum Pearson correlation coefficient between each sample spectrum and the individual entries in the library.\n\nThe identified materials are as follows:\n- **T126_1.csv**: polystyrene\n- **T126_2.csv**: silicon\n- **T126_3.csv**: PET\n- **T126_4.csv**: calcite\n- **T126_5.csv**: PMMA\n\n```json\n{\"materials\": [\"polystyrene\", \"silicon\", \"PET\", \"calcite\", \"PMMA\"]}\n```",
+  "answer_json": {
+    "materials": [
+      "polystyrene",
+      "silicon",
+      "PET",
+      "calcite",
+      "PMMA"
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T126_1.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T126_2.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T126_3.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T126_4.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T126_5.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\ndef normalize(y):\n    return (y - np.min(y)) / (np.max(y) - np.min(y)) if np.max(y) > np.min(y) else y\n\n# Organize reference library\nref_data = files[0][\"table\"] # Assuming reference_library.csv is the first one in file_ids\nunique_refs = [] \n# We need to group by spectrum_id and material\nall_ids = ref_data[\"spectrum_id\"]\nmaterials_col = ref_data[\"material\"]\nshifts_col = ref_data[\"raman_shift_cm-1\"]\nints_col = ref_data[\"intensity\"]\n\nunique_spec_ids = [] \n# Simple way to find unique IDs while preserving order if possible, or just use set\nseen = set()\nfor sid in all_ids:\n    if sid not in seen:\n        unique_spec_ids.append(sid)\n        seen.add(sid)\n\nref_spectra = []\nfor sid in unique_spec_ids:\n    mask = (all_ids == sid)\n    mat = materials_col[mask][0]\n    y = ints_col[mask]\n    x = shifts_col[mask]\n    ref_spectra.append({'id': sid, 'material': mat, 'x': x, 'y': normalize(y)})\n\n# Process samples\nsample_files = [f for f in files if \"T126\" in f[\"filename\"]]\nresults = []\n\nfor sf in sample_files:\n    s_data = sf[\"table\"]\n    sx = s_data[\"raman_shift_cm-1\"]\n    sy = normalize(s_data[\"intensity\"])\n    \n    best_sim = -1\n    best_mat = \"Unknown\"\n    \n    for ref in ref_spectra:\n        # Ensure lengths match. If not, we'd need to interpolate. \n        # But based on inspect, both are 200-2000 with steps of 1? Let's check.\n        if len(sy) == len(ref['y']):\n            sim, _ = pearsonr(sy, ref['y'])\n            if sim > best_sim:\n                best_sim = sim\n                best_mat = ref['material']\n    \n    results.append({'file': sf[\"filename\"], 'material': best_mat, 'similarity': best_sim})\n\n# Sort by filename to ensure order T126_1...T126_5\nresults.sort(key=lambda x: x['file'])\nprint(\"Identification results:\")\nfor r in results:\n    print(f\"{r['file']}: {r['material']} (sim={r['similarity']:.4f})\")\n",
+        "file_ids": [
+          "2026-08-04/reference_library.csv",
+          "2026-08-04/T126_1.csv",
+          "2026-08-04/T126_2.csv",
+          "2026-08-04/T126_3.csv",
+          "2026-08-04/T126_4.csv",
+          "2026-08-04/T126_5.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\ndef normalize(y):\n    ymin = np.min(y)\n    ymax = np.max(y)\n    if ymax > ymin:\n        return (y - ymin) / (ymax - ymin)\n    return y - ymin # return zeros if constant\n\n# Identify which file is the library and which are samples\nlib_file = None\nsample_files = []\nfor f in files:\n    if \"reference_library\" in f[\"filename\"]:\n        lib_file = f\n    elif \"T126\" in f[\"filename\"]:\n        sample_files.append(f)\n\n# Organize reference library\nref_table = lib_file[\"table\"]\nall_ids = ref_table[\"spectrum_id\"]\nmaterials = ref_table[\"material\"]\nshifts = ref_table[\"raman_shift_cm-1\"]\nintensities = ref_table[\"intensity\"]\n\nunique_ids = []\nseen = set()\nfor sid in all_ids:\n    if sid not in seen:\n        unique_ids.append(sid)\n        seen.add(sid)\n\nref_spectra = []\nfor sid in unique_ids:\n    mask = (all_ids == sid)\n    # Verify we have data for this ID\n    if np.any(mask):\n        mat = materials[mask][0]\n        y = intensities[mask]\n        x = shifts[mask]\n        ref_spectra.append({'material': mat, 'x': x, 'y': normalize(y)})\n\n# Process samples\nfinal_results = []\nfor sf in sample_files:\n    s_table = sf[\"table\"]\n    sx = s_table[\"raman_shift_cm-1\"]\n    sy_raw = s_table[\"intensity\"]\n    sy = normalize(sy_raw)\n    \n    best_sim = -1.0\n    best_mat = \"Unknown\"\n    \n    for ref in ref_spectra:\n        # Check if lengths match (both should be 1801)\n        if len(sy) == len(ref['y']):\n            sim, _ = pearsonr(sy, ref['y'])\n            if sim > best_sim:\n                best_sim = sim\n                best_mat = ref['material']\n    \n    final_results.append({'file': sf[\"filename\"], 'material': best_mat, 'similarity': best_sim})\n\n# Sort by filename T126_1...5\nfinal_results.sort(key=lambda x: x['file'])\n\nprint(\"Identification results:\")\nfor r in final_results:\n    print(f\"{r['file']}: {r['material']} (similarity={r['similarity']:.4f})\")\n",
+        "file_ids": [
+          "2026-08-04/reference_library.csv",
+          "2026-08-04/T126_1.csv",
+          "2026-08-04/T126_2.csv",
+          "2026-08-04/T126_3.csv",
+          "2026-08-04/T126_4.csv",
+          "2026-08-04/T126_5.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nlib_table = files[0][\"table\"]\nall_ids = lib_table[\"spectrum_id\"]\nunique_ids = np.unique(all_ids)\n\nprint(f\"Unique spectrum IDs in library: {len(unique_ids)}\")\nfor sid in unique_ids[:10]: # Check first 10\n    mask = (all_ids == sid)\n    print(f\"ID: {sid}, length: {np.sum(mask)}, material: {lib_table['material'][mask][0]}\")\n\n# Also check one sample length\nsample_table = files[1][\"table\"]\nprint(f\"Sample T126_1 length: {len(sample_table['raman_shift_cm-1'])}\")\n",
+        "file_ids": [
+          "2026-08-04/reference_library.csv",
+          "2026-08-04/T126_1.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\ndef normalize(y):\n    ymin = np.min(y)\n    ymax = np.max(y)\n    if ymax > ymin:\n        return (y - ymin) / (ymax - ymin)\n    return y - ymin\n\n# Find the library and samples\nlib_file = next(f for f in files if \"reference_library\" in f[\"filename\"])\nsample_files = [f for f in files if \"T126\" in f[\"filename\"]]\n\nref_table = lib_file[\"table\"]\nsids = ref_table[\"spectrum_id\"]\nmats = ref_table[\"material\"]\nshifts = ref_table[\"raman_shift_cm-1\"]\nints = ref_table[\"intensity\"]\n\n# Group by spectrum_id manually since the mask seems to fail for some reason\nref_dict = {}\nfor i in range(len(sids)):\n    sid = sids[i]\n    if sid not in ref_dict:\n        ref_dict[sid] = {'mat': mats[i], 'y': [], 'x': []}\n    ref_dict[sid]['y'].append(ints[i])\n    ref_dict[sid]['x'].append(shifts[i])\n\n# Convert lists to numpy arrays and normalize\nref_spectra = []\nfor sid, data in ref_dict.items():\n    y_arr = np.array(data['y'])\n    x_arr = np.array(data['x'])\n    ref_spectra.append({\n        'material': data['mat'], \n        'y': normalize(y_arr), \n        'x': x_arr\n    })\n\nprint(f\"Loaded {len(ref_spectra)} reference spectra.\")\n\n# Identify samples\nresults = []\nfor sf in sample_files:\n    s_table = sf[\"table\"]\n    sy_raw = s_table[\"intensity\"]\n    sy = normalize(sy_raw)\n    \n    best_sim = -1.0\n    best_mat = \"Unknown\"\n    \n    for ref in ref_spectra:\n        if len(sy) == len(ref['y']):\n            sim, _ = pearsonr(sy, ref['y'])\n            if sim > best_sim:\n                best_sim = sim\n                best_mat = ref['material']\n    \n    results.append({'file': sf[\"filename\"], 'material': best_mat, 'similarity': best_sim})\n\n# Sort by filename T126_1...5\nresults.sort(key=lambda x: x['file'])\n\nprint(\"\\nIdentification results:\")\nfor r in results:\n    print(f\"{r['file']}: {r['material']} (sim={r['similarity']:.4f})\")\n",
+        "file_ids": [
+          "2026-08-04/reference_library.csv",
+          "2026-08-04/T126_1.csv",
+          "2026-08-04/T126_2.csv",
+          "2026-08-04/T126_3.csv",
+          "2026-08-04/T126_4.csv",
+          "2026-08-04/T126_5.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\ndef normalize(y):\n    ymin = np.min(y)\n    ymax = np.max(y)\n    if ymax > ymin:\n        return (y - ymin) / (ymax - ymin)\n    return y - ymin\n\n# Find the library and samples explicitly\nlib_file_id = None\nsample_file_ids = []\nfor f in files:\n    if \"reference_library\" in f[\"filename\"]:\n        lib_file_id = f[\"file_id\"]\n    elif \"T126\" in f[\"filename\"]:\n        sample_file_ids.append(f[\"file_id\"])\n\n# Extract library data\nlib_f = [f for f in files if f[\"file_id\"] == lib_file_id][0]\nlib_table = lib_f[\"table\"]\nsids = lib_table[\"spectrum_id\"]\nmats = lib_table[\"material\"]\nshifts = lib_table[\"raman_shift_cm-1\"]\nints = lib_table[\"intensity\"]\n\n# Group by spectrum_id\nref_spectra = {}\nfor i in range(len(sids)):\n    sid = sids[i]\n    if sid not in ref_spectra:\n        ref_spectra[sid] = {'material': mats[i], 'y': [], 'x': []}\n    ref_spectra[sid]['y'].append(ints[i])\n    ref_spectra[sid]['x'].append(shifts[i])\n\n# Process reference lists into arrays and normalize\nprocessed_refs = []\nfor sid, data in ref_spectra.items():\n    y_arr = np.array(data['y'])\n    x_arr = np.array(data['x'])\n    processed_refs.append({\n        'material': data['material'], \n        'y': normalize(y_arr), \n        'x': x_arr\n    })\n\n# Identify samples\nfinal_materials = []\n# Ensure we process T126_1 through T126_5 in order\ntarget_files = [\"T126_1.csv\", \"T126_2.csv\", \"T126_3.csv\", \"T126_4.csv\", \"T126_5.csv\"]\n\nfor tfname in target_files:\n    # Find the file object for this filename\n    sf = [f for f in files if f[\"filename\"] == tfname][0]\n    s_table = sf[\"table\"]\n    sy_raw = s_table[\"intensity\"]\n    sy = normalize(sy_raw)\n    \n    best_sim = -1.0\n    best_mat = \"Unknown\"\n    \n    for ref in processed_refs:\n        if len(sy) == len(ref['y']):\n            sim, _ = pearsonr(sy, ref['y'])\n            if sim > best_sim:\n                best_sim = sim\n                best_mat = ref['material']\n    \n    final_materials.append(best_mat)\n\nprint(\"Final Materials List:\")\nprint(final_materials)\n",
+        "file_ids": [
+          "2026-08-04/reference_library.csv",
+          "2026-08-04/T126_1.csv",
+          "2026-08-04/T126_2.csv",
+          "2026-08-04/T126_3.csv",
+          "2026-08-04/T126_4.csv",
+          "2026-08-04/T126_5.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T126_70b979",
+  "elapsed_s": 122.64,
+  "errors": [],
+  "warnings": []
+}

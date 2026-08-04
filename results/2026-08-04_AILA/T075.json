@@ -1,0 +1,200 @@
+{
+  "task": "T075",
+  "axis": "data processing",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 4,
+  "checks_total": 4,
+  "question": "Compare the two sessions in T075_a.csv and T075_b.csv and report in one summary: the 1001 cm-1 peak position difference, the RSD (ddof=1, %) of the peak intensity in each session, and the cosine similarity between the two mean spectra (common axis, L2).",
+  "criteria": "NUM ×4 (position difference ±1 cm-1 / RSD 5% / similarity ±0.01)",
+  "checks": [
+    {
+      "name": "RSD(a)",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3.2782 (expected 3.27818, rel.err=6.105e-06 ≤ 0.05)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "RSD(b)",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3.1544 (expected 3.10577, rel.err=0.01566 ≤ 0.05)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "similarity of the means",
+      "passed": true,
+      "score": 1.0,
+      "detail": "0.957068 (expected 0.957068, |Δ|=9.14e-08 ≤ 0.01)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "peak position difference",
+      "passed": true,
+      "score": 1.0,
+      "detail": "1 (expected 1, |Δ|=0 ≤ 1.0)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T075_a.csv",
+    "T075_b.csv"
+  ],
+  "answer_text": "Based on the analysis of the two Raman data files, here is the comparison between session A and session B:\n\n- **Peak Position (near 1001 cm⁻¹):** The mean peak position for Session A was found at 1001.0 cm⁻¹, while Session B's mean peak was at 1002.0 cm⁻¹, resulting in a difference of **1.0 cm⁻¹**.\n- **Peak Intensity Precision:** The Relative Standard Deviation (RSD, ddof=1) of the peak intensity was **3.278%** for Session A and **3.154%** for Session B, indicating similar precision between the two measurement sets.\n- **Spectral Similarity:** The cosine similarity between the mean spectra of the two sessions is **0.957**, suggesting a high degree of overall spectral correlation across the entire measured range.\n\n```json\n{\"rsd_a_pct\": 3.2782, \"rsd_b_pct\": 3.1544, \"cosine_of_means\": 0.957068, \"peak_position_diff\": 1.0}\n```",
+  "answer_json": {
+    "rsd_a_pct": 3.2782,
+    "rsd_b_pct": 3.1544,
+    "cosine_of_means": 0.957068,
+    "peak_position_diff": 1.0
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T075_a.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T075_b.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nfrom scipy.spatial.distance import cosine\n\ndef process_session(data):\n    # Group by spectrum_id\n    ids = np.unique(data['spectrum_id'])\n    shifts = np.unique(data['raman_shift_cm-1'])\n    \n    intensities = []\n    for sid in ids:\n        mask = data['spectrum_id'] == sid\n        # Ensure sorted by shift\n        s_data = data[mask]\n        # Sort indices to match the global 'shifts' array\n        sorted_idx = np.argsort(s_data['raman_shift_cm-1'])\n        intensities.append(s_data['intensity'][sorted_idx])\n    \n    int_matrix = np.array(intensities) # (n_spectra, n_shifts)\n    mean_spectrum = np.mean(int_matrix, axis=0)\n    \n    # Peak near 1001 cm-1: search in window [980, 1020]\n    window = (shifts >= 980) & (shifts <= 1020)\n    win_shifts = shifts[window]\n    win_ints = mean_spectrum[window]\n    \n    peak_idx_rel = np.argmax(win_ints)\n    peak_pos = win_shifts[peak_idx_rel]\n    \n    # Peak intensities for RSD: \n    # For each spectrum, find the max in that window\n    win_int_matrix = int_matrix[:, window]\n    peak_vals = np.max(win_int_matrix, axis=1)\n    \n    mean_val = np.mean(peak_vals)\n    std_val = np.std(peak_vals, ddof=1)\n    rsd = (std_val / mean_val) * 100 if mean_val != 0 else 0\n    \n    return mean_spectrum, peak_pos, rsd, shifts\n\n# Process session A\ndata_a = files[0]['table'] # T075_a.csv (assuming order of file_ids)\n# But let's be explicit with index based on filename if possible? \n# No, I passed file_ids in the call. Let's check which is which.\n\n# Since I don't know for sure which index matches A or B from files[], \n# and run_analysis receives 'files' as a list of dicts including 'filename'.\nfile_a = next(f for f in files if 'T075_a.csv' in f['filename'])\nfile_b = next(f for f in files if 'T075_b.csv' in f['filename'])\n\nmean_a, pos_a, rsd_a, shifts_a = process_session(file_a['table'])\nmean_b, pos_b, rsd_b, shifts_b = process_session(file_b['table'])\n\n# Check common axis\nif not np.array_equal(shifts_a, shifts_b):\n    print(\"Axes differ!\")\n    # In a real scenario I'd interpolate, but here they look identical from inspect_file.\n\n# Cosine Similarity: 1 - cosine distance\ncos_sim = 1 - cosine(mean_a, mean_b)\npeak_diff = abs(pos_a - pos_b)\n\nprint(f\"Session A: peak={pos_a:.3f}, rsd={rsd_a:.3f}%\")\nprint(f\"Session B: peak={pos_b:.3f}, rsd={rsd_b:.3f}%\")\nprint(f\"Peak Diff: {peak_diff:.3f} cm-1\")\nprint(f\"Cosine Sim: {cos_sim:.5f}\")\n\n# Save the means if needed, but not requested.\n",
+        "file_ids": [
+          "2026-08-04/T075_a.csv",
+          "2026-08-04/T075_b.csv"
+        ],
+        "title": "Comparison of T075 sessions A and B"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nfrom scipy.spatial.distance import cosine\n\ndef process_session(table):\n    # Group by spectrum_id\n    unique_ids = []\n    for sid in table['spectrum_id']:\n        if sid not in unique_ids:\n            unique_ids.append(sid)\n    \n    shifts = np.unique(table['raman_shift_cm-1'])\n    \n    intensities = []\n    for sid in unique_ids:\n        # Manual mask to avoid any potential issue with boolean indexing if table is odd\n        # but since they are numpy arrays from the system, it should be fine.\n        mask = (table['spectrum_id'] == sid)\n        s_intensities = table['intensity'][mask]\n        s_shifts = table['raman_shift_cm-1'][mask]\n        \n        # Sort to ensure consistency with global 'shifts'\n        sort_idx = np.argsort(s_shifts)\n        intensities.append(s_intensities[sort_idx])\n    \n    int_matrix = np.array(intensities) \n    mean_spectrum = np.mean(int_matrix, axis=0)\n    \n    # Peak near 1001 cm-1: window [980, 1020]\n    window = (shifts >= 980) & (shifts <= 1020)\n    win_shifts = shifts[window]\n    win_ints = mean_spectrum[window]\n    \n    peak_idx_rel = np.argmax(win_ints)\n    peak_pos = win_shifts[peak_idx_rel]\n    \n    # Peak intensities for RSD (per spectrum in the session)\n    # Get intensity at the index corresponding to the peak of the mean spectrum\n    # OR find max per spectrum in window. User said \"RSD ... of the peak intensity\". \n    # Usually means finding the local peak for each individual spectrum.\n    win_int_matrix = int_matrix[:, window]\n    peak_vals = np.max(win_int_matrix, axis=1)\n    \n    mean_val = np.mean(peak_vals)\n    std_val = np.std(peak_vals, ddof=1)\n    rsd = (std_val / mean_val) * 100 if mean_val != 0 else 0\n    \n    return mean_spectrum, peak_pos, rsd, shifts\n\n# Identify files by checking the 'filename' attribute in the list of dictionaries\ndata_a = None\ndata_b = None\nfor f in files:\n    if 'T075_a.csv' in f['filename']:\n        data_a = f['table']\n    elif 'T075_b.csv' in f['filename']:\n        data_b = f['table']\n\nmean_a, pos_a, rsd_a, shifts_a = process_session(data_a)\nmean_b, pos_b, rsd_b, shifts_b = process_session(data_b)\n\n# Cosine Similarity: 1 - cosine distance (L2 based)\ncos_sim = 1 - cosine(mean_a, mean_b)\npeak_diff = abs(pos_a - pos_b)\n\nprint(f\"Session A: peak={pos_a:.4f}, rsd={rsd_a:.4f}%\")\nprint(f\"Session B: peak={pos_b:.4f}, rsd={rsd_b:.4f}%\")\nprint(f\"Peak Diff: {peak_diff:.4f}\")\nprint(f\"Cosine Sim: {cos_sim:.6f}\")\n",
+        "file_ids": [
+          "2026-08-04/T075_a.csv",
+          "2026-08-04/T075_b.csv"
+        ],
+        "title": "Comparison of T075 sessions A and B"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nfrom scipy.spatial.distance import cosine\n\ndef process_session(table_dict):\n    # Convert all to numpy arrays for consistent indexing\n    sid = np.array(table_dict['spectrum_id'])\n    shifts_col = np.array(table_dict['raman_shift_cm-1'])\n    ints_col = np.array(table_dict['intensity'])\n    \n    unique_ids = np.unique(sid)\n    # We need a common axis to build the matrix. \n    # Let's see if shifts are consistent across spectra.\n    global_shifts = np.unique(shifts_col)\n    \n    intensities_list = []\n    for uid in unique_ids:\n        mask = (sid == uid)\n        # Get spectrum and sort by shift\n        s_shifts = shifts_col[mask]\n        s_ints = ints_col[mask]\n        sort_idx = np.argsort(s_shifts)\n        intensities_list.append(s_ints[sort_idx])\n    \n    # Matrix shape: (n_spectra, n_points)\n    int_matrix = np.array(intensities_list)\n    mean_spectrum = np.mean(int_matrix, axis=0)\n    \n    # 1001 cm-1 peak analysis\n    # Window around 1001\n    win_mask = (global_shifts >= 990) & (global_shifts <= 1015)\n    win_shifts = global_shifts[win_mask]\n    win_mean_ints = mean_spectrum[win_mask]\n    \n    peak_rel_idx = np.argmax(win_mean_ints)\n    peak_pos = win_shifts[peak_rel_idx]\n    \n    # RSD of peak intensity: \n    # Find the maximum value in that window for each individual spectrum\n    win_int_matrix = int_matrix[:, win_mask]\n    individual_peaks = np.max(win_int_matrix, axis=1)\n    \n    m_val = np.mean(individual_peaks)\n    s_val = np.std(individual_peaks, ddof=1)\n    rsd = (s_val / m_val * 100) if m_val != 0 else 0\n    \n    return mean_spectrum, peak_pos, rsd, global_shifts\n\n# Separate files\nfile_a_data = None\nfile_b_data = None\nfor f in files:\n    if 'T075_a.csv' in f['filename']:\n        file_a_data = f['table']\n    elif 'T075_b.csv' in f['filename']:\n        file_b_data = f['table']\n\nmean_a, pos_a, rsd_a, shifts_a = process_session(file_a_data)\nmean_b, pos_b, rsd_b, shifts_b = process_session(file_b_data)\n\n# Cosine similarity (common axis L2)\n# a and b mean spectra are already on the same shifted-sorted axis.\ncos_sim = 1 - cosine(mean_a, mean_b)\npeak_diff = abs(pos_a - pos_b)\n\nprint(f\"A: peak={pos_a:.4f}, rsd={rsd_a:.4f}%\")\nprint(f\"B: peak={pos_b:.4f}, rsd={rsd_b:.4f}%\")\nprint(f\"Diff: {peak_diff:.4f}\")\nprint(f\"Cosine: {cos_sim:.6f}\")\n",
+        "file_ids": [
+          "2026-08-04/T075_a.csv",
+          "2026-08-04/T075_b.csv"
+        ],
+        "title": "Raman Comparison T075 A vs B"
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T075_46478f",
+  "elapsed_s": 107.82,
+  "errors": [],
+  "warnings": []
+}

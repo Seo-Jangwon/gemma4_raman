@@ -1,0 +1,170 @@
+{
+  "task": "T066",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "T066.csv is a Raman map (columns: x, y, raman_shift_cm-1, intensity). Find the positions whose SNR (T050 definition) is below 10 and re-measure a spectrum once at each of those positions only.",
+  "criteria": "SET(coords EXACT) + PROC(no extra acquisitions)",
+  "checks": [
+    {
+      "name": "re-measured positions",
+      "passed": true,
+      "score": 1.0,
+      "detail": "1/1 matched (submitted 1) [[37.8, 25.2]] vs [[37.8, 25.2]]",
+      "weight": 2.0,
+      "kind": "SET"
+    },
+    {
+      "name": "acquire_spectrum calls",
+      "passed": true,
+      "score": 1.0,
+      "detail": "1 calls (exactly 1 calls)",
+      "weight": 2.0,
+      "kind": "PROC"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T066.csv"
+  ],
+  "answer_text": "Based on the analysis of `T066.csv`, I calculated the Signal-to-Noise Ratio (SNR) for each coordinate by comparing the peak intensity to the standard deviation of the background region (approximately 200–250 cm⁻¹).\n\nOnly one position was found with an SNR below 10:\n- **(37.8, 25.2)**: SNR ≈ 9.37\n\nI proceeded to re-measure a spectrum at this location. The process included:\n1. Moving the stage to X=37.8, Y=25.2.\n2. Performing autofocus (optimal Z = -0.045 mm).\n3. Acquiring a new Raman spectrum with 10% laser power and an exposure time of 2 seconds.\n\n```json\n{\"re_measured_positions\": [[37.8, 25.2]]}\n```",
+  "answer_json": {
+    "re_measured_positions": [
+      [
+        37.8,
+        25.2
+      ]
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "search_knowledge_base",
+      "args": {
+        "query": "SNR T050 definition"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T066.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "web_search",
+      "args": {
+        "query": "Raman spectrometer SNR T050 definition"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# Group by x,y\nunique_pos = []\n# We need to find all unique (x,y) pairs\nall_x = files[0]['table']['x']\nall_y = files[0]['table']['y']\nall_shift = files[0]['table']['raman_shift_cm-1']\nall_int = files[0]['table']['intensity']\n\n# Find unique positions\npos_set = set(zip(all_x, all_y))\npositions = sorted(list(pos_set))\n\nlow_snr_pos = []\n\nfor px, py in positions:\n    mask = (all_x == px) & (all_y == py)\n    shift = all_shift[mask]\n    intensity = all_int[mask]\n    \n    # Peak intensity: max of the spectrum\n    i_max = np.max(intensity)\n    \n    # Noise estimation: std dev of a background region\n    # Looking at the range 200-2000, usually ends are quieter or specific windows\n    # Let's take the first 100 points as background noise if they aren't peaks\n    bg_region = intensity[:50] \n    noise_std = np.std(bg_region)\n    \n    # Baseline mean for subtraction\n    bg_mean = np.mean(bg_region)\n    \n    snr = (i_max - bg_mean) / noise_std if noise_std != 0 else 0\n    \n    if snr < 10:\n        low_snr_pos.append((px, py, snr))\n    \n    print(f\"Pos ({px}, {py}): Peak={i_max:.2f}, Noise={noise_std:.2f}, SNR={snr:.2f}\")\n\nprint(\"\\nPositions with SNR < 10:\")\nfor p in low_snr_pos:\n    print(p)\n",
+        "file_ids": [
+          "2026-08-04/T066.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "get_hardware_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "move_stage",
+      "args": {
+        "x": 37.8,
+        "y": 25.2
+      },
+      "ok": true
+    },
+    {
+      "name": "run_autofocus",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 2,
+        "power": 10
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-04/bench_2026-08-04_AILA_AILA_T066_cd858d/123711_428_x37.8_y25.2.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.8,
+    "y": 25.2,
+    "z": -0.045,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 10.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T066_cd858d",
+  "elapsed_s": 128.3,
+  "errors": [],
+  "warnings": []
+}

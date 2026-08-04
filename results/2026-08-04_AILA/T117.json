@@ -1,0 +1,199 @@
+{
+  "task": "T117",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Identify the material of T117.csv against reference_library.csv, which includes PET and PMMA references.",
+  "criteria": "EXACT(material)",
+  "checks": [
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'PET' (expected 'PET')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T117.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "The material of sample T117 was identified by comparing its Raman spectrum against the reference library using Pearson correlation coefficients on normalized intensities. The analysis showed an extremely high correlation (0.9953) with PET references, while correlations with PMMA and other materials in the library were very low (typically < 0.15). Based on this result, T117 is identified as PET.\n\n```json\n{\"material\": \"PET\"}\n```",
+  "answer_json": {
+    "material": "PET"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T117.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Load T117 spectrum\nt117 = files[0] # Assuming order from file_ids, but let's be explicit based on filename\nt117_data = None\nref_data = None\n\nfor f in files:\n    if 'T117.csv' in f['filename']:\n        t117_data = {'x': f['table']['raman_shift_cm-1'], 'y': f['table']['intensity']}\n    elif 'reference_library.csv' in f['filename']:\n        ref_data = f['table']\n\n# Normalize T117\ny_t117 = t117_data['y']\nx_t117 = t117_data['x']\ny_t117_norm = (y_t117 - np.min(y_t117)) / (np.max(y_t117) - np.min(y_t117))\n\n# Group reference library by spectrum_id\nunique_ids = np.unique(ref_data['spectrum_id'])\nmaterials_map = {} # id -> material\nspectra_map = {}   # id -> intensity array\n\nfor sid in unique_ids:\n    mask = (ref_data['spectrum_id'] == sid)\n    mat = ref_data['material'][mask][0]\n    intensities = ref_data['intensity'][mask]\n    \n    # Ensure length matches T117\n    if len(intensities) == len(y_t117):\n        materials_map[sid] = mat\n        # Normalize reference spectrum\n        i_min, i_max = np.min(intensities), np.max(intensities)\n        spectra_map[sid] = (intensities - i_min) / (i_max - i_min)\n\n# Compare T117 with every reference spectrum using correlation\nresults = []\nfor sid, y_ref_norm in spectra_map.items():\n    corr = np.corrcoef(y_t117_norm, y_ref_norm)[0, 1]\n    results.append({'id': sid, 'material': materials_map[sid], 'correlation': corr})\n\n# Find the best match\nbest_match = max(results, key=lambda x: x['correlation'])\nprint(f\"Best match: {best_match}\")\n\n# Plot comparison for visual verification (though I can't see it, I will save it)\nplt.figure(figsize=(10, 6))\nplt.plot(x_t117, y_t117_norm, label='T117 (Normalized)', color='black', lw=2)\n\n# Find the best reference spectrum's raw data for plotting if needed or just use normalized\nbest_sid = best_match['id']\nmask_best = (ref_data['spectrum_id'] == best_sid)\nx_ref = ref_data['raman_shift_cm-1'][mask_best]\ny_ref_raw = ref_data['intensity'][mask_best]\ny_ref_norm_plot = (y_ref_raw - np.min(y_ref_raw)) / (np.max(y_ref_raw) - np.min(y_ref_raw))\n\nplt.plot(x_ref, y_ref_norm_plot, label=f\"Reference {best_match['material']} ({best_sid})\", color='red', alpha=0.7)\nplt.title(f\"Comparison: T117 vs Best Match ({best_match['material']})\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Normalized Intensity\")\nplt.legend()\nplt.savefig('comparison_plot.png')\n\n# Also check other materials specifically mentioned if correlation is close\nprint(\"\\nTop 5 correlations:\")\nsorted_results = sorted(results, key=lambda x: x['correlation'], reverse=True)\nfor r in sorted_results[:5]:\n    print(f\"Material: {r['material']}, ID: {r['id']}, Corr: {r['correlation']:.4f}\")\n",
+        "file_ids": [
+          "2026-08-04/T117.csv",
+          "2026-08-04/reference_library.csv"
+        ],
+        "title": "Material Identification of T117"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\nfrom scipy.interpolate import interp1d\n\n# Load data explicitly\nt117_file = None\nref_file = None\n\nfor f in files:\n    if 'T117.csv' in f['filename']:\n        t117_file = f\n    elif 'reference_library.csv' in f['filename']:\n        ref_file = f\n\nx_t117 = t117_file['table']['raman_shift_cm-1']\ny_t117 = t117_file['table']['intensity']\n\n# Normalize T117 (Min-Max)\ny_t117_norm = (y_t117 - np.min(y_t117)) / (np.max(y_t117) - np.min(y_t117))\n\nref_data = ref_file['table']\nunique_ids = np.unique(ref_data['spectrum_id'])\n\nresults = []\n\nfor sid in unique_ids:\n    mask = (ref_data['spectrum_id'] == sid)\n    mat = ref_data['material'][mask][0]\n    x_ref = ref_data['raman_shift_cm-1'][mask]\n    y_ref = ref_data['intensity'][mask]\n    \n    # Interpolate reference spectrum onto T117 x-axis to ensure identical dimensions for correlation\n    # Use linear interpolation\n    f_interp = interp1d(x_ref, y_ref, bounds_error=False, fill_value=\"extrapolate\")\n    y_ref_resampled = f_interp(x_t117)\n    \n    # Normalize resampled reference spectrum (Min-Max)\n    y_ref_norm = (y_ref_resampled - np.min(y_ref_resampled)) / (np.max(y_ref_resampled) - np.min(y_ref_resampled))\n    \n    # Calculate Pearson correlation coefficient\n    corr = np.corrcoef(y_t117_norm, y_ref_norm)[0, 1]\n    results.append({'id': sid, 'material': mat, 'correlation': corr})\n\n# Sort results by correlation\nsorted_results = sorted(results, key=lambda x: x['correlation'], reverse=True)\nprint(\"Top matches:\")\nfor r in sorted_results[:5]:\n    print(f\"Material: {r['material']}, ID: {r['id']}, Corr: {r['correlation']:.4f}\")\n\nbest_match = sorted_results[0]\nprint(f\"\\nConclusion: Best match is {best_match['material']} with correlation {best_match['correlation']:.4f}\")\n\n# Plot the top match for visual record (though not seen by AI)\nplt.figure(figsize=(10, 6))\nplt.plot(x_t117, y_t117_norm, label='T117', color='black', lw=2)\n\n# Get the actual reference data for the best match to plot it correctly (resampled)\nmask_best = (ref_data['spectrum_id'] == best_match['id'])\nx_best = ref_data['raman_shift_cm-1'][mask_best]\ny_best = ref_data['intensity'][mask_best]\nf_best = interp1d(x_best, y_best, bounds_error=False, fill_value=\"extrapolate\")\ny_best_resampled = f_best(x_t117)\ny_best_norm = (y_best_resampled - np.min(y_best_resampled)) / (np.max(y_best_resampled) - np.min(y_best_resampled))\n\nplt.plot(x_t117, y_best_norm, label=f\"Reference {best_match['material']}\", color='red', linestyle='--')\nplt.title(f\"Comparison: T117 vs {best_match['material']}\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Normalized Intensity\")\nplt.legend()\nplt.savefig('t117_identification.png')\n",
+        "file_ids": [
+          "2026-08-04/T117.csv",
+          "2026-08-04/reference_library.csv"
+        ],
+        "title": "Identification of T117 Material"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Use explicitly identified files\nt117_file = None\nref_file = None\nfor f in files:\n    if 'T117.csv' in f['filename']:\n        t117_file = f\n    elif 'reference_library.csv' in f['filename']:\n        ref_file = f\n\n# Load T117\nx_t117 = t117_file['table']['raman_shift_cm-1']\ny_t117 = t117_file['table']['intensity']\n\n# Normalize T117 (Min-Max)\ny_t117_norm = (y_t117 - np.min(y_t117)) / (np.max(y_t117) - np.min(y_t117))\n\n# Load reference library\nref_table = ref_file['table']\nsids = ref_table['spectrum_id']\nmats = ref_table['material']\nx_ref_all = ref_table['raman_shift_cm-1']\ny_ref_all = ref_table['intensity']\n\nunique_sids = np.unique(sids)\nresults = []\n\nfor sid in unique_sids:\n    mask = (sids == sid)\n    # Get the material for this ID\n    mat = mats[mask][0]\n    # Extract spectrum\n    x_ref = x_ref_all[mask]\n    y_ref = y_ref_all[mask]\n    \n    # Check lengths (should be identical, but let's verify)\n    if len(x_ref) != len(y_ref):\n        print(f\"Error: Length mismatch for {sid}: x={len(x_ref)}, y={len(y_ref)}\")\n        continue\n        \n    # Resample reference to T117 grid using np.interp (linear interpolation)\n    y_resampled = np.interp(x_t117, x_ref, y_ref)\n    \n    # Normalize resampled spectrum\n    y_ref_norm = (y_resampled - np.min(y_resampled)) / (np.max(y_resampled) - np.min(y_resampled))\n    \n    # Calculate correlation\n    corr = np.corrcoef(y_t117_norm, y_ref_norm)[0, 1]\n    results.append({'id': sid, 'material': mat, 'correlation': corr})\n\n# Sort and report\nsorted_results = sorted(results, key=lambda x: x['correlation'], reverse=True)\nprint(\"Top 5 matches:\")\nfor r in sorted_results[:5]:\n    print(f\"Material: {r['material']}, ID: {r['id']}, Corr: {r['correlation']:.4f}\")\n\nbest = sorted_results[0]\nprint(f\"\\nBest Match: {best['material']} (ID: {best['id']}, Correlation: {best['correlation']:.4f})\")\n\n# Visualization for the record\nplt.figure(figsize=(10, 6))\nplt.plot(x_t117, y_t117_norm, label='T117', color='black', lw=2)\nmask_best = (sids == best['id'])\ny_best_raw = y_ref_all[mask_best]\ny_best_resampled = np.interp(x_t117, x_ref_all[mask_best], y_best_raw)\ny_best_norm = (y_best_resampled - np.min(y_best_resampled)) / (np.max(y_best_resampled) - np.min(y_best_resampled))\nplt.plot(x_t117, y_best_norm, label=f\"Reference {best['material']}\", color='red', linestyle='--')\nplt.title(f\"Material Identification: T117 vs {best['material']}\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Normalized Intensity\")\nplt.legend()\nplt.savefig('t117_match.png')\n",
+        "file_ids": [
+          "2026-08-04/T117.csv",
+          "2026-08-04/reference_library.csv"
+        ],
+        "title": "Material Identification T117 Final"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Explicitly identify files from the list\nt117_file = next((f for f in files if 'T117.csv' in f['filename']), None)\nref_file = next((f for f in files if 'reference_library.csv' in f['filename']), None)\n\n# Load T117 as 1D float arrays\nx_t117 = np.array(t117_file['table']['raman_shift_cm-1'], dtype=float).flatten()\ny_t117 = np.array(t117_file['table']['intensity'], dtype=float).flatten()\n\n# Min-Max Normalize T117\ny_t117_norm = (y_t117 - np.min(y_t117)) / (np.max(y_t117) - np.min(y_t117))\n\n# Load Reference Library table\nref_table = ref_file['table']\nsids = np.array(ref_table['spectrum_id'])\nmats = np.array(ref_table['material'])\nx_ref_all = np.array(ref_table['raman_shift_cm-1'], dtype=float).flatten()\ny_ref_all = np.array(ref_table['intensity'], dtype=float).flatten()\n\nunique_sids = np.unique(sids)\nresults = []\n\nfor sid in unique_sids:\n    mask = (sids == sid)\n    mat = mats[mask][0]\n    x_ref = x_ref_all[mask]\n    y_ref = y_ref_all[mask]\n    \n    # np.interp(x, xp, fp) -> x: target, xp: data points, fp: values at those points\n    # Ensure they are 1D float arrays\n    try:\n        y_resampled = np.interp(x_t117, x_ref, y_ref)\n        \n        # Normalize resampled reference spectrum\n        y_ref_norm = (y_resampled - np.min(y_resampled)) / (np.max(y_resampled) - np.min(y_resampled))\n        \n        # Correlation\n        corr = np.corrcoef(y_t117_norm, y_ref_norm)[0, 1]\n        results.append({'id': sid, 'material': mat, 'correlation': corr})\n    except Exception as e:\n        print(f\"Error processing {sid}: {e}\")\n\n# Sort by correlation descending\nsorted_results = sorted(results, key=lambda x: x['correlation'], reverse=True)\nprint(\"Top 5 matches:\")\nfor r in sorted_results[:5]:\n    print(f\"Material: {r['material']}, ID: {r['id']}, Corr: {r['correlation']:.4f}\")\n\nbest = sorted_results[0]\nprint(f\"\\nBest Match Conclusion: {best['material']} (Corr: {best['correlation']:.4f})\")\n\n# Visual verification save\nplt.figure(figsize=(10, 6))\nplt.plot(x_t117, y_t117_norm, label='T117', color='black', lw=2)\nmask_best = (sids == best['id'])\ny_best_resampled = np.interp(x_t117, x_ref_all[mask_best], y_ref_all[mask_best])\ny_best_norm = (y_best_resampled - np.min(y_best_resampled)) / (np.max(y_best_resampled) - np.min(y_best_resampled))\nplt.plot(x_t117, y_best_norm, label=f\"Ref {best['material']}\", color='red', linestyle='--')\nplt.title(f\"Material Identification: T117 vs {best['material']}\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Normalized Intensity\")\nplt.legend()\nplt.savefig('t117_final_id.png')\n",
+        "file_ids": [
+          "2026-08-04/T117.csv",
+          "2026-08-04/reference_library.csv"
+        ],
+        "title": "Material Identification T117 Final v2"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Find files without using 'next()'\nt117_file = None\nref_file = None\nfor f in files:\n    if 'T117.csv' in f['filename']:\n        t117_file = f\n    elif 'reference_library.csv' in f['filename']:\n        ref_file = f\n\n# Load and flatten T117 data\nx_t117 = np.array(t117_file['table']['raman_shift_cm-1']).astype(float).flatten()\ny_t117 = np.array(t117_file['table']['intensity']).astype(float).flatten()\n\n# Normalize T117\ny_t117_norm = (y_t117 - np.min(y_t117)) / (np.max(y_t117) - np.min(y_t117))\n\n# Load reference library data\nref_table = ref_file['table']\nsids = np.array(ref_table['spectrum_id'])\nmats = np.array(ref_table['material'])\nx_ref_all = np.array(ref_table['raman_shift_cm-1']).astype(float).flatten()\ny_ref_all = np.array(ref_table['intensity']).astype(float).flatten()\n\nunique_sids = np.unique(sids)\nresults = []\n\nfor sid in unique_sids:\n    mask = (sids == sid)\n    mat = mats[mask][0]\n    x_ref = x_ref_all[mask]\n    y_ref = y_ref_all[mask]\n    \n    # Interpolate and normalize reference spectrum to match T117 axis\n    y_resampled = np.interp(x_t117, x_ref, y_ref)\n    y_ref_norm = (y_resampled - np.min(y_resampled)) / (np.max(y_resampled) - np.min(y_resampled))\n    \n    # Correlation coefficient\n    corr = np.corrcoef(y_t117_norm, y_ref_norm)[0, 1]\n    results.append({'material': mat, 'id': sid, 'correlation': corr})\n\n# Sort and print top matches\nsorted_results = sorted(results, key=lambda x: x['correlation'], reverse=True)\nprint(\"Top Matches:\")\nfor r in sorted_results[:5]:\n    print(f\"Material: {r['material']}, ID: {r['id']}, Correlation: {r['correlation']:.4f}\")\n\nbest = sorted_results[0]\nprint(f\"\\nConclusion: T117 is most likely {best['material']} (Corr: {best['correlation']:.4f})\")\n\n# Plotting for record\nplt.figure(figsize=(8, 5))\nplt.plot(x_t117, y_t117_norm, label='T117', color='black', lw=2)\nmask_best = (sids == best['id'])\ny_ref_resampled = np.interp(x_t117, x_ref_all[mask_best], y_ref_all[mask_best])\ny_ref_norm_best = (y_ref_resampled - np.min(y_ref_resampled)) / (np.max(y_ref_resampled) - np.min(y_ref_resampled))\nplt.plot(x_t117, y_ref_norm_best, label=f\"Ref {best['material']}\", color='red', linestyle='--')\nplt.title(f\"Material Identification: T117 vs {best['material']}\")\nplt.legend()\nplt.savefig('t117_final_match.png')\n",
+        "file_ids": [
+          "2026-08-04/T117.csv",
+          "2026-08-04/reference_library.csv"
+        ],
+        "title": "Final Identification of T117"
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "/api/results/2026-08-04/bench_2026-08-04_AILA_AILA_T117_3239fc/fig142032_607_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T117_3239fc",
+  "elapsed_s": 148.66,
+  "errors": [],
+  "warnings": []
+}

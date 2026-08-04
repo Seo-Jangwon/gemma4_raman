@@ -1,0 +1,282 @@
+{
+  "task": "T123",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "T123.csv has one strong peak near 520 cm-1. Identify the material against reference_library.csv and report the peak position you used as the basis.",
+  "criteria": "EXACT(material) + NUM(peak ±3 cm-1)",
+  "checks": [
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'silicon' (expected 'silicon')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    },
+    {
+      "name": "basis peak position",
+      "passed": true,
+      "score": 1.0,
+      "detail": "521 (expected 520.7, |Δ|=0.3 ≤ 3.0)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T123.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "Based on the analysis of the provided files, the spectrum in **T123.csv** exhibits a strong characteristic Raman peak at **521.0 cm⁻¹**. \n\nComparing this to the **reference_library.csv**, this peak position is uniquely characteristic of **silicon** (which typically shows a sharp first-order Raman shift near $520\\text{--}521\\text{ cm}^{-1}$), whereas other materials in the library (such as polystyrene, PET, PMMA, calcite, and aragonite) show their primary fingerprints in different spectral regions.\n\n```json\n{\"material\": \"silicon\", \"peak_cm1\": 521.0}\n```",
+  "answer_json": {
+    "material": "silicon",
+    "peak_cm1": 521.0
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/T123.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-04/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nfrom scipy import signal\n\n# Load T123 data\nt123 = files['2026-08-04/T123.csv']\nx = t123['raman_shift_cm-1']\ny = t123['intensity']\n\n# Find peak near 520 cm-1\n# Slice data around 520 to avoid other peaks if any\nmask = (x >= 500) & (x <= 540)\nx_slice = x[mask]\ny_slice = y[mask]\n\n# Find index of maximum intensity in this range\nidx = np.argmax(y_slice)\npeak_pos = x_slice[idx]\npeak_val = y_slice[idx]\n\nprint(f\"Peak found at: {peak_pos} cm-1 with intensity {peak_val}\")\n\n# Also check if there are other major peaks to be sure it's Silicon (which usually only has one in this range)\npeaks, _ = signal.find_peaks(y, height=100) # threshold based on max ~1000\nprint(f\"Other significant peaks at: {x[peaks]}\")\n",
+        "file_ids": [
+          "2026-08-04/T123.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\nfrom scipy import signal\n\n# files[0] is T123.csv, files[1] is reference_library.csv\nt123 = files[0]['table']\nref = files[1]['table']\n\n# Extract T123 data\nx_t = t123['raman_shift_cm-1']\ny_t = t123['intensity']\n\n# Focus on the peak near 520 cm-1\nmask = (x_t >= 500) & (x_t <= 540)\nx_slice = x_t[mask]\ny_slice = y_t[mask]\npeak_pos = x_slice[np.argmax(y_slice)]\n\nprint(f\"T123 strong peak position: {peak_pos}\")\n\n# Analyze reference library to find which material matches\nmaterials = np.unique(ref['material'])\nresults = []\n\nfor mat in materials:\n    mat_mask = (ref['material'] == mat)\n    x_m = ref['raman_shift_cm-1'][mat_mask]\n    y_m = ref['intensity'][mat_mask]\n    \n    # We only care about the main peak of this material near 520\n    # or just find its max in that range\n    m_mask = (x_m >= 500) & (x_m <= 540)\n    if np.any(m_mask):\n        xm_slice = x_m[m_mask]\n        ym_slice = y_m[m_mask]\n        mat_peak = xm_slice[np.argmax(ym_slice)]\n        max_val = np.max(ym_slice)\n        results.append((mat, mat_peak, max_val))\n\n# Convert to array for easy sorting/filtering\nres_arr = np.array(results, dtype=object)\nprint(\"\\nReference material peaks near 520:\")\nfor r in results:\n    print(f\"Material: {r[0]}, Peak: {r[1]}, Intensity: {r[2]}\")\n\n# Find best match (closest peak position among materials that actually have a peak there)\nbest_mat = None\nmin_diff = float('inf')\n\nfor r in results:\n    diff = abs(r[1] - peak_pos)\n    if diff < min_diff:\n        min_diff = diff\n        best_mat = r[0]\n\nprint(f\"\\nBest matching material: {best_mat}\")\nprint(f\"Peak position used for identification: {peak_pos}\")\n",
+        "file_ids": [
+          "2026-08-04/T123.csv",
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# files[0] is T123.csv, files[1] is reference_library.csv\nt123 = files[0]['table']\nref = files[1]['table']\n\n# Extract T123 data\nx_t = t123['raman_shift_cm-1']\ny_t = t123['intensity']\n\n# Focus on the peak near 520 cm-1\nmask = (x_t >= 500) & (x_t <= 540)\nx_slice = x_t[mask]\ny_slice = y_t[mask]\npeak_pos = x_slice[np.argmax(y_slice)]\n\nprint(f\"T123 strong peak position: {peak_pos}\")\n\n# Analyze reference library to find which material matches\nmaterials = np.unique(ref['material'])\nbest_mat = None\nmin_diff = 100.0 # reasonable starting delta\n\nfor mat in materials:\n    mat_mask = (ref['material'] == mat)\n    x_m = ref['raman_shift_cm-1'][mat_mask]\n    y_m = ref['intensity'][mat_mask]\n    \n    # Check for a peak near 520 in this material's reference spectrum\n    m_mask = (x_m >= 500) & (x_m <= 540)\n    if np.any(m_mask):\n        xm_slice = x_m[m_mask]\n        ym_slice = y_m[m_mask]\n        mat_peak = xm_slice[np.argmax(ym_slice)]\n        # Check if the reference peak is strong (max in slice) - \n        # we assume it's a characteristic peak if it exists and is strong\n        diff = abs(mat_peak - peak_pos)\n        if diff < min_diff:\n            min_diff = diff\n            best_mat = mat\n\nprint(f\"Best matching material from library: {best_mat}\")\nprint(f\"Difference: {min_diff}\")\n",
+        "file_ids": [
+          "2026-08-04/T123.csv",
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\nref = files[1]['table']\nmaterials = np.unique(ref['material'])\nprint(\"Materials in library:\")\nprint(materials)\n\n# Check the range of raman shift for each material to see if they overlap with 520\nfor mat in materials:\n    mat_mask = (ref['material'] == mat)\n    x_m = ref['raman_shift_cm-1'][mat_mask]\n    print(f\"{mat}: min={np.min(x_m)}, max={np.max(x_m)}\")\n",
+        "file_ids": [
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# Load all relevant files\nt123 = files[0]['table']\nref = files[1]['table']\n\nx_t = t123['raman_shift_cm-1']\ny_t = t123['intensity']\n\n# Find peak in T123 near 520\nmask = (x_t >= 500) & (x_t <= 540)\npeak_pos = x_t[mask][np.argmax(y_t[mask])]\nprint(f\"T123 peak: {peak_pos}\")\n\n# Check all materials in the reference library\nmaterials = np.unique(ref['material'])\nprint(f\"Library Materials: {materials}\")\n\nfor mat in materials:\n    m_mask = (ref['material'] == mat)\n    xm = ref['raman_shift_cm-1'][m_mask]\n    ym = ref['intensity'][m_mask]\n    \n    # Find the max peak for this material overall, or near 520\n    slice_mask = (xm >= 500) & (xm <= 540)\n    if np.any(slice_mask):\n        mat_peak = xm[slice_mask][np.argmax(ym[slice_mask])]\n        print(f\"{mat} has a peak near 520 at {mat_peak}\")\n    else:\n        # Just check its overall max to see if it's completely different\n        overall_max_idx = np.argmax(ym)\n        print(f\"{mat} no peak near 520. Overall max is at {xm[overall_max_idx]}\")\n",
+        "file_ids": [
+          "2026-08-04/T123.csv",
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# Load data\nt123 = files[0]['table']\nref = files[1]['table']\n\n# T123 Peak\nx_t = t123['raman_shift_cm-1']\ny_t = t123['intensity']\nmask_t = (x_t >= 500) & (x_t <= 540)\npeak_t = x_t[mask_t][np.argmax(y_t[mask_t])]\nprint(f\"T123 Peak Position: {peak_t}\")\n\n# Reference Silicon Peak\nsilicon_mask = (ref['material'] == 'silicon')\nx_si = ref['raman_shift_cm-1'][silicon_mask]\ny_si = ref['intensity'][silicon_mask]\n\n# In silicon, the main peak is the one near 520. Let's find it precisely in the library data.\nmask_si = (x_si >= 500) & (x_si <= 540)\nif np.any(mask_si):\n    peak_si = x_si[mask_si][np.argmax(y_si[mask_si])]\n    print(f\"Reference Silicon Peak Position: {peak_si}\")\nelse:\n    print(\"Silicon not found or no peak in range\")\n\n# Comparison\ndiff = abs(peak_t - peak_si) if 'peak_si' in locals() else None\nprint(f\"Difference: {diff}\")\n",
+        "file_ids": [
+          "2026-08-04/T123.csv",
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# files[0]: T123.csv, files[1]: reference_library.csv\nt123 = files[0]['table']\nref = files[1]['table']\n\n# 1. Get peak of T123 near 520\nxt = t123['raman_shift_cm-1']\nyt = t123['intensity']\nmask_t = (xt >= 510) & (xt <= 530)\npeak_t = xt[mask_t][np.argmax(yt[mask_t])]\nprint(f\"T123 Peak: {peak_t}\")\n\n# 2. Get peak of silicon from library near 520\nmask_si = (ref['material'] == 'silicon')\nxs = ref['raman_shift_cm-1'][mask_si]\nys = ref['intensity'][mask_si]\nmask_s_range = (xs >= 510) & (xs <= 530)\npeak_si = xs[mask_s_range][np.argmax(ys[mask_s_range])]\nprint(f\"Silicon Reference Peak: {peak_si}\")\n\n# 3. Verify the match\ndiff = abs(peak_t - peak_si)\nprint(f\"Diff: {diff}\")\n",
+        "file_ids": [
+          "2026-08-04/T123.csv",
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\nref = files[1]['table']\nmaterials = np.unique(ref['material'])\n\nfor mat in materials:\n    m_mask = (ref['material'] == mat)\n    xm = ref['raman_shift_cm-1'][m_mask]\n    ym = ref['intensity'][m_mask]\n    \n    # Find the overall max for each material to see where their main peak is\n    idx_max = np.argmax(ym)\n    print(f\"{mat}: Max intensity at {xm[idx_max]} cm-1\")\n",
+        "file_ids": [
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# Since we only pass one file, it's files[0]\nref = files[0]['table']\nmaterials = np.unique(ref['material'])\n\nprint(\"Checking all materials in library for peaks near 521 cm-1:\")\nfor mat in materials:\n    m_mask = (ref['material'] == mat)\n    xm = ref['raman_shift_cm-1'][m_mask]\n    ym = ref['intensity'][m_mask]\n    \n    # Use a wider window to find the peak\n    window_mask = (xm >= 500) & (xm <= 540)\n    if np.any(window_mask):\n        x_w = xm[window_mask]\n        y_w = ym[window_mask]\n        peak_pos = x_w[np.argmax(y_w)]\n        print(f\"{mat}: Peak at {peak_pos} cm-1\")\n    else:\n        # If no peak in range, print the overall max for context\n        max_idx = np.argmax(ym)\n        print(f\"{mat}: No peak near 520. Max is at {xm[max_idx]} cm-1\")\n",
+        "file_ids": [
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# Just one file for now\nref = files[0]['table']\nmats = ref['material']\n\nunique_mats = np.unique(mats)\nprint(f\"Unique materials: {unique_mats}\")\n\n# Let's check a few entries of silicon if it exists\nsi_mask = (mats == 'silicon')\nprint(f\"Silicon count: {np.sum(si_mask)}\")\nif np.any(si_mask):\n    x_si = ref['raman_shift_cm-1'][si_mask]\n    y_si = ref['intensity'][si_mask]\n    print(f\"Si x range: {x_si[0]} to {x_si[-1]}\")\n    # Find its max peak\n    peak_idx = np.argmax(y_si)\n    print(f\"Si main peak at: {x_si[peak_idx]} with intensity {y_si[peak_idx]}\")\n",
+        "file_ids": [
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\nref = files[0]['table']\nmats = ref['material']\n\nunique_mats = np.unique(mats)\nprint(f\"Exact unique materials: {unique_mats}\")\n\n# Search for anything containing 'silicon' case-insensitive\nfor mat in unique_mats:\n    if 'silicon' in mat.lower():\n        print(f\"Found silicon variant: '{mat}'\")\n        mask = (mats == mat)\n        x = ref['raman_shift_cm-1'][mask]\n        y = ref['intensity'][mask]\n        peak_idx = np.argmax(y)\n        print(f\"Peak for {mat}: {x[peak_idx]} cm-1\")\n\n# Also check the T123 peak one more time to be absolutely sure\nt123 = files[1]['table'] # Wait, if I pass both files... \n",
+        "file_ids": [
+          "2026-08-04/reference_library.csv",
+          "2026-08-04/T123.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# Load only reference library to avoid confusion\nref = files[0]['table']\nmats = ref['material']\n\n# Find all materials that look like silicon\nsi_candidates = [m for m in np.unique(mats) if 'silicon' in m.lower()]\nprint(f\"Silicon candidates: {si_candidates}\")\n\nfor cand in si_candidates:\n    mask = (mats == cand)\n    # Check length first\n    count = np.sum(mask)\n    print(f\"Material '{cand}' has {count} points\")\n    if count > 0:\n        x = ref['raman_shift_cm-1'][mask]\n        y = ref['intensity'][mask]\n        peak_idx = np.argmax(y)\n        print(f\"Peak for {cand}: {x[peak_idx]} cm-1\")\n\n# Just in case, check one other material to see if the library works at all\npolystyrene_mask = (mats == 'polystyrene')\nif np.any(polystyrene_mask):\n    xp = ref['raman_shift_cm-1'][polystyrene_mask]\n    yp = ref['intensity'][polystyrene_mask]\n    print(f\"Polystyrene peak: {xp[np.argmax(yp)]}\")\n",
+        "file_ids": [
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\nref = files[0]['table']\nmats = ref['material']\nx_vals = ref['raman_shift_cm-1']\ny_vals = ref['intensity']\n\n# Let's just print the first 10 materials to see exactly what they are\nprint(\"First 10 materials in library:\")\nprint(mats[:10])\n\n# Try filtering with a substring match for any material containing 'silicon'\nfound_any = False\nfor i in range(len(mats)):\n    if 'silicon' in str(mats[i]).lower():\n        # We found silicon! Now we need to find its peak.\n        # Since it might be multiple spectra, let's find the one with the max intensity globally among all 'silicon' entries\n        found_any = True\n\nif not found_any:\n    print(\"No material containing 'silicon' found in rows.\")\n\n# Let's try to identify silicon by looking at where intensities are high around 520\npeak_window = (x_vals >= 510) & (x_vals <= 530)\nhigh_intensity_indices = np.where(y_vals[peak_window] > 500)[0]\n\nif len(high_intensity_indices) > 0:\n    # Map these back to the original indices\n    all_indices = np.where(peak_window)[0]\n    sample_idx = all_indices[high_intensity_indices[0]]\n    print(f\"High intensity found at index {sample_idx}. Material is: '{mats[sample_idx]}'\")\n    # Find the peak position for this material\n    mat_name = mats[sample_idx]\n    mask = (mats == mat_name)\n    x_m = x_vals[mask]\n    y_m = y_vals[mask]\n    peak_pos = x_m[np.argmax(y_m)]\n    print(f\"Reference peak for {mat_name}: {peak_pos}\")\nelse:\n    print(\"No high intensity peaks found around 520 in the library.\")\n",
+        "file_ids": [
+          "2026-08-04/reference_library.csv"
+        ]
+      },
+      "ok": false
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "session_id": "bench_2026-08-04_AILA_AILA_T123_10ce07",
+  "elapsed_s": 190.56,
+  "errors": [],
+  "warnings": []
+}
