@@ -110,6 +110,14 @@ class AndorCCD(object):
 
         # 내부 상태 초기화
         self.aq_mode = 'single'
+        # 프레임 수 캐시. 셔터·트리거와 같은 이유로 존재한다 — SDK 에 GetNumberKinetics /
+        # GetNumberAccumulations 가 없어서, set 시점에 여기 적어 두지 않으면 '지금 몇 장으로
+        # 걸려 있는가'를 되읽을 방법이 없다.
+        #
+        # [불변식 — 반드시 지킬 것] SetNumberKinetics / SetNumberAccumulations 를 부르는
+        # **모든** 경로가 이 두 값을 함께 갱신해야 한다. 한 곳이라도 빠지면 SDK 와 캐시가
+        # 갈라지고, 그 순간 도구 계층은 조용히 거짓말을 시작한다(2026-08-05 사고 — 아래
+        # set_aq_kinetic_scan / set_aq_accumulate_scan 주석 참고).
         self.num_kin = 1
         self.num_acc = 1
         self.Nx_ro = self.Nx
@@ -543,6 +551,12 @@ class AndorCCD(object):
         """
         Accumulate 취득 모드.
         동일 노출을 num_acc 회 반복하여 더한다.
+
+        [num_acc 캐시를 반드시 함께 갱신한다 — 2026-08-05]
+        set_num_accumulations() 와 달리 이 함수는 SDK 만 세팅하고 self.num_acc 는 그대로
+        두었다. 그러면 도구 계층이 되읽는 값(get_ccd_info / acquire_spectrum 의
+        num_accumulations)이 실제로 걸린 값과 갈라진다 — 자세한 사고 경위는
+        set_aq_kinetic_scan 주석 참고(같은 버그가 두 함수에 있었다).
         """
         self.aq_mode = 'accumulate'
         with self.lock:
@@ -554,6 +568,7 @@ class AndorCCD(object):
         if num_acc is not None:
             with self.lock:
                 _check(self.sdk.SetNumberAccumulations(int(num_acc)), "SetNumberAccumulations")
+            self.num_acc = int(num_acc)
         if cycle_time is not None:
             with self.lock:
                 _check(self.sdk.SetAccumulationCycleTime(float(cycle_time)),
@@ -564,6 +579,26 @@ class AndorCCD(object):
         """
         Kinetic Series 취득 모드.
         연속 프레임 빠르게 취득.
+
+        [num_kin / num_acc 캐시를 반드시 함께 갱신한다 — 2026-08-05 사고]
+        예전에는 SDK 에 SetNumberKinetics(num_kin) 을 밀어넣고 self.num_kin 은 1 로 둔 채였다.
+        SDK 쪽은 정상이라 프레임은 요청한 만큼 들어왔지만, 되읽는 값만 1 로 남았다:
+
+            acquire_spectrum → {"num_frames": 5, "kinetic_count": 1}   ← 자기모순
+            get_ccd_info     → {"num_kinetics": 1}                      ← 확인해도 1
+            set_ccd_acquisition_mode → 방금 설정한 값을 1 로 되돌려줌
+
+        벤치마크 N07 에서 에이전트가 "5장 요청했는데 1장이라니 실패했군" 으로 읽고 같은 좌표를
+        30 회(재실행에서도 10 회) 재측정하며 72 분을 태웠다. 교차 확인 경로가 전부 같은 거짓을
+        말해서 스스로 빠져나올 수 없었다. 조사량이 실제로 시료에 누적되는 종류의 사고다.
+
+        raman_tools 의 kinetic 타임아웃도 이 값을 쓴다(_cyc × num_kin × num_acc × 2 + 15).
+        1 로 고정되면 프레임 수에 비례해야 할 상한이 안 늘어나, 긴 시리즈가 취득 도중
+        AbortAcquisition 으로 잘린다.
+
+        (버퍼 모양이 (1, Ny, Nx) 로 잡히는 것은 무해했다 — get_acquired_data() 의 kinetic
+         분기가 GetNumberNewImages() 로 실제 장수를 물어 self.buffer 를 통째로 재할당한다.
+         즉 틀린 것은 순수하게 이 캐시뿐이었다.)
         """
         self.aq_mode = 'kinetic'
         with self.lock:
@@ -575,6 +610,7 @@ class AndorCCD(object):
         if num_acc is not None:
             with self.lock:
                 _check(self.sdk.SetNumberAccumulations(int(num_acc)), "SetNumberAccumulations")
+            self.num_acc = int(num_acc)
         if acc_time is not None:
             with self.lock:
                 _check(self.sdk.SetAccumulationCycleTime(float(acc_time)),
@@ -582,6 +618,7 @@ class AndorCCD(object):
         if num_kin is not None:
             with self.lock:
                 _check(self.sdk.SetNumberKinetics(int(num_kin)), "SetNumberKinetics")
+            self.num_kin = int(num_kin)
         if kin_time is not None:
             with self.lock:
                 _check(self.sdk.SetKineticCycleTime(float(kin_time)), "SetKineticCycleTime")

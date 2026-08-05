@@ -374,16 +374,24 @@ RAMAN_TOOLS = [
                         "description": "Acquisition mode",
                         "enum": ["single", "accumulate", "kinetic", "run_till_abort"],
                     },
+                    # minimum 을 acquire_spectrum 쪽과 맞춘다(2026-08-05) — 도구 계층이
+                    # 1 미만을 거부하므로 그 제약을 스키마에도 적어 둔다. 선언하지 않으면
+                    # 모델은 0 을 '기능 끄기'로 보낼 수 있고, 무엇이 잘못됐는지는 실행해
+                    # 봐야만 알게 된다.
                     "num_accumulations": {
                         "type": "integer",
+                        "minimum": 1,
                         "description": ("Number of accumulations (used in accumulate/kinetic mode). "
-                                        "Omit to keep the value already on the CCD. Note that "
+                                        "Omit to keep the value already on the CCD - 0 is not a way "
+                                        "to switch accumulation off and is rejected. Note that "
                                         "accumulate mode with 1 accumulation is just a single "
                                         "shot - set this deliberately when you want averaging."),
                     },
                     "num_kinetics": {
                         "type": "integer",
-                        "description": "Total number of frames to acquire (used in kinetic mode)",
+                        "minimum": 1,
+                        "description": ("Total number of frames to acquire (used in kinetic mode). "
+                                        "Omit to keep the value already on the CCD."),
                     },
                 },
                 "required": ["mode"],

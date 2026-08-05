@@ -1130,6 +1130,41 @@ def _current_read_mode() -> str:
     return _RO_MODE_TO_ARG.get(getattr(_ccd, 'ro_mode', ''), 'fvb')
 
 
+def _check_ccd_positive(name: str, value, integer: bool = False) -> dict | None:
+    """CCD 수치 파라미터가 양수인지 검사. 통과(또는 None=생략)면 None, 실패면 error dict.
+
+    [왜 필요한가 — 2026-08-05]
+    이 값들은 결국 SDK 로 들어가고, SDK 는 잘못된 값에 DRV_P1INVALID 를 돌려준다
+    (_check 가 IOError 로 올린다). 문제는 그 호출 시점이다: acquire_spectrum 에서
+    _apply_acq_mode / _apply_read_mode 는 **레이저를 켠 뒤**에 실행되므로, 검증을 SDK 에
+    맡기면 잘못된 값 하나 때문에 시료에 빔이 들어간 뒤에야 실패한다. 셔터·트리거를
+    발사 전에 검증하는 것과 정확히 같은 이유로 여기서 미리 막는다.
+
+    [거부하되 조용히 고치지 않는다]
+    0 을 1 로 바꿔 주면 호출자는 자기가 요청한 조건으로 측정됐다고 믿는다.
+    _apply_laser_power 가 클램핑 대신 거부하는 것과 같은 정책이다.
+
+    None 은 통과시킨다 — 이 파일에서 None 은 '지정 안 함 = 현재 설정 유지'다.
+    bool 을 막는 이유: 파이썬에서 True 는 int 라 isinstance 검사를 그냥 통과한다.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return {"ok": False, "error": f"{name} must be a number, got {value!r}."}
+    if integer:
+        if int(value) != value:
+            return {"ok": False, "error": f"{name} must be a whole number, got {value!r}."}
+        if int(value) < 1:
+            return {"ok": False, "error": (
+                f"{name} must be at least 1, got {value!r}. Omit the parameter to keep the "
+                f"instrument's current setting - it is not a way to switch the feature off.")}
+    elif float(value) <= 0:
+        return {"ok": False, "error": (
+            f"{name} must be greater than 0, got {value!r}. Omit the parameter to keep the "
+            f"instrument's current setting.")}
+    return None
+
+
 def _apply_acq_mode(mode: str, exposure=None, num_accumulations=None,
                     kinetic_count=None, kinetic_cycle_time=None) -> dict | None:
     """취득 모드와 그 파라미터를 적용한다. 통과면 None, 실패면 error dict.
@@ -1140,6 +1175,17 @@ def _apply_acq_mode(mode: str, exposure=None, num_accumulations=None,
     """
     if mode not in _ACQ_MODES:
         return {"ok": False, "error": f"acquisition mode must be one of {list(_ACQ_MODES)}."}
+    # 수치 검증도 이 공용 경로에서 한다 — acquire_spectrum 은 발사 전에 이미 같은 검사를
+    # 끝내지만(아래 사전검증 블록), set_ccd_acquisition_mode 는 여기로만 들어온다.
+    # 한쪽에만 두면 같은 값이 한 도구에서는 깔끔한 에러, 다른 도구에서는 날것의 SDK
+    # IOError 로 갈라진다 — 이 파일이 _apply_* 를 공용으로 만든 이유가 그것이다.
+    for _n, _v, _i in (("exposure", exposure, False),
+                       ("num_accumulations", num_accumulations, True),
+                       ("kinetic_count", kinetic_count, True),
+                       ("kinetic_cycle_time", kinetic_cycle_time, False)):
+        err = _check_ccd_positive(_n, _v, integer=_i)
+        if err:
+            return err
     if mode == 'single':
         _ccd.set_aq_single_scan(exposure=exposure)
     elif mode == 'accumulate':
@@ -1148,14 +1194,30 @@ def _apply_acq_mode(mode: str, exposure=None, num_accumulations=None,
         _ccd.set_aq_kinetic_scan(
             exp_time=exposure,
             num_kin=kinetic_count,
-            num_acc=num_accumulations if (num_accumulations or 0) > 1 else None,
+            # >= 1 이다(> 1 이 아니다) — 2026-08-05.
+            # None 은 '지정 안 함 = 유지', 숫자는 '이 값으로 걸어라'가 이 파일의 규약이다.
+            # 예전에는 > 1 이라 **명시한 1 이 None 으로 바뀌어** 무시됐다. 직전에 누적이
+            # 10 으로 걸려 있었다면 num_accumulations=1 로 요청해도 10 이 유지되어, 5 프레임
+            # 짜리 kinetic 이 요청의 10 배로 조사된다(5x10x0.5s = 25s vs 2.5s). 관측은
+            # 가능하지만(보고값도 10) 그때는 이미 시료에 들어간 뒤다.
+            # acquire_spectrum 이 생략 시 '리셋'이 아니라 '유지'가 되도록 고친 2026-07-30
+            # 수정과 같은 규약이다 — '값을 안 줬다'와 '값을 줬다'를 뭉개지 않는다.
+            num_acc=num_accumulations if (num_accumulations or 0) >= 1 else None,
             kin_time=kinetic_cycle_time,
         )
     else:                                   # run_till_abort
         _ccd.set_aq_run_till_abort_scan()
         if exposure is not None:
             _ccd.set_exposure_time(exposure)
-    # set_aq_*_scan 이 다루지 않는 조합(예: single 모드인데 누적 횟수만 조정)도 반영한다.
+    # set_aq_*_scan 이 인자로 받지 않는 조합(예: single 모드인데 누적 횟수만 조정)을 메운다.
+    #
+    # [지우지 말 것 — 조건이 뒤집혀 보이지만 맞다, 2026-08-05]
+    # "값이 중요한 모드에서만 건너뛴다"처럼 읽혀서 지우고 싶어지는 자리다. 실제로는
+    # set_aq_single_scan / set_aq_run_till_abort_scan 이 num_acc 를 받지 않고, num_kin 을
+    # 받는 set_aq_* 는 kinetic 하나뿐이라, 아래 두 줄이 나머지 조합을 담당한다. 지우면
+    # set_ccd_acquisition_mode('single', num_accumulations=N) 이 조용히 무시된다.
+    # accumulate/kinetic 모드는 위의 set_aq_* 가 SDK 와 캐시를 함께 갱신하므로 여기서
+    # 다시 부를 필요가 없다(andor_ccd_interface 의 캐시 불변식 주석 참고).
     if num_accumulations is not None and mode in ('single', 'run_till_abort'):
         _ccd.set_num_accumulations(num_accumulations)
     if kinetic_count is not None and mode != 'kinetic':
@@ -1171,6 +1233,11 @@ def _apply_read_mode(mode: str, hbin=None, single_track_center=None,
     """
     if mode not in _READ_MODES:
         return {"ok": False, "error": f"read mode must be one of {list(_READ_MODES)}."}
+    for _n, _v in (("hbin", hbin), ("single_track_center", single_track_center),
+                   ("single_track_width", single_track_width)):
+        err = _check_ccd_positive(_n, _v, integer=True)
+        if err:
+            return err
     eff_hbin = hbin if hbin is not None else _ccd.get_current_hbin()
     if mode == 'fvb':
         _ccd.set_ro_full_vertical_binning(hbin=eff_hbin)
@@ -1406,6 +1473,24 @@ def acquire_spectrum(
                   else getattr(_ccd, 'ro_single_track_center', None))
     if eff_read == 'single_track' and eff_center is None:
         return {"ok": False, "error": "single_track_center is required when read_mode='single_track'"}
+
+    # ── 수치 파라미터도 레이저를 쏘기 전에 검증한다 — 2026-08-05 ──────────────
+    # 이 값들이 실제로 SDK 로 들어가는 곳은 아래 try 블록의 _apply_acq_mode /
+    # _apply_read_mode 이고, 그 시점에는 laser_on() 이 이미 끝나 있다. 검증을 거기에만
+    # 맡기면 exposure=0 같은 값 하나에 시료가 조사된 뒤 DRV_P1INVALID 로 실패한다.
+    # 셔터·트리거를 아래에서 미리 보는 것과 같은 이유로 여기서 끝낸다.
+    # (같은 검사가 _apply_* 에도 있다 — 그쪽은 set_ccd_* 도구용이라 중복이 아니다.)
+    for _n, _v, _i in (("exposure", exposure, False),
+                       ("num_accumulations", num_accumulations, True),
+                       ("kinetic_count", kinetic_count, True),
+                       ("kinetic_cycle_time", kinetic_cycle_time, False),
+                       ("hbin", hbin, True),
+                       ("single_track_width", single_track_width, True),
+                       # 캐시에서 온 값도 함께 본다 — 사용될 값 자체를 검사해야 한다.
+                       ("single_track_center", eff_center if eff_read == 'single_track' else None, True)):
+        err = _check_ccd_positive(_n, _v, integer=_i)
+        if err:
+            return err
 
     # 셔터·트리거는 레이저를 쏘기 전에 검증한다 — 잘못된 값으로 발사한 뒤 실패하면
     # 조사만 낭비되고 시료에는 이미 빔이 들어간 뒤다.
@@ -1684,6 +1769,13 @@ def set_ccd_acquisition_mode(
     측정을 시도하면 acq_mode 를 명시하라는 에러를 받는다.
     """
     err = _ccd_ready()
+    if err:
+        return err
+    # 이 도구의 인자는 num_kinetics 인데 공용 경로(_apply_acq_mode)는 같은 값을
+    # kinetic_count 로 부른다. 검증을 거기에만 맡기면 "kinetic_count must be at least 1"
+    # 처럼 **이 도구에 존재하지 않는 인자명**으로 거절당해, 모델이 무엇을 고쳐야 할지
+    # 알 수 없다(get_ccd_info 가 read_mode 를 도구 표기로 되돌려주는 것과 같은 이유).
+    err = _check_ccd_positive("num_kinetics", num_kinetics, integer=True)
     if err:
         return err
     try:
