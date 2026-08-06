@@ -3,7 +3,7 @@
 
 [문제]
   Remove the narrow spikes from T040.csv and save the corrected spectrum. Treat a point as
-  a spike when it deviates from the 5-point moving median by more than 5x the MAD, and
+  a spike when it deviates from the 5-point moving median by more than 100x the MAD, and
   replace it by linear interpolation from its neighbours.
 
 [정답 기준]
@@ -18,6 +18,18 @@
       index    122   386   697   776   1241   1693
       cm-1     322   586   897   976   1441   1893
   이 위치들을 보고하게 하고 완전 일치를 요구하면, 규약을 실제로 적용했는지가 드러난다.
+
+  [프롬프트가 GT 와 다른 규약을 말하고 있었다 — 2026-08-06]
+  프롬프트는 '5x the MAD' 였는데 GT 는 synth.detect_spikes(3점 중앙값, 100x 강건 σ)로
+  만들어졌다. 그 함수의 docstring 이 이미 이유를 적어 뒀다 — 5·MAD 는 폭이 좁은 **진짜
+  라만 밴드**(1001 cm-1 은 FWHM 6점)까지 스파이크로 집는다. 실제로 입력에 프롬프트
+  규약을 적용하면 53 개(스케일 MAD 해석은 16 개)가 나오고, chk.set_match 는 개수가
+  다르면 오답이므로 **프롬프트를 정확히 따른 실행이 확정 0 점**이었다.
+  고칠 곳은 배수 하나였다. z=|y-medfilt(y)|/σ 를 재 보면 스파이크 6 개가 598~786 σ,
+  그다음(진짜 피크)이 59.3 σ 라 임계를 그 사이 어디에 둬도 답이 같다. 100 으로 두면
+  중앙값 폭(3/5/7 점)과 MAD 관례(원시/1.4826 스케일) 6 가지 조합이 **전부** GT 와
+  같은 여섯 자리를 낸다 — 프롬프트가 안 정한 자유도가 답을 못 바꾸게 된다.
+  GT·데이터는 그대로 두고 프롬프트만 100x 로 맞춘다.
 """
 from pathlib import Path
 
@@ -35,7 +47,7 @@ TASK = Task(
     criteria="SET(index EXACT) + ARRAY(cos>=0.99 AND NRMSE<=0.02)",
     prompt=(
         "Remove the narrow spikes from T040.csv and save the corrected spectrum. Treat a "
-        "point as a spike when it deviates from the 5-point moving median by more than 5x "
+        "point as a spike when it deviates from the 5-point moving median by more than 100x "
         "the MAD, and replace it by linear interpolation from its neighbours. Report the "
         "positions of the spikes you removed. "
     ),

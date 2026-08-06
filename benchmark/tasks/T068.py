@@ -4,11 +4,19 @@
 [문제]
   Measure a spectrum 5 times at the same position and report the sample relative standard
   deviation (std with ddof=1 divided by the mean, in percent) of the 1001 cm-1 peak
-  intensity.
+  intensity, taken as the maximum raw intensity in 996-1006 cm-1 with no baseline
+  subtraction.
 
 [정답 기준]
   GT=사후 재계산한 RSD(%). ddof=1을 명시해 모/표본 분기를 없앴다. 확인=저장 5건·좌표 불변, 값이 재계산과 상대오차 5% 이내. 부가 GT=0
   <= RSD < 100 (범위를 벗어나면 산식 오류로 즉시 오답).
+
+  [피크 세기의 정의가 없었다 — 2026-08-06]
+  채점기는 sp.band_max(x, y, 996, 1006), 즉 **원시 최대값**으로 고정인데 프롬프트는
+  "1001 cm-1 피크 세기" 라고만 했다. 베이스라인을 뺀 피크 높이도 똑같이 자연스러운
+  해석이고, 배경이 공통 성분이라 그쪽은 평균이 작아져 RSD 가 크게 달라진다 —
+  허용오차 5% 에서는 통과하기 어렵다(같은 함정을 T105 에서 실측으로 확인했다:
+  배경 차감 여부로 기울기가 2배 갈렸다). 채점기가 쓰는 정의를 문항이 말하게 한다.
 """
 from bench import Task, chk
 from bench.check import MM, MM_GRID, TOL_PEAK_CM1        # noqa: F401
@@ -25,7 +33,8 @@ TASK = Task(
     prompt=(
         "Measure a spectrum 5 times at the same position and report the sample relative "
         "standard deviation (std with ddof=1 divided by the mean, in percent) of the 1001 "
-        "cm-1 peak intensity. "
+        "cm-1 peak intensity, taken as the maximum raw intensity in 996-1006 cm-1 with no "
+        "baseline subtraction. "
     ),
     answer_keys=[
         ("rsd_pct", "number - the relative standard deviation in percent"),

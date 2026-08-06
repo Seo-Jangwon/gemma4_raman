@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from typing import Iterator
 
@@ -70,7 +71,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from backend.agents import run_store
+from backend.agents import reason_log, run_store
 from backend.agents.detail_log import new_turn
 from backend.agents.file_tools import FILE_DISPATCH, FILE_TOOLS
 from backend.agents.knowledge import search_kb
@@ -562,90 +563,121 @@ def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
       {"type": "error", "detail": str}
       {"type": "final", "text": str, "ctx": dict, "messages": list}
     """
-    if llm is None:
-        yield {"type": "error",
-               "detail": "Ollama LLM is not connected. "
-                         "(Check that langchain-ollama is installed and the Ollama server is running)"}
-        return
+    # 추론 로그(results/<run_id>/<문항>.log). 세션은 run_store 의 스레드로컬에서 읽으므로
+    # 이 함수의 시그니처는 바뀌지 않는다 — 벤치 경로(server.py 가 run_stream 을 직접
+    # 소비)는 호출 직전에 begin_session 을 부른다. 로깅이 꺼져 있으면 무동작 대역이다.
+    rlog = reason_log.open_turn("AILA", user_message)
+    try:
+        if llm is None:
+            rlog.failed("Ollama LLM is not connected.")
+            yield {"type": "error",
+                   "detail": "Ollama LLM is not connected. "
+                             "(Check that langchain-ollama is installed and the Ollama server is running)"}
+            return
 
-    ctx = {"dispatch": _get_dispatch(), "dose": 0.0, "tool_call_order": []}
-    messages: list[BaseMessage] = list(history) + [HumanMessage(content=user_message)]
+        ctx = {"dispatch": _get_dispatch(), "dose": 0.0, "tool_call_order": []}
+        messages: list[BaseMessage] = list(history) + [HumanMessage(content=user_message)]
 
-    for _ in range(_MAX_AGENT_STEPS):
-        try:
-            # 시스템 프롬프트는 세션 히스토리에 남기지 않고 매 호출마다 새로 붙인다 —
-            # history에 넣으면 턴마다 중복 누적된다.
-            # 세션 요약(내 세션 라벨 + 지금까지 저장한 산출물)도 매 호출마다 새로 만든다.
-            # 히스토리에 넣으면 안 되는 이유: 산출물이 늘어날 때마다 낡은 목록이 계속
-            # 쌓여 모델이 이미 지난 상태를 현재로 오인한다. 매번 '현재 상태'만 실어준다.
-            _sess = run_store.summary_for_prompt()
-            _sys_text = SYSTEM_PROMPT + (f"\n\n[This session]\n{_sess}\n" if _sess else "")
-            ai_msg: AIMessage = llm.invoke([SystemMessage(content=_sys_text)] + messages)
-        except Exception as e:
-            # 타임아웃은 "모델이 틀렸다"가 아니라 "응답이 아예 안 왔다"이므로 구분해서
-            # 알린다 — 로그만 보고 Ollama/네트워크 쪽을 봐야 한다는 걸 알 수 있게.
-            if "timeout" in type(e).__name__.lower() or "timeout" in str(e).lower():
-                yield {"type": "error",
-                       "detail": (f"No response from the LLM within {_LLM_TIMEOUT_S:.0f}s "
-                                  f"({type(e).__name__}). The Ollama server may have dropped the "
-                                  f"request or be overloaded - check that {OLLAMA_HOST} is healthy "
-                                  f"and retry.")}
+        for step in range(_MAX_AGENT_STEPS):
+            try:
+                # 시스템 프롬프트는 세션 히스토리에 남기지 않고 매 호출마다 새로 붙인다 —
+                # history에 넣으면 턴마다 중복 누적된다.
+                # 세션 요약(내 세션 라벨 + 지금까지 저장한 산출물)도 매 호출마다 새로 만든다.
+                # 히스토리에 넣으면 안 되는 이유: 산출물이 늘어날 때마다 낡은 목록이 계속
+                # 쌓여 모델이 이미 지난 상태를 현재로 오인한다. 매번 '현재 상태'만 실어준다.
+                _sess = run_store.summary_for_prompt()
+                _sys_text = SYSTEM_PROMPT + (f"\n\n[This session]\n{_sess}\n" if _sess else "")
+                # rlog.invoke 는 llm.invoke 를 그대로 부르고 프롬프트·생각·본문·토큰통계를
+                # 남긴다. 로깅이 꺼져 있으면 llm.invoke(messages) 와 완전히 동일하다.
+                ai_msg: AIMessage = rlog.invoke(
+                    [SystemMessage(content=_sys_text)] + messages,
+                    llm=llm, stage="ReAct propose", step=step + 1)
+            except Exception as e:
+                # 타임아웃은 "모델이 틀렸다"가 아니라 "응답이 아예 안 왔다"이므로 구분해서
+                # 알린다 — 로그만 보고 Ollama/네트워크 쪽을 봐야 한다는 걸 알 수 있게.
+                if "timeout" in type(e).__name__.lower() or "timeout" in str(e).lower():
+                    detail = (f"No response from the LLM within {_LLM_TIMEOUT_S:.0f}s "
+                              f"({type(e).__name__}). The Ollama server may have dropped the "
+                              f"request or be overloaded - check that {OLLAMA_HOST} is healthy "
+                              f"and retry.")
+                    rlog.failed(detail)
+                    yield {"type": "error", "detail": detail}
+                    return
+                rlog.failed(f"LLM call failed: {type(e).__name__}: {e}")
+                yield {"type": "error", "detail": f"LLM call failed: {type(e).__name__}: {e}"}
                 return
-            yield {"type": "error", "detail": f"LLM call failed: {type(e).__name__}: {e}"}
-            return
 
-        # 도구 호출이 없으면 = 모델이 할 말을 다 했다 = 이번 턴 종료.
-        if not ai_msg.tool_calls:
-            final_text = _msg_text(ai_msg).strip() or "Failed to generate a response."
-            messages.append(ai_msg)
-            yield {"type": "final", "text": final_text, "ctx": ctx, "messages": messages}
-            return
+            # 도구 호출이 없으면 = 모델이 할 말을 다 했다 = 이번 턴 종료.
+            if not ai_msg.tool_calls:
+                final_text = _msg_text(ai_msg).strip() or "Failed to generate a response."
+                messages.append(ai_msg)
+                rlog.reasoning(step + 1, "도구 호출 없음 → 최종 보고서 작성으로 턴 종료")
+                rlog.final(final_text, ctx)
+                yield {"type": "final", "text": final_text, "ctx": ctx, "messages": messages}
+                return
 
-        messages.append(ai_msg)   # tool_calls를 담은 assistant 메시지를 그대로 추가
+            messages.append(ai_msg)   # tool_calls를 담은 assistant 메시지를 그대로 추가
+            rlog.reasoning(step + 1,
+                           f"도구 {len(ai_msg.tool_calls)}개 실행 결정 → "
+                           + ", ".join(str(tc["name"]) for tc in ai_msg.tool_calls))
 
-        for tc in ai_msg.tool_calls:
-            # LangChain의 tool_call은 dict: {"name":..., "args":..., "id":...}
-            # (raw ollama의 tc.function.name / tc.function.arguments 와 형태가 다르다)
-            name = tc["name"]
-            args = dict(tc.get("args") or {})
-            tool_call_id = tc.get("id") or ""
-            ctx["tool_call_order"].append(name)
+            for tc in ai_msg.tool_calls:
+                # LangChain의 tool_call은 dict: {"name":..., "args":..., "id":...}
+                # (raw ollama의 tc.function.name / tc.function.arguments 와 형태가 다르다)
+                name = tc["name"]
+                args = dict(tc.get("args") or {})
+                tool_call_id = tc.get("id") or ""
+                ctx["tool_call_order"].append(name)
 
-            raw_result = _call_tool(ctx, name, args)
-            result = _slim(raw_result) if isinstance(raw_result, dict) else raw_result
+                rlog.acting(step + 1, name, args)
+                _t0 = time.time()
+                raw_result = _call_tool(ctx, name, args)
+                _ms = (time.time() - _t0) * 1000.0
+                result = _slim(raw_result) if isinstance(raw_result, dict) else raw_result
 
-            # 이미지 반환 도구(analyze_microscope_image)는 base64를 tool 메시지에
-            # 그대로 싣지 않고, 별도 user 메시지의 이미지 블록으로 전달한다 —
-            # gemma4가 실제로 "보고" 판단하게 하면서도 tool 메시지 자체는 가볍게 유지한다.
-            img_b64 = result.pop("image_base64", None) if isinstance(result, dict) else None
-            question = result.pop("question", None) if isinstance(result, dict) else None
+                # 이미지 반환 도구(analyze_microscope_image)는 base64를 tool 메시지에
+                # 그대로 싣지 않고, 별도 user 메시지의 이미지 블록으로 전달한다 —
+                # gemma4가 실제로 "보고" 판단하게 하면서도 tool 메시지 자체는 가볍게 유지한다.
+                img_b64 = result.pop("image_base64", None) if isinstance(result, dict) else None
+                question = result.pop("question", None) if isinstance(result, dict) else None
 
-            yield {"type": "tool", "name": name, "args": args, "result": result}
+                rlog.observation(step + 1, name, result, _ms)
+                if img_b64:
+                    rlog.rec("ReAct OBSERVATION",
+                             f"step {step + 1} · {name} · 이미지 1장을 모델에게 주입 "
+                             f"(base64 {len(img_b64)}자, 로그에는 싣지 않음)")
 
-            # ToolMessage는 반드시 자신을 유발한 tool_call의 id를 가져야 한다 —
-            # 없으면 다음 invoke에서 assistant.tool_calls와 짝이 안 맞아 거부된다.
-            messages.append(ToolMessage(
-                content=json.dumps(result, ensure_ascii=False, default=str),
-                tool_call_id=tool_call_id,
-            ))
+                yield {"type": "tool", "name": name, "args": args, "result": result}
 
-            if img_b64:
-                # ChatOllama는 image_url 콘텐츠 블록을 ollama API의 images 필드로
-                # 변환해 준다. data URI의 base64 부분만 잘라 보내므로 접두사가 필요하다.
-                messages.append(HumanMessage(
-                    content=[
-                        {"type": "text", "text": question or "Microscope camera image:"},
-                        {"type": "image_url",
-                         "image_url": f"data:image/png;base64,{img_b64}"},
-                    ],
-                    # 이 메시지는 사람이 친 게 아니라 시스템이 끼워 넣은 것이므로
-                    # 히스토리 트리밍의 "사용자 턴" 계산에서 빠져야 한다.
-                    additional_kwargs={_INJECTED_IMAGE: True},
+                # ToolMessage는 반드시 자신을 유발한 tool_call의 id를 가져야 한다 —
+                # 없으면 다음 invoke에서 assistant.tool_calls와 짝이 안 맞아 거부된다.
+                messages.append(ToolMessage(
+                    content=json.dumps(result, ensure_ascii=False, default=str),
+                    tool_call_id=tool_call_id,
                 ))
 
-    yield {"type": "final",
-          "text": f"Stopped after reaching the maximum number of steps ({_MAX_AGENT_STEPS}). Please check the progress and request again.",
-          "ctx": ctx, "messages": messages}
+                if img_b64:
+                    # ChatOllama는 image_url 콘텐츠 블록을 ollama API의 images 필드로
+                    # 변환해 준다. data URI의 base64 부분만 잘라 보내므로 접두사가 필요하다.
+                    messages.append(HumanMessage(
+                        content=[
+                            {"type": "text", "text": question or "Microscope camera image:"},
+                            {"type": "image_url",
+                             "image_url": f"data:image/png;base64,{img_b64}"},
+                        ],
+                        # 이 메시지는 사람이 친 게 아니라 시스템이 끼워 넣은 것이므로
+                        # 히스토리 트리밍의 "사용자 턴" 계산에서 빠져야 한다.
+                        additional_kwargs={_INJECTED_IMAGE: True},
+                    ))
+
+        _capped = (f"Stopped after reaching the maximum number of steps ({_MAX_AGENT_STEPS}). "
+                   f"Please check the progress and request again.")
+        rlog.final(_capped, ctx)
+        yield {"type": "final", "text": _capped, "ctx": ctx, "messages": messages}
+    finally:
+        # 벤치 러너가 중단하면 server.py 가 gen.close() 를 부른다(GeneratorExit).
+        # 그때도 로그 꼬리가 닫히도록 finally 에 둔다.
+        rlog.close()
 
 
 # ══════════════════════════════════════════════════════════════════════════════

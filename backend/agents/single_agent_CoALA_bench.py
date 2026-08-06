@@ -78,7 +78,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from backend.agents import run_store
+from backend.agents import reason_log, run_store
 from backend.agents.detail_log import new_turn
 from backend.agents.file_tools import FILE_DISPATCH, FILE_RETRIEVAL, FILE_TOOLS
 from backend.agents.knowledge import search_kb
@@ -1234,7 +1234,9 @@ def _execute_one(ctx: dict, name: str, args: dict, tool_call_id: str) -> dict:
     반환: {name, args, result, action, img_b64, question, tool_call_id}
     """
     ctx["tool_call_order"].append(name)
+    _t0 = time.time()
     raw = _call_tool(ctx, name, args)
+    _elapsed_ms = (time.time() - _t0) * 1000.0
     result = _slim(raw) if isinstance(raw, dict) else raw
 
     # 이미지 반환 도구는 base64를 tool 메시지에 싣지 않고 별도 user 이미지 블록으로 전달.
@@ -1249,7 +1251,8 @@ def _execute_one(ctx: dict, name: str, args: dict, tool_call_id: str) -> dict:
         action = "grounding"
 
     return {"name": name, "args": args, "result": result, "action": action,
-            "img_b64": img_b64, "question": question, "tool_call_id": tool_call_id}
+            "img_b64": img_b64, "question": question, "tool_call_id": tool_call_id,
+            "elapsed_ms": _elapsed_ms}
 
 
 def _plan_progress_note(round_no: int, retrieval_count: int, repeated: bool) -> str:
@@ -1275,7 +1278,8 @@ def _plan_progress_note(round_no: int, retrieval_count: int, repeated: bool) -> 
     return note
 
 
-def _propose(llm_tools, wm: WorkingMemory, plan_note: str = "") -> AIMessage:
+def _propose(llm_tools, wm: WorkingMemory, plan_note: str = "",
+             rlog=None, stage: str = "CoALA propose", step: int = 0) -> AIMessage:
     """Propose — 작업기억(+계획 진행 문구)을 주입해 다음 행동 후보(tool_calls)를 생성한다.
 
     반환된 AIMessage.tool_calls가 후보 목록이다(0개면 finish = 최종 답변).
@@ -1290,11 +1294,15 @@ def _propose(llm_tools, wm: WorkingMemory, plan_note: str = "") -> AIMessage:
         content += f"\n\n[This session]\n{_sess}\n"
     if plan_note:
         content += "\n\n" + plan_note
-    return llm_tools.invoke([SystemMessage(content=content)] + wm.messages)
+    # rlog.invoke 는 llm_tools.invoke 를 그대로 부르고 프롬프트·생각·본문·토큰통계를
+    # 남긴다. 로거가 없거나 로깅이 꺼져 있으면 llm_tools.invoke(...) 와 완전히 같다.
+    rlog = rlog or reason_log.NULL
+    return rlog.invoke([SystemMessage(content=content)] + wm.messages,
+                       llm=llm_tools, stage=stage, step=step)
 
 
 def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
-                         dose: float) -> tuple[dict, dict]:
+                         dose: float, rlog=None) -> tuple[dict, dict]:
     """Evaluate + Select — '실행(commit) 후보'가 여럿이면 점수화 후 argmax, 하나면 그대로.
 
     여기 들어오는 candidates는 grounding/learning(실행 대상)뿐이다 — retrieval은
@@ -1306,7 +1314,10 @@ def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
     plain LLM으로 유용성·안전(dose/광손상)·근거성을 0~1 점수화한다. 파싱 실패 시 첫
     후보로 폴백해 사이클이 멈추지 않게 한다.
     """
+    rlog = rlog or reason_log.NULL
     if len(candidates) == 1:
+        rlog.phase("evaluate", "후보 1개 — 평가 생략(논문 4.6: 단순 상황)",
+                   _candidate_label(candidates[0]))
         return candidates[0], {"scores": [1.0], "reason": "single execution candidate - evaluation skipped"}
 
     listing = "\n".join(
@@ -1325,8 +1336,11 @@ def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
     )
     scores = None
     reason = ""
+    rlog.phase("evaluate", f"{len(candidates)}개 후보를 점수화 (누적 dose {dose:.1f} mJ 반영)",
+               listing)
     try:
-        resp = llm_plain.invoke([HumanMessage(content=prompt)])
+        resp = rlog.invoke([HumanMessage(content=prompt)], llm=llm_plain,
+                           stage="CoALA evaluate (도구 없는 평가자 호출)")
         text = _msg_text(resp)
         m = re.search(r"\{.*\}", text, re.DOTALL)
         if m:
@@ -1339,9 +1353,12 @@ def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
 
     if not scores or len(scores) != len(candidates):
         # 평가 실패 → 첫 후보로 폴백(사이클 진행 보장).
+        rlog.phase("evaluate", "점수 JSON 파싱 실패 → 첫 후보로 폴백")
         return candidates[0], {"scores": [], "reason": "evaluation parse failed - first candidate chosen"}
 
     best_idx = max(range(len(candidates)), key=lambda i: scores[i])
+    rlog.phase("evaluate", "점수 " + ", ".join(
+        f"{_candidate_label(c)}={s:.2f}" for c, s in zip(candidates, scores)), reason)
     return candidates[best_idx], {"scores": scores, "reason": reason}
 
 
@@ -1350,7 +1367,8 @@ def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory,
-                    propose_state: list, outcome: dict) -> Iterator[dict]:
+                    propose_state: list, outcome: dict,
+                    rlog=None, cycle: int = 0) -> Iterator[dict]:
     """한 사이클의 planning 단계(논문 §4.6 / Figure 4B).
 
     reasoning(모델의 내재 CoT)·retrieval을 써서 근거를 쌓다가, 실행(grounding/learning)
@@ -1367,9 +1385,11 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory,
     """
     # 이번 사이클에서 실행한 retrieval의 시그니처(name+args) 이력 — 반복 조회 감지용.
     prior_sigs: list = []
+    rlog = rlog or reason_log.NULL
 
     for step in range(_MAX_PLANNING_STEPS):
         if propose_state[0] <= 0:
+            rlog.phase("plan", f"cycle {cycle} · propose 예산 소진 → stuck")
             outcome["kind"] = "stuck"
             return
 
@@ -1378,8 +1398,12 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory,
         repeated = bool(prior_sigs) and prior_sigs[-1] in prior_sigs[:-1]
         plan_note = _plan_progress_note(step + 1, len(prior_sigs), repeated)
 
+        rlog.phase("plan", f"cycle {cycle} · 계획 라운드 {step + 1}/{_MAX_PLANNING_STEPS}"
+                           + (" · 같은 조회 반복 감지" if repeated else ""), plan_note)
         try:
-            ai_msg = _propose(llm_tools, wm, plan_note)
+            ai_msg = _propose(llm_tools, wm, plan_note, rlog=rlog,
+                              stage=f"CoALA propose (cycle {cycle}, plan {step + 1})",
+                              step=_MAX_AGENT_STEPS - propose_state[0] + 1)
         except Exception as e:
             outcome["kind"] = "error"
             outcome["detail"] = f"LLM call failed (propose): {type(e).__name__}: {e}"
@@ -1390,6 +1414,7 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory,
 
         # 후보 없음 = finish. 모델이 최종 보고서를 낸 것 → 이번 턴 종료.
         if not candidates:
+            rlog.phase("plan", f"cycle {cycle} · 도구 후보 없음 → 최종 보고서로 턴 종료")
             wm.messages.append(ai_msg)
             text = _msg_text(ai_msg).strip()
             if not text:
@@ -1420,6 +1445,15 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory,
                 f"{c.get('name')}:{json.dumps(c.get('args') or {}, sort_keys=True, ensure_ascii=False)}"
                 for c in planning_actions)))
 
+            rlog.phase("retrieval",
+                       f"cycle {cycle} · 정보수집 {len(planning_actions)}건 실행 (사이클을 닫지 않음)",
+                       " / ".join(_candidate_label(c) for c in planning_actions))
+            if commit_actions:
+                rlog.phase("retrieval",
+                           f"cycle {cycle} · 같은 응답에 섞여 나온 실행 후보 "
+                           f"{len(commit_actions)}건은 버림 (다음 propose 에서 재제안시킴)",
+                           " / ".join(_candidate_label(c) for c in commit_actions))
+
             yield {"type": "phase", "phase": "plan",
                    "message": "Information gathering (retrieval): "
                               + " / ".join(_candidate_label(c) for c in planning_actions),
@@ -1427,6 +1461,7 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory,
 
             for tc in planning_actions:
                 ex = _execute_one(ctx, tc["name"], dict(tc.get("args") or {}), tc.get("id") or "")
+                rlog.observed(ex["name"], ex["result"], ex.get("elapsed_ms", 0.0), ex["action"])
                 yield {"type": "tool", "name": ex["name"], "args": ex["args"],
                        "result": ex["result"], "action": ex["action"]}
                 wm.messages.append(ToolMessage(
@@ -1447,12 +1482,16 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory,
             continue  # 같은 사이클 안에서 다시 propose (planning 반복)
 
         # ── retrieval이 없고 commit 후보만 있으면: planning 종료 ────────────────
+        rlog.phase("plan", f"cycle {cycle} · 정보수집 종료 · 실행 후보 {len(commit_actions)}건 확보 "
+                           f"→ evaluate/select 로", " / ".join(_candidate_label(c) for c in commit_actions))
         outcome["kind"] = "commit"
         outcome["commit"] = commit_actions
         outcome["commit_text"] = _msg_text(ai_msg)
         return
 
     # planning 예산 소진 — 실행/종료 결정을 못 내림.
+    rlog.phase("plan", f"cycle {cycle} · 계획 라운드 {_MAX_PLANNING_STEPS}회를 다 쓰고도 "
+                       f"실행/종료를 못 정함 → stuck")
     outcome["kind"] = "stuck"
 
 
@@ -1478,99 +1517,127 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
       {"type": "error", "detail": str}
       {"type": "final", "text": str, "ctx": dict, "messages": list}
     """
-    if llm_tools is None or llm_plain is None:
-        yield {"type": "error",
-               "detail": "Ollama LLM is not connected. "
-                         "(Check that langchain-ollama is installed and the Ollama server is running)"}
-        return
-
-    ctx = {"dispatch": _get_dispatch(), "dose": 0.0, "session_id": session_id,
-           "tool_call_order": [], "learned": False, "goal": user_message.strip()}
-    wm = WorkingMemory(messages=list(history) + [HumanMessage(content=user_message)])
-    wm.goal = user_message.strip()
-
-    propose_state = [_MAX_AGENT_STEPS]   # 턴 전체 propose 호출 총량 가드(가변 공유)
-
-    for _cycle in range(_MAX_CYCLES):
-        # ── 1) PLANNING STAGE ────────────────────────────────────────────────
-        outcome: dict = {}
-        yield from _planning_stage(llm_tools, ctx, wm, propose_state, outcome)
-
-        kind = outcome.get("kind")
-
-        if kind == "error":
-            yield {"type": "error", "detail": outcome.get("detail", "planning failed")}
-            return
-
-        if kind == "finish":
-            yield {"type": "final", "text": outcome["final_text"],
-                   "ctx": ctx, "messages": wm.messages}
-            return
-
-        if kind != "commit":
-            # stuck — 계획만 반복하고 실행/종료를 못 정함. 안전하게 턴을 닫는다.
-            yield {"type": "final",
-                   "text": "Reached the planning-stage budget, ending this turn. "
-                           "Please check the progress and request again.",
-                   "ctx": ctx, "messages": wm.messages}
-            return
-
-        commit_candidates = outcome["commit"]
-
-        # ── 2) EVALUATE + SELECT (grounding/learning 후보에 한해서) ────────────
-        commit_labels = [_candidate_label(c) for c in commit_candidates]
-        if len(commit_candidates) > 1:
-            yield {"type": "phase", "phase": "evaluate",
-                   "message": f"Evaluating {len(commit_candidates)} execution candidates…",
-                   "candidates": commit_labels}
-        try:
-            chosen, meta = _evaluate_and_select(llm_plain, wm, commit_candidates, ctx["dose"])
-        except Exception as e:
+    # 추론 로그(results/<run_id>/<문항>.log). AILA 와 달리 여기는 session_id 를 인자로
+    # 받으므로 그대로 넘긴다. 로깅이 꺼져 있으면 무동작 대역이라 경로가 전혀 안 바뀐다.
+    rlog = reason_log.open_turn("CoALA", user_message, session_id=session_id)
+    try:
+        if llm_tools is None or llm_plain is None:
+            rlog.failed("Ollama LLM is not connected.")
             yield {"type": "error",
-                   "detail": f"LLM call failed (evaluate): {type(e).__name__}: {e}"}
+                   "detail": "Ollama LLM is not connected. "
+                             "(Check that langchain-ollama is installed and the Ollama server is running)"}
             return
 
-        # select 이벤트에 propose→evaluate→select의 전 과정을 실어 벤치마크 로그
-        # ("planning evaluation process")가 후보/점수/이유/선택을 다 담게 한다.
-        yield {"type": "phase", "phase": "select",
-               "message": f"Selected → {_candidate_label(chosen)}"
-                          + (f"  ({meta['reason']})" if meta.get("reason") else ""),
-               "candidates": commit_labels,
-               "scores": meta.get("scores") or None,
-               "reason": meta.get("reason") or None,
-               "chosen": _candidate_label(chosen)}
+        ctx = {"dispatch": _get_dispatch(), "dose": 0.0, "session_id": session_id,
+               "tool_call_order": [], "learned": False, "goal": user_message.strip()}
+        wm = WorkingMemory(messages=list(history) + [HumanMessage(content=user_message)])
+        wm.goal = user_message.strip()
 
-        # ── 3) EXECUTE + OBSERVE ─────────────────────────────────────────────
-        # 선택된 실행 후보 '하나만' 담은 AIMessage를 히스토리에 남긴다(나머지는 버림).
-        selected_ai = AIMessage(content=outcome.get("commit_text", ""), tool_calls=[chosen])
-        wm.messages.append(selected_ai)
+        propose_state = [_MAX_AGENT_STEPS]   # 턴 전체 propose 호출 총량 가드(가변 공유)
 
-        ex = _execute_one(ctx, chosen["name"], dict(chosen.get("args") or {}),
-                          chosen.get("id") or "")
-        yield {"type": "tool", "name": ex["name"], "args": ex["args"],
-               "result": ex["result"], "action": ex["action"]}
+        for _cycle in range(_MAX_CYCLES):
+            cycle = _cycle + 1
+            rlog.phase("cycle", f"────── 사이클 {cycle} 시작 "
+                                f"(propose 예산 {propose_state[0]}/{_MAX_AGENT_STEPS}, "
+                                f"누적 dose {ctx['dose']:.1f} mJ) ──────")
+            # ── 1) PLANNING STAGE ────────────────────────────────────────────────
+            outcome: dict = {}
+            yield from _planning_stage(llm_tools, ctx, wm, propose_state, outcome,
+                                       rlog=rlog, cycle=cycle)
 
-        wm.messages.append(ToolMessage(
-            content=json.dumps(ex["result"], ensure_ascii=False, default=str),
-            tool_call_id=ex["tool_call_id"],
-        ))
-        _update_working_memory(wm, ex["name"], ex["args"], ex["result"], ex["action"])
+            kind = outcome.get("kind")
 
-        if ex["img_b64"]:
-            wm.messages.append(HumanMessage(
-                content=[
-                    {"type": "text", "text": ex["question"] or "Microscope camera image:"},
-                    {"type": "image_url",
-                     "image_url": f"data:image/png;base64,{ex['img_b64']}"},
-                ],
-                additional_kwargs={_INJECTED_IMAGE: True},
+            if kind == "error":
+                rlog.failed(outcome.get("detail", "planning failed"))
+                yield {"type": "error", "detail": outcome.get("detail", "planning failed")}
+                return
+
+            if kind == "finish":
+                rlog.final(outcome["final_text"], ctx)
+                yield {"type": "final", "text": outcome["final_text"],
+                       "ctx": ctx, "messages": wm.messages}
+                return
+
+            if kind != "commit":
+                # stuck — 계획만 반복하고 실행/종료를 못 정함. 안전하게 턴을 닫는다.
+                _stuck = ("Reached the planning-stage budget, ending this turn. "
+                          "Please check the progress and request again.")
+                rlog.final(_stuck, ctx)
+                yield {"type": "final", "text": _stuck,
+                       "ctx": ctx, "messages": wm.messages}
+                return
+
+            commit_candidates = outcome["commit"]
+
+            # ── 2) EVALUATE + SELECT (grounding/learning 후보에 한해서) ────────────
+            commit_labels = [_candidate_label(c) for c in commit_candidates]
+            if len(commit_candidates) > 1:
+                yield {"type": "phase", "phase": "evaluate",
+                       "message": f"Evaluating {len(commit_candidates)} execution candidates…",
+                       "candidates": commit_labels}
+            try:
+                chosen, meta = _evaluate_and_select(llm_plain, wm, commit_candidates,
+                                                    ctx["dose"], rlog=rlog)
+            except Exception as e:
+                rlog.failed(f"LLM call failed (evaluate): {type(e).__name__}: {e}")
+                yield {"type": "error",
+                       "detail": f"LLM call failed (evaluate): {type(e).__name__}: {e}"}
+                return
+
+            rlog.phase("select", f"cycle {cycle} · 선택 → {_candidate_label(chosen)}",
+                       (meta.get("reason") or "") +
+                       (f"\n(후보 {len(commit_labels)}개: " + " / ".join(commit_labels) + ")"
+                        if len(commit_labels) > 1 else ""))
+
+            # select 이벤트에 propose→evaluate→select의 전 과정을 실어 벤치마크 로그
+            # ("planning evaluation process")가 후보/점수/이유/선택을 다 담게 한다.
+            yield {"type": "phase", "phase": "select",
+                   "message": f"Selected → {_candidate_label(chosen)}"
+                              + (f"  ({meta['reason']})" if meta.get("reason") else ""),
+                   "candidates": commit_labels,
+                   "scores": meta.get("scores") or None,
+                   "reason": meta.get("reason") or None,
+                   "chosen": _candidate_label(chosen)}
+
+            # ── 3) EXECUTE + OBSERVE ─────────────────────────────────────────────
+            # 선택된 실행 후보 '하나만' 담은 AIMessage를 히스토리에 남긴다(나머지는 버림).
+            selected_ai = AIMessage(content=outcome.get("commit_text", ""), tool_calls=[chosen])
+            wm.messages.append(selected_ai)
+
+            rlog.executing(chosen["name"], dict(chosen.get("args") or {}))
+            ex = _execute_one(ctx, chosen["name"], dict(chosen.get("args") or {}),
+                              chosen.get("id") or "")
+            rlog.observed(ex["name"], ex["result"], ex.get("elapsed_ms", 0.0), ex["action"])
+            yield {"type": "tool", "name": ex["name"], "args": ex["args"],
+                   "result": ex["result"], "action": ex["action"]}
+
+            wm.messages.append(ToolMessage(
+                content=json.dumps(ex["result"], ensure_ascii=False, default=str),
+                tool_call_id=ex["tool_call_id"],
             ))
-        # 다음 사이클로 (관측을 반영해 다시 planning)
+            _update_working_memory(wm, ex["name"], ex["args"], ex["result"], ex["action"])
 
-    yield {"type": "final",
-           "text": f"Stopped after reaching the maximum number of cycles ({_MAX_CYCLES}). "
-                   "Please check the progress and request again.",
-           "ctx": ctx, "messages": wm.messages}
+            if ex["img_b64"]:
+                rlog.phase("observe", f"cycle {cycle} · 이미지 1장을 모델에게 주입 "
+                                      f"(base64 {len(ex['img_b64'])}자, 로그에는 싣지 않음)")
+                wm.messages.append(HumanMessage(
+                    content=[
+                        {"type": "text", "text": ex["question"] or "Microscope camera image:"},
+                        {"type": "image_url",
+                         "image_url": f"data:image/png;base64,{ex['img_b64']}"},
+                    ],
+                    additional_kwargs={_INJECTED_IMAGE: True},
+                ))
+            # 다음 사이클로 (관측을 반영해 다시 planning)
+
+        _capped = (f"Stopped after reaching the maximum number of cycles ({_MAX_CYCLES}). "
+                   "Please check the progress and request again.")
+        rlog.final(_capped, ctx)
+        yield {"type": "final", "text": _capped, "ctx": ctx, "messages": wm.messages}
+    finally:
+        # 벤치 러너가 중단하면 server.py 가 gen.close() 를 부른다(GeneratorExit).
+        # 그때도 로그 꼬리가 닫히도록 finally 에 둔다.
+        rlog.close()
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -204,6 +204,42 @@ class Run:
         from bench import spectra
         return spectra.load_saved(self.artifacts, DATA)
 
+    def acquisitions(self) -> list[dict]:
+        """측정 하나하나를 **그때의 실효 설정과 함께** — 호출 순서대로.
+
+        [왜 저장 순서로 짝지으면 안 되는가 — 2026-08-06]
+        예전에는 문항들이 run.spectra() 의 저장 순서가 곧 측정 순서라고 가정하고
+        `snrs[:3]` 을 20/40/60 % 에, `snrs[1]-snrs[0]` 을 2.0 s/0.5 s 에 매핑했다.
+        run.spectra() 는 **모든 CSV 산출물**을 저장 순으로 주므로, 중간 산출물(배경보정본·
+        합본)을 하나만 저장해도 매핑이 통째로 어긋난다. 순서는 프롬프트가 요구한 바도
+        아니라, 2.0 s 를 먼저 잰 정답 실행이 부호가 뒤집혀 떨어졌다.
+
+        [설정은 인자가 아니라 되읽기로 본다]
+        acquire_spectrum 은 결과에 그 측정에 **실제로 걸린** exposure_time /
+        laser_power_pct 를 싣는다. 인자로 넘겼든 set_ccd_exposure·set_laser_power 로
+        미리 걸어 뒀든 같은 값이 나오므로, 되읽기를 보면 도구 선택을 벌하지 않는다
+        (문항들의 정답 기준이 원래 "readback" 이라고 적고 있던 그대로다).
+        그리고 그 결과에는 저장된 CSV 경로도 함께 실려 있어 (설정 ↔ 스펙트럼) 짝이
+        추측 없이 정해진다.
+        """
+        from bench import spectra
+        out = []
+        for c in self.calls:
+            if c.get("name") != "acquire_spectrum":
+                continue
+            r = c.get("result")
+            if not isinstance(r, dict) or r.get("ok") is False:
+                continue
+            csv = ((r.get("saved") or {}).get("files") or {}).get("csv")
+            xy = spectra.read_xy(Path(csv)) if csv else None
+            out.append({"exposure": _f(r.get("exposure_time")),
+                        "power": _f(r.get("laser_power_pct")),
+                        "shutter": r.get("shutter"),
+                        "path": csv,
+                        "x": xy[0] if xy else None,
+                        "y": xy[1] if xy else None})
+        return out
+
     def as_dict(self) -> dict:
         return {"task": self.task_id, "agent": self.agent, "session_id": self.session_id,
                 "prompt": self.prompt, "elapsed_s": round(self.elapsed_s, 2),

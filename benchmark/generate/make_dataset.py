@@ -526,10 +526,15 @@ def build_troubleshooting():
     broad = synth.scale_counts(synth.pure("polystyrene", X, broaden=9.0), 1000.0) \
         + synth.noise(X, NOISE, 1060)
     w_spec("T106.csv", broad)
+    # 임계 40 은 GT(51.79)와 27% 떨어져 있다. 예전 임계 50 은 여유가 3.5% 뿐이라
+    # 허용 밴드(±5%)의 아래쪽이 임계 밑으로 내려갔고, 그러면 '근거 FWHM 은 통과인데
+    # 그 값의 귀결은 undecidable' 인 자기모순 답이 생긴다(T106 docstring 참고).
     f = synth.fwhm_spec(broad, X, 960.0, 1060.0)
-    label = "crystalline" if f < 15 else ("amorphous" if f > 50 else "undecidable")
-    gt("T106", ["T106.csv"], "EXACT(레이블) + NUM(FWHM 10%)",
-       label=label, fwhm_cm1=f, rule="FWHM<15 crystalline / >50 amorphous / 그 사이 undecidable")
+    label = "crystalline" if f < 15 else ("amorphous" if f > 40 else "undecidable")
+    gt("T106", ["T106.csv"], "EXACT(레이블) + NUM(FWHM 5%)",
+       label=label, fwhm_cm1=f, window=[960.0, 1060.0],
+       rule="FWHM<15 crystalline / >40 amorphous / 그 사이 undecidable",
+       fwhm_rule="960-1060 cm-1, 반높이=(피크세기-구간최소)/2, 교차점 선형보간")
 
     # T108 baseline 드리프트
     SLOPE = 18.0

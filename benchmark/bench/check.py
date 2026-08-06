@@ -165,9 +165,15 @@ class chk:
 
     @staticmethod
     def relation(name, lhs, op, rhs, weight=1.0) -> Check:
-        if lhs is None or rhs is None:
-            return _mk(name, False, f"nothing to compare ({lhs}, {rhs})", weight, "REL")
-        l, r = float(lhs), float(rhs)
+        """두 값의 대소 관계. 숫자로 못 읽히는 답은 예외가 아니라 오답으로 남긴다.
+
+        예전에는 float(lhs) 를 그냥 불렀다. 답변이 "-49.3 counts/frame" 처럼 단위를
+        달고 오면 ValueError 가 나고, evaluate 가 통째로 터지면 그 문항은 채점 자체가
+        안 되어 분모에서 빠진다 — 오답이 '없던 일'이 되는 가장 나쁜 고장이다.
+        """
+        l, r = _num(lhs), _num(rhs)
+        if l is None or r is None:
+            return _mk(name, False, f"nothing to compare ({lhs!r}, {rhs!r})", weight, "REL")
         ok = {"<": l < r, "<=": l <= r, ">": l > r, ">=": l >= r}[op]
         return _mk(name, ok, f"{l:.6g} {op} {r:.6g}", weight, "REL")
 
@@ -410,6 +416,31 @@ class chk:
                    weight, "KEYWORD")
 
     @staticmethod
+    def keywords_all(run, all_of, name="answer content", weight=1.0) -> Check:
+        """그 말을 **전부** 했는가. 하나라도 빠지면 실패.
+
+        any_of 하나로 여러 뜻을 묶으면 판정이 조용히 무의미해진다 — T092 는
+        ['support', 'not available', 'MCP'] 였는데 프롬프트가 "Query the MCP Gain range"
+        라 어떤 답변에도 'MCP' 가 들어갔고, 그래서 **"MCP Gain 범위는 0~1000 입니다"**
+        라고 지어낸 답이 통과했다. 뜻이 다른 조건은 판정을 나눠 세워야 한다.
+        """
+        t = (run.text or "").lower()
+        miss = [k for k in all_of if k.lower() not in t]
+        return _mk(name, not miss, f"missing {miss}" if miss else f"all present {list(all_of)}",
+                   weight, "KEYWORD")
+
+    @staticmethod
+    def no_keywords(run, none_of, name="must not say", weight=2.0) -> Check:
+        """하면 안 되는 말을 했는가. 하나라도 있으면 실패.
+
+        '무엇을 말했는가'만 보는 판정은 오답을 못 잡는다 — 미지원 사실을 옳게 말하면서
+        동시에 값을 지어내는 답이 있기 때문이다. 지어낼 때만 나오는 표현을 따로 막는다.
+        """
+        t = (run.text or "").lower()
+        hit = [k for k in none_of if k.lower() in t]
+        return _mk(name, not hit, f"said {hit}" if hit else "clean", weight, "KEYWORD")
+
+    @staticmethod
     def reported(run, key, want, tol=None, rel=TOL_REL, name=None, weight=1.0) -> Check:
         """에이전트가 그 값을 **보고했는가**.
 
@@ -484,12 +515,25 @@ class chk:
 
         mode='exact'   결정적 변환 — 구현이 유일하므로 오차를 허용할 이유가 없다
         mode='similar' 알고리즘 자유도가 있는 변환 — cos≥0.99 AND NRMSE≤0.02
+        mode='shape'   **세로 배율에 자유도가 있는** 변환 — 양쪽을 L2 로 맞춘 뒤 similar
+
+        [왜 'shape' 가 필요한가 — 2026-08-06]
+        T115 는 프롬프트가 "IPBSA order 5 **및 L2 정규화**"를 요구하는데 GT 배열은
+        정규화 전 값(0~995 counts)이었다. 시킨 대로 최종 산출물(최대 ~0.02)을 저장하면
+        코사인은 1.0 인데 NRMSE 가 GT 의 range 로 나뉘어 ≈0.98 이 되어 **확정 실패**했다.
+        정규화 여부는 문항이 자유도로 남긴 것이므로 배율을 맞추고 모양을 본다. 배율까지
+        정답이어야 하는 문항(차감·평균처럼 절대값이 뜻을 갖는 것)은 계속 similar 를 쓴다.
         """
         if got is None:
             return _mk(name, False, "no array", weight, "ARRAY")
         a, b = np.asarray(got, float), np.asarray(want, float)
         if a.shape != b.shape:
             return _mk(name, False, f"shape mismatch {a.shape} vs {b.shape}", weight, "ARRAY")
+        if mode == "shape":
+            na, nb = np.linalg.norm(a), np.linalg.norm(b)
+            if na <= 0 or nb <= 0:
+                return _mk(name, False, "array is all zero", weight, "ARRAY")
+            a, b, mode = a / na, b / nb, "similar"
         if mode == "exact":
             # atol 은 데이터 크기에 맞춰 잡는다. 배열은 CSV 를 거쳐 오는데 저장이 소수점
             # 여섯 자리라 0 근처 값의 왕복 오차가 최대 5e-7 이다. atol 을 1e-9 로 두면

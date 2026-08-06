@@ -2,13 +2,34 @@
 """T115 — 신호 판별 (2점)
 
 [문제]
-  Apply IPBSA baseline correction with order 5 and L2 normalization to the raw spectrum
-  T115.csv, then compare it with reference_library.csv on the reference axis and report the
-  most similar material.
+  Apply IPBSA baseline correction with order 5 to the raw spectrum T115.csv and save the
+  corrected spectrum. Then apply L2 normalization, compare it with reference_library.csv on
+  the reference axis using cosine similarity, and report the most similar material.
 
 [정답 기준]
   GT=물질명 1개. 규약=IPBSA(order=5) → 참조축 보간 → L2 → 코사인. 배경을 얹은 원시 스펙트럼이라 보정을 건너뛰면 유사도 순위가 뒤집히도록
-  입력을 설계할 것 (그래야 전처리 단계가 실제로 채점된다). 확인=물질명 완전 일치. 중간 산출인 보정 배열이 GT와 cos>=0.99면 가점.
+  입력을 설계할 것 (그래야 전처리 단계가 실제로 채점된다). 확인=물질명 완전 일치 + 저장한 보정 배열이 GT와 모양 일치(배율 무관).
+
+  ['가점'이라는 것이 이 프레임워크에 없다 — 2026-08-06]
+  예전 정답 기준은 배열 판정을 "가점"이라고 적었지만 check.py 가 밝히듯 이 벤치는
+  **이진 채점이고 weight 는 장식**이다 — 판정 하나만 떨어져도 그 문항은 fail 이다.
+  즉 배열 판정은 가점이 아니라 필수 관문이었는데, **프롬프트에는 저장하라는 말이
+  없었다.** 메모리에서 처리하고 calcite 를 정확히 맞힌 실행이 "no spectrum was saved"
+  로 죽었다. 채점할 것은 프롬프트가 요구해야 하므로 저장 지시를 문항에 넣는다.
+
+  [시킨 대로 저장하면 배열 판정이 죽었다 — 2026-08-06]
+  프롬프트는 "IPBSA 및 **L2 정규화**"를 요구하는데 GT 배열(gt/arrays/T115_corrected.csv)은
+  정규화 전 값(-14.2 ~ 994.8 counts)이다. 최종 산출물(최대 ~0.02)을 저장하면 코사인은
+  1.00000 인데 NRMSE 는 GT 의 range 로 나뉘어 0.0622(상한 0.02) → 확정 실패였다.
+  정규화 여부는 이 문항이 자유도로 남긴 것이므로 배율을 맞추고 모양을 보는
+  mode="shape" 로 판정한다. 실측으로 확인한 판정 표(shape):
+      보정본 저장 PASS(cos 1.00000) / 정규화본 저장 PASS(cos 1.00000)
+      보정 안 한 원시 FAIL(cos 0.25255) / 원시 정규화본 FAIL(cos 0.25255)
+  즉 저장 형태의 자유도만 흡수하고 **보정을 건너뛴 것**은 그대로 걸린다.
+
+  [유사도 정의가 프롬프트에 없었다 — 2026-08-06]
+  규약이 GT json 에만 있었다. 물질이 calcite 로 크게 갈려 순위가 뒤집힐 위험은 낮지만,
+  판정이 기대하는 계산을 문항이 말하지 않는 상태를 남겨 둘 이유가 없어 코사인을 명시한다.
 """
 from pathlib import Path
 
@@ -23,11 +44,12 @@ TASK = Task(
     axis="identification",
     mode="live",
     inputs=['T115.csv', 'reference_library.csv'],
-    criteria="EXACT(material) + ARRAY(corrected array, cos>=0.99) bonus",
+    criteria="EXACT(material) + ARRAY(corrected array, shape)",
     prompt=(
-        "Apply IPBSA baseline correction with order 5 and L2 normalization to the raw "
-        "spectrum T115.csv, then compare it with reference_library.csv on the reference axis "
-        "and report the most similar material. "
+        "Apply IPBSA baseline correction with order 5 to the raw spectrum T115.csv and save "
+        "the corrected spectrum. Then apply L2 normalization, compare it with "
+        "reference_library.csv on the reference axis using cosine similarity, and report the "
+        "most similar material. "
     ),
     answer_keys=[
         ("material",
@@ -47,7 +69,9 @@ def evaluate(b, run):
 
 # ── 배열 GT ──────────────────────────────────────────────────────────────────
 GT_ARRAY = "T115_corrected.csv"
-GT_MODE = "similar"      # exact = 결정적 변환(구현이 유일) / similar = 알고리즘 자유도 있음
+# shape = 세로 배율에 자유도가 있는 변환. 이 문항은 L2 정규화까지 요구하므로 저장물이
+# 보정본일 수도 정규화본일 수도 있다 — 배율을 맞추고 모양을 본다(check.array 주석 참고).
+GT_MODE = "shape"
 
 
 def _gt_array():
