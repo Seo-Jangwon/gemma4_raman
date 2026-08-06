@@ -48,7 +48,7 @@ TASK = Task(
     prompt=(
         "Remove the narrow spikes from T040.csv and save the corrected spectrum. Treat a "
         "point as a spike when it deviates from the 5-point moving median by more than 100x "
-        "the MAD, and replace it by linear interpolation from its neighbours. Report the "
+        "the MAD(Median Absolute Deviation), and replace it by linear interpolation from its neighbours. Report the "
         "positions of the spikes you removed. "
     ),
     answer_keys=[
