@@ -1,0 +1,150 @@
+{
+  "task": "T106",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "Classify the sample of T106.csv as amorphous, crystalline, or undecidable. Use this rule: if the strongest peak has FWHM below 15 cm-1 it is crystalline; above 40 cm-1 it is amorphous; in between it is undecidable. Measure the FWHM inside 960-1060 cm-1, taking the half height as (peak intensity - interval minimum)/2 and finding the crossings by linear interpolation. Report the FWHM you measured.",
+  "criteria": "EXACT(labels) + NUM(FWHM 5%)",
+  "checks": [
+    {
+      "name": "FWHM",
+      "passed": true,
+      "score": 1.0,
+      "detail": "51.7877 (expected 51.7877, rel.err=2.572e-10 ≤ 0.05)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "classification",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'amorphous' (expected 'amorphous')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T106.csv"
+  ],
+  "answer_text": "The analysis of the spectrum in `T106.csv` was performed focusing on the range $960\\text{--}1060 \\text{ cm}^{-1}$. The strongest peak was identified at $1003.0 \\text{ cm}^{-1}$ with an intensity of approximately $1004.27$. Using the provided formula, the half-height level was calculated as $(1004.27 - 321.18) / 2 + 321.18 = 662.73$. Linear interpolation between data points determined the crossing positions at $983.02 \\text{ cm}^{-1}$ and $1034.80 \\text{ cm}^{-1}$, resulting in a measured Full Width at Half Maximum (FWHM) of $51.79 \\text{ cm}^{-1}$.\n\nBased on the classification rule ($\\text{FWHM} > 40 \\text{ cm}^{-1}$ for amorphous), the sample is classified as amorphous.\n\n```json\n{\"fwhm_cm1\": 51.787707646125114, \"label\": \"amorphous\"}\n```",
+  "answer_json": {
+    "fwhm_cm1": 51.787707646125114,
+    "label": "amorphous"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T106.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load data from file\nx = files[0][\"table\"][\"raman_shift_cm-1\"]\ny = files[0][\"table\"][\"intensity\"]\n\n# Crop to range 960-1060 cm-1\nmask = (x >= 960) & (x <= 1060)\nx_crop = x[mask]\ny_crop = y[mask]\n\nif len(x_crop) == 0:\n    print(\"No data in the specified range.\")\nelse:\n    # Find the strongest peak\n    idx_max = np.argmax(y_crop)\n    peak_x = x_crop[idx_max]\n    peak_y = y_crop[idx_max]\n    \n    # Interval minimum for half height calculation\n    min_y = np.min(y_crop)\n    half_height_val = (peak_y - min_y) / 2 + min_y\n    \n    print(f\"Peak X: {peak_x}, Peak Y: {peak_y}\")\n    print(f\"Min Y in interval: {min_y}\")\n    print(f\"Half height level: {half_height_val}\")\n\n    # Find crossings using linear interpolation\n    # Left side of peak\n    left_side = y_crop[:idx_max+1]\n    left_x = x_crop[:idx_max+1]\n    # Find index where it first crosses half_height_val from the left (starting at idx_max and going back)\n    # Actually, looking for the point to the left of peak where y == half_height_val\n    # We look for indices i where y[i] <= half_height_val < y[i+1] or vice versa\n    \n    cross_left = None\n    for i in range(idx_max - 1, -1, -1):\n        if (left_x[i] <= left_x[i+1]) and ((y_crop[i] - half_height_val) * (y_crop[i+1] - half_height_val) <= 0):\n            # Linear interpolation: x = x0 + (x1-x0)*(y-y0)/(y1-y0)\n            cross_left = left_x[i] + (left_x[i+1] - left_x[i]) * (half_height_val - y_crop[i]) / (y_crop[i+1] - y_crop[i])\n            break\n\n    # Right side of peak\n    right_side = y_crop[idx_max:]\n    right_x = x_crop[idx_max:]\n    cross_right = None\n    for i in range(0, len(right_side) - 1):\n        if (right_x[i] <= right_x[i+1]) and ((y_crop[idx_max + i] - half_height_val) * (y_crop[idx_max + i + 1] - half_height_val) <= 0):\n            cross_right = right_x[i] + (right_x[i+1] - right_x[i]) * (half_height_val - y_crop[idx_max + i]) / (y_crop[idx_max + i + 1] - y_crop[idx_max + i])\n            break\n\n    if cross_left is not None and cross_right is not None:\n        fwhm = cross_right - cross_left\n        print(f\"Cross left: {cross_left}, Cross right: {cross_right}\")\n        print(f\"Measured FWHM: {fwhm}\")\n    else:\n        print(\"Could not find both crossings for FWHM.\")\n",
+        "file_ids": [
+          "2026-08-07/T106.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 60.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -38,
+    "temperature_status": "NOT_STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 60.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 60.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -39,
+    "temperature_status": "NOT_STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 60.0
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T106_e48a2a",
+  "elapsed_s": 61.22,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

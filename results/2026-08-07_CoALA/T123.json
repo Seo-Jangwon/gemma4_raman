@@ -1,0 +1,181 @@
+{
+  "task": "T123",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "T123.csv has one strong peak near 520 cm-1. Identify the material against reference_library.csv and report the peak position you used as the basis.",
+  "criteria": "EXACT(material) + NUM(peak ±3 cm-1)",
+  "checks": [
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'silicon' (expected 'silicon')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    },
+    {
+      "name": "basis peak position",
+      "passed": true,
+      "score": 1.0,
+      "detail": "521 (expected 520.7, |Δ|=0.3 ≤ 3.0)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T123.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "The analysis of `T123.csv` reveals a strong Raman peak at **$521.0 \\text{ cm}^{-1}$**. By comparing this result with the provided `reference_library.csv`, it was found that the material corresponding to a strong peak at this position is **silicon**, which also exhibits its characteristic primary peak at $521.0 \\text{ cm}^{-1}$.\n\n```json\n{\"material\": \"silicon\", \"peak_cm1\": 521.0}\n```",
+  "answer_json": {
+    "material": "silicon",
+    "peak_cm1": 521.0
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T123.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Process T123\nt123 = files[0] if files[0]['filename'] == 'T123.csv' else files[1] # Just in case of order\nx_t123 = t123['table']['raman_shift_cm-1']\ny_t123 = t123['table']['intensity']\n\n# Find peak near 520 cm-1\nmask = (x_t123 > 500) & (x_t123 < 540)\nx_region = x_t123[mask]\ny_region = y_t123[mask]\n\npeak_idx = np.argmax(y_region)\npeak_pos = x_region[peak_idx]\npeak_val = y_region[peak_idx]\nprint(f\"T123 peak position: {peak_pos} cm-1\")\n\n# Process Reference Library\nref = [f for f in files if f['filename'] == 'reference_library.csv'][0]\nmats = np.unique(ref['table']['material'])\nx_ref = ref['table']['raman_shift_cm-1']\ny_ref = ref['table']['intensity']\nmat_col = ref['table']['material']\n\nresults = []\nfor m in mats:\n    # Get spectrum for this material (assuming one spectrum per material or taking the first)\n    m_mask = (mat_col == m)\n    x_m = x_ref[m_mask]\n    y_m = y_ref[m_mask]\n    \n    # We need to handle that materials might have multiple spectra in the file (spectrum_id)\n    # Let's just find the max peak near 520 for each material overall if they are aggregated, \n    # or better, group by spectrum_id. But typically these libraries have one representative.\n    # Since we are looking for a match to 'silicon' specifically usually around 520:\n    m_mask_region = m_mask & (x_ref > 500) & (x_ref < 540)\n    if np.any(m_mask_region):\n        y_m_region = y_ref[m_mask_region]\n        x_m_region = x_ref[m_mask_region]\n        m_peak_idx = np.argmax(y_m_region)\n        m_peak_pos = x_m_region[m_peak_idx]\n        results.append((m, m_peak_pos))\n\nprint(\"Reference peaks near 520:\")\nfor m, p in results:\n    print(f\"{m}: {p} cm-1\")\n",
+        "file_ids": [
+          "2026-08-07/T123.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# T123 data\nt123 = [f for f in files if f['filename'] == 'T123.csv'][0]\nx_t123 = t123['table']['raman_shift_cm-1']\ny_t123 = t123['table']['intensity']\n\n# Find peak position for T123 in the 500-540 range\nmask = (x_t123 >= 500) & (x_t123 <= 540)\npeak_idx = np.argmax(y_t123[mask])\npeak_pos = x_t123[mask][peak_idx]\nprint(f\"T123 peak position: {peak_pos}\")\n\n# Reference data\nref = [f for f in files if f['filename'] == 'reference_library.csv'][0]\nx_ref = ref['table']['raman_shift_cm-1']\ny_ref = ref['table']['intensity']\nmats_col = ref['table']['material']\n\nunique_mats = np.unique(mats_col)\nmatches = []\n\nfor m in unique_mats:\n    # Extract spectrum for this material\n    m_mask = (mats_col == m)\n    x_m = x_ref[m_mask]\n    y_m = y_ref[m_mask]\n    \n    # Find the strongest peak overall or specifically near 520?\n    # The goal is to identify T123, which has a strong peak at ~520.\n    # Let's find the max peak in the 500-540 range for each material.\n    reg_mask = (x_m >= 500) & (x_m <= 540)\n    if np.any(reg_mask):\n        x_reg = x_m[reg_mask]\n        y_reg = y_m[reg_mask]\n        p_idx = np.argmax(y_reg)\n        p_pos = x_reg[p_idx]\n        p_val = y_reg[p_idx]\n        # If the intensity is significant compared to others, it's a candidate\n        matches.append((m, p_pos, p_val))\n\nprint(\"Candidate materials with peaks near 520:\")\nfor m, p, v in matches:\n    print(f\"Material: {m}, Peak: {p} cm-1, Intensity: {v}\")\n",
+        "file_ids": [
+          "2026-08-07/T123.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\nref = [f for f in files if f['filename'] == 'reference_library.csv'][0]\nmat_col = ref['table']['material']\nunique_mats = np.unique(mat_col)\nprint(\"Materials in library:\", unique_mats)\n\n# Let's check the range of raman shifts for each material to see where they are located\nfor m in unique_mats:\n    m_mask = (mat_col == m)\n    x_m = ref['table']['raman_shift_cm-1'][m_mask]\n    if len(x_m) > 0:\n        print(f\"{m}: range [{x_m.min()}, {x_m.max()}]\")\n\n# Now let's specifically look for a peak near 520 across all spectra in the library\n# regardless of material, and then identify which material that belongs to.\nx_ref = ref['table']['raman_shift_cm-1']\ny_ref = ref['table']['intensity']\nmats_ref = ref['table']['material']\n\n# Find points near 520\nnear_520_mask = (x_ref >= 510) & (x_ref <= 530)\npoints_near_520 = ref['table'] # Access the table via dict as per instructions\n# Actually, since I have x_ref and y_ref...\nindices = np.where(near_520_mask)[0]\nif len(indices) > 0:\n    # Find the absolute max intensity in this region across all spectra\n    max_idx = indices[np.argmax(y_ref[indices])]\n    print(f\"Highest peak near 520 is at {x_ref[max_idx]} cm-1, material: {mats_ref[max_idx]}\")\n\n# Let's double check T123 again\nt123 = [f for f in files if f['filename'] == 'T123.csv'][0]\nx_t123 = t123['table']['raman_shift_cm-1']\ny_t123 = t123['table']['intensity']\nt123_mask = (x_t123 >= 510) & (x_t123 <= 530)\nt123_peak_idx = np.argmax(y_t123[t123_mask])\nprint(f\"T123 peak position: {x_t123[t123_mask][t123_peak_idx]}\")\n",
+        "file_ids": [
+          "2026-08-07/T123.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T123_4869e7",
+  "elapsed_s": 98.4,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

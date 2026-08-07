@@ -1,0 +1,241 @@
+{
+  "task": "T028",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "fail",
+  "reason": "run_grid_scan.center_x: no call passed this argument (expected 37.9)",
+  "checks_passed": 3,
+  "checks_total": 5,
+  "question": "Measure a 3x3 grid at X=37.8, 37.9, 38.0 mm and Y=25.2, 25.3, 25.4 mm, saving each spectrum with its coordinates.",
+  "criteria": "PROC(args EXACT) + SET(coords 9 items, ±0.001)",
+  "checks": [
+    {
+      "name": "run_grid_scan.center_x",
+      "passed": false,
+      "score": 0.0,
+      "detail": "no call passed this argument (expected 37.9)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "run_grid_scan.center_y",
+      "passed": false,
+      "score": 0.0,
+      "detail": "no call passed this argument (expected 25.3)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "run_grid_scan.spacing_mm",
+      "passed": true,
+      "score": 1.0,
+      "detail": "[0.1] (expected 0.1)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "run_grid_scan.rows",
+      "passed": true,
+      "score": 1.0,
+      "detail": "[3] (expected 3)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "run_grid_scan.cols",
+      "passed": true,
+      "score": 1.0,
+      "detail": "[3] (expected 3)",
+      "weight": 1.0,
+      "kind": "PROC"
+    }
+  ],
+  "failures": [
+    {
+      "check": "run_grid_scan.center_x",
+      "kind": "PROC",
+      "reason": "no call passed this argument (expected 37.9)"
+    },
+    {
+      "check": "run_grid_scan.center_y",
+      "kind": "PROC",
+      "reason": "no call passed this argument (expected 25.3)"
+    }
+  ],
+  "blocked": [],
+  "input_files": [],
+  "answer_text": "The requested 3x3 Raman grid measurement has been completed at the coordinates X=37.8, 37.9, 38.0 mm and Y=25.2, 25.3, 25.4 mm.\n\n**Experiment Summary:**\n- **Grid Layout:** 3 rows x 3 columns (9 points total).\n- **Spacing:** 0.1 mm.\n- **Measurement Parameters:** Laser power = 20%, Exposure time = 2.0 s.\n- **Autofocus:** Performed at each point to ensure signal quality across the sample.\n- **Results:** All 9 spectra were successfully acquired and auto-saved with their corresponding coordinate tags in the filename.\n\n**Observations:**\nA significant variation in signal intensity was observed across the grid. While most points showed low intensities (baseline ~1100-1500), a very strong Raman signal (max intensity 26,142) was detected at X=37.8, Y=25.3 mm, indicating a high concentration of material or a specific feature at that location.\n\n```json\n{\"n_spectra\": 9, \"grid_size\": \"3x3\", \"status\": \"success\"}\n```",
+  "answer_json": {
+    "n_spectra": 9,
+    "grid_size": "3x3",
+    "status": "success"
+  },
+  "tool_calls": [
+    {
+      "name": "start_camera_stream",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "move_stage",
+      "args": {
+        "x": 37.9,
+        "y": 25.3
+      },
+      "ok": true
+    },
+    {
+      "name": "analyze_microscope_image",
+      "args": {
+        "question": "What sample is at this location? Please describe its appearance."
+      },
+      "ok": true
+    },
+    {
+      "name": "search_knowledge_base",
+      "args": {
+        "query": "carbon"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_autofocus",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 2,
+        "power": 1
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 2,
+        "power": 10
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Load the most recent spectrum (the 10% power one)\nspec = spectra[-1]\nx = spec['raman_shift']\ny = spec['intensity']\n\nplt.figure(figsize=(8, 5))\nplt.plot(x, y)\nplt.title(f\"Spectrum at {spec['title']}\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Intensity\")\nplt.grid(True)\nplt.show()\n\nprint(f\"Max intensity: {np.max(y)}\")\nprint(f\"Mean intensity: {np.mean(y)}\")\nprint(f\"Std deviation: {np.std(y)}\")\n",
+        "names": [
+          "133957_065_x37.9_y25.3"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "preview_grid_scan",
+      "args": {
+        "cols": 3,
+        "rows": 3,
+        "spacing_mm": 0.1
+      },
+      "ok": true
+    },
+    {
+      "name": "run_grid_scan",
+      "args": {
+        "autofocus": "each",
+        "cols": 3,
+        "exposure": 2,
+        "power": 20,
+        "rows": 3,
+        "spacing_mm": 0.1
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Load the strong signal spectrum\nspec = spectra[0] # I need to be careful with indices, let's filter by file name\ntarget_file = '134149_014_x37.8_y25.3'\ndata = [s for s in spectra if target_file in s['base']][0]\n\nx = data['raman_shift']\ny = data['intensity']\n\nplt.figure(figsize=(8, 5))\nplt.plot(x, y)\nplt.title(f\"Strong Signal at {data['title']}\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Intensity\")\nplt.grid(True)\nplt.show()\n\nprint(f\"Max intensity: {np.max(y)}\")\n",
+        "names": [
+          "134149_014_x37.8_y25.3"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T028_9640cd/133938_628_x37.9_y25.3.csv",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T028_9640cd/133957_065_x37.9_y25.3.csv",
+    "/api/results/2026-08-07/bench_2026-08-07_AILA_AILA_T028_9640cd/fig134009_698_0.png",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T028_9640cd/134057_013_x37.8_y25.2.csv",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T028_9640cd/134114_035_x37.9_y25.2.csv",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T028_9640cd/134131_935_x38.0_y25.2.csv",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T028_9640cd/134149_014_x37.8_y25.3.csv",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T028_9640cd/134206_927_x37.9_y25.3.csv",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T028_9640cd/134227_436_x38.0_y25.3.csv",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T028_9640cd/134245_378_x37.8_y25.4.csv",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T028_9640cd/134302_241_x37.9_y25.4.csv",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T028_9640cd/134321_905_x38.0_y25.4.csv",
+    "/api/results/2026-08-07/bench_2026-08-07_AILA_AILA_T028_9640cd/fig134347_094_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 5,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 38.0,
+    "y": 25.4,
+    "z": 0.0131,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 20.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-07_AILA_AILA_T028_9640cd",
+  "elapsed_s": 336.1,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

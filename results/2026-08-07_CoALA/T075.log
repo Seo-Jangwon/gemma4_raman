@@ -1,0 +1,597 @@
+══════════════════════════════════════════════════════════════════════════════
+ CoALA · T075 · gemma4:31b @ http://192.168.1.15:11434
+ session : bench_2026-08-07_CoALA_CoALA_T075_9463b4
+ started : 2026-08-07 20:33:09
+ thinking: ON — gemma4:31b capabilities=['completion', 'vision', 'tools', 'thinking'] → thinking 지원
+══════════════════════════════════════════════════════════════════════════════
+
+[20:33:09.221] [QUESTION]
+    Compare the two sessions in T075_a.csv and T075_b.csv and report in one summary: the 1001 cm-1 peak position difference, the RSD (ddof=1, %) of the peak intensity in each session, and the cosine similarity between the two mean spectra (common axis, L2). 
+    
+    ---
+    When you are done, end your reply with a JSON block holding the values you were asked to
+    report, like this:
+    
+    ```json
+    {"key": value, ...}
+    ```
+    
+    The JSON block must include these keys, spelled exactly like this, with the shape described for each:
+      "rsd_a_pct": number - RSD of group A in percent
+      "rsd_b_pct": number - RSD of group B in percent
+      "cosine_of_means": number - cosine similarity between the two mean spectra
+      "peak_position_diff": number - peak position difference in cm-1
+    
+    Give plain JSON numbers and strings - no units, no LaTeX, no thousands separators. If the
+    task asked you to refuse, explain, or ask a question instead of measuring, say so in plain
+    text and omit the block.
+[20:33:09.222] [CoALA CYCLE] ────── 사이클 1 시작 (propose 예산 150/150, 누적 dose 0.0 mJ) ──────
+[20:33:09.222] [CoALA PLAN] cycle 1 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[20:33:09.232] [Gemma <- PROMPT] step 1 · CoALA propose (cycle 1, plan 1) · 2 msgs
+    system(11539ch) · human(953ch)
+[20:33:21.092] [Gemma THINKING] step 1 · 1148ch
+    The user wants me to compare two datasets provided in `T075_a.csv` and `T075_b.csv`.
+    
+    Specifically, I need to calculate:
+    1.  The difference in peak position for a peak around 1001 cm$^{-1}$ between the two sessions.
+    2.  The Relative Standard Deviation (RSD) of the peak intensity at ~1001 cm$^{-1}$ for each session (using `ddof=1`, expressed as a percentage).
+    3.  The cosine similarity between the mean spectra of the two sessions (using a common axis and L2 norm).
+    
+    Plan:
+    1.  List uploaded files to get the file IDs for `T075_a.csv` and `T075_b.csv`.
+    2.  Inspect both files to understand their structure (identify Raman shift and intensity columns).
+    3.  Use `run_analysis` to:
+        *   Identify the 1001 cm$^{-1}$ peak for each spectrum in both files.
+        *   Compute the mean peak position for each session and find the difference.
+        *   Compute the RSD of the peak intensity for each session.
+        *   Calculate the mean spectrum for each session (ensuring a common axis).
+        *   Compute the cosine similarity between these two mean spectra.
+    4.  Report the findings and provide the JSON block.
+    
+    Let's start by listing and inspecting the files.
+[20:33:21.092] [Gemma TOOL_CALLS] step 1 · 1개
+    1) list_uploaded_files({})
+[20:33:21.092] [Gemma STATS] prompt 17112 tok · out 328 tok · wall 11.86s · eval 5.26s (62.4 tok/s) · load 0.24s · done=stop
+[20:33:21.092] [CoALA RETRIEVAL] cycle 1 · 정보수집 1건 실행 (사이클을 닫지 않음)
+    list_uploaded_files()
+[20:33:21.094] [CoALA OBSERVE] list_uploaded_files · ok · 1 ms · retrieval
+    {"ok": true, "count": 2, "files": [{"file_id": "2026-08-07/T075_a.csv", "filename": "T075_a.csv", "kind": "text", "bytes": 218146}, {"file_id": "2026-08-07/T075_b.csv", "filename": "T075_b.csv", "kind": "text", "bytes": 218118}]}
+[20:33:21.094] [CoALA PLAN] cycle 1 · 계획 라운드 2/6
+    [Planning progress] This is planning (information gathering) round 2 in this cycle (1 consecutive lookups, 4 planning rounds left).
+[20:33:21.095] [Gemma <- PROMPT] step 2 · CoALA propose (cycle 1, plan 2) · 4 msgs
+    system(11526ch) · human(953ch) · ai(0ch)[list_uploaded_files] · tool(229ch)
+[20:33:29.080] [Gemma THINKING] step 2 · 174ch
+    I need to compare two sessions stored in `T075_a.csv` and `T075_b.csv`.
+    First, I must inspect the files to understand their structure (columns for Raman shift and intensity).
+[20:33:29.081] [Gemma TOOL_CALLS] step 2 · 2개
+    1) inspect_file({"file_id": "2026-08-07/T075_a.csv"})
+    2) inspect_file({"file_id": "2026-08-07/T075_b.csv"})
+[20:33:29.081] [Gemma STATS] prompt 17263 tok · out 119 tok · wall 7.99s · eval 1.89s (62.9 tok/s) · load 0.24s · done=stop
+[20:33:29.081] [CoALA RETRIEVAL] cycle 1 · 정보수집 2건 실행 (사이클을 닫지 않음)
+    inspect_file(file_id=2026-08-07/T075_a.csv) / inspect_file(file_id=2026-08-07/T075_b.csv)
+[20:33:29.112] [CoALA OBSERVE] inspect_file · ok · 30 ms · retrieval
+    {"ok": true, "file_id": "2026-08-07/T075_a.csv", "filename": "T075_a.csv", "kind": "text", "bytes": 218146, "n_rows": 9005, "n_cols": 3, "columns": ["spectrum_id", "raman_shift_cm-1", "intensity"], "dtypes": {"spectrum_id": "text", "raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 9005}, "intensity": {"min": -19.591013, "max": 1034.71477, "mean": 21.061767, "n_valid": 9005}}, "head": [["S01", 200.0, 2.849031], ["S01", 201.0, -2.059114], ["S01", 202.0, -4.025657], ["S01", 203.0, -4.107672], ["S01", 204.0, 4.331874]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-07/T075_a.csv']."}
+[20:33:29.182] [CoALA OBSERVE] inspect_file · ok · 70 ms · retrieval
+    {"ok": true, "file_id": "2026-08-07/T075_b.csv", "filename": "T075_b.csv", "kind": "text", "bytes": 218118, "n_rows": 9005, "n_cols": 3, "columns": ["spectrum_id", "raman_shift_cm-1", "intensity"], "dtypes": {"spectrum_id": "text", "raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 9005}, "intensity": {"min": -20.779542, "max": 974.810487, "mean": 20.451776, "n_valid": 9005}}, "head": [["S01", 200.0, 8.829723], ["S01", 201.0, -1.399467], ["S01", 202.0, -2.842836], ["S01", 203.0, -7.876209], ["S01", 204.0, -1.094671]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-07/T075_b.csv']."}
+[20:33:29.182] [CoALA PLAN] cycle 1 · 계획 라운드 3/6
+    [Planning progress] This is planning (information gathering) round 3 in this cycle (2 consecutive lookups, 3 planning rounds left).
+[20:33:29.182] [Gemma <- PROMPT] step 3 · CoALA propose (cycle 1, plan 3) · 7 msgs
+    system(12212ch) · human(953ch) · ai(0ch)[list_uploaded_files] · tool(229ch) · ai(0ch)[inspect_file,inspect_file] · tool(947ch) · tool(948ch)
+[20:33:56.133] [Gemma THINKING] step 3 · 1975ch
+    The user wants to compare two Raman spectroscopy datasets (`T075_a.csv` and `T075_b.csv`).
+    
+    Analysis of `inspect_file` results:
+    - Both files have columns: `spectrum_id`, `raman_shift_cm-1`, and `intensity`.
+    - Raman shift range is 200 to 2000 cm-1.
+    - This is a standard spectral format where multiple spectra (identified by `spectrum_id`) are stacked in one file.
+    
+    Goals:
+    1.  **Peak position difference at ~1001 cm-1**: I need to find the exact peak position near 1001 cm-1 for each session (presumably by averaging the spectra first or finding the mean peak). The prompt says "the 1001 cm-1 peak position difference", implying I should look for the peak closest to 1001.
+    2.  **RSD of peak intensity**: Calculate Relative Standard Deviation (RSD, ddof=1) of the intensity at that peak for each session's individual spectra.
+    3.  **Cosine similarity between mean spectra**: Compute the L2 cosine similarity between the average spectrum of Session A and the average spectrum of Session B using a common axis.
+    
+    Plan:
+    - Use `run_analysis` with both file IDs.
+    - In Python:
+        - Separate data for session A and B.
+        - For each session:
+            - Pivot or group by `spectrum_id` to get spectra as arrays.
+            - Compute the mean spectrum.
+            - Find the peak position near 1001 cm-1 in the mean spectrum (or average of peak positions, but usually "the peak" refers to the feature in the ensemble/mean). I'll find the max intensity index around 1001 for each session.
+            - Extract the intensity at that specific peak position for every individual spectrum in the session.
+            - Calculate RSD = (std / mean) * 100 with ddof=1.
+        - For cosine similarity:
+            - Ensure both use the same x-axis (they seem to, from `inspect_file` range).
+            - Compute $\frac{A \cdot B}{\|A\| \|B\|}$ for the mean spectra.
+        - Print all required values.
+    
+    I should be careful about "the 1001 cm-1 peak". I'll look in a small window (e.g., 980-1020) to find the actual maximum.
+[20:33:56.133] [Gemma TOOL_CALLS] step 3 · 1개
+    1) run_analysis({"code": "import numpy as np\nfrom scipy import stats\n\ndef process_session(file_data):\n    # Extract columns\n    ids = file_data['spectrum_id']\n    shifts = file_data['raman_shift_cm-1']\n    intensities = file_data['intensity']\n    \n    unique_ids = np.unique(ids)\n    n_spectra = len(unique_ids)\n    \n    # Assume all spectra have the same shift axis\n    axis = shifts[ids == unique_ids[0]]\n    spectra_matrix = []\n    for uid in unique_ids:\n        spectra_matrix.append(intensities[ids == uid])\n    \n    spectra_matrix = np.array(spectra_matrix) # (n_spectra, n_points)\n    mean_spectrum = np.mean(spectra_matrix, axis=0)\n    \n    # Find peak near 1001 cm-1\n    mask = (axis >= 980) & (axis <= 1020)\n    peak_idx = np.argmax(mean_spectrum[mask])\n    actual_indices = np.wher
+    … <1077자 생략>)
+[20:33:56.134] [Gemma STATS] prompt 18433 tok · out 1258 tok · wall 26.95s · eval 20.23s (62.2 tok/s) · load 0.25s · done=stop
+[20:33:56.134] [CoALA PLAN] cycle 1 · 정보수집 종료 · 실행 후보 1건 확보 → evaluate/select 로
+    run_analysis(code=import numpy as np
+    from scipy import stats
+    
+    def process_session(file_data):
+        # Extract columns
+        ids = file_data['spectrum_id']
+        shifts = file_data['raman_shift_cm-1']
+        intensities = file_data['intensity']
+        
+        unique_ids = np.unique(ids)
+        n_spectra = len(unique_ids)
+        
+        # Assume all spectra have the same shift axis
+        axis = shifts[ids == unique_ids[0]]
+        spectra_matrix = []
+        for uid in unique_ids:
+            spectra_matrix.append(intensities[ids == uid])
+        
+        spectra_matrix = np.array(spectra_matrix) # (n_spectra, n_points)
+        mean_spectrum = np.mean(spectra_matrix, axis=0)
+        
+        # Find peak near 1001 cm-1
+        mask = (axis >= 980) & (axis <= 1020)
+        peak_idx = np.argmax(mean_spectrum[mask])
+        actual_indices = np.where(mask)[0]
+        best_idx = actual_indices[peak_idx]
+        peak_pos = axis[best_idx]
+        
+        # Peak intensities for each spectrum at this exact position
+        peak_intensities = spectra_matrix[:, best_idx]
+        mean_int = np.mean(peak_intensities)
+        std_int = np.std(peak_intensities, ddof=1)
+        rsd = (std_int / mean_int) * 100 if mean_int != 0 else 0
+        
+        return mean_spectrum, peak_pos, rsd
+    
+    # Load files
+    data_a = files[0]['table']
+    data_b = files[1]['table']
+    
+    mean_a, pos_a, rsd_a = process_session(data_a)
+    mean_b, pos_b, rsd_b = process_session(data_b)
+    
+    # Cosine similarity
+    dot_prod = np.dot(mean_a, mean_b)
+    norm_a = np.linalg.norm(mean_a)
+    norm_b = np.linalg.norm(mean_b)
+    cosine_sim = dot_prod / (norm_a * norm_b) if (norm_a * norm_b) != 0 else 0
+    
+    print(f"Session A: Peak Pos={pos_a:.3f}, RSD={rsd_a:.3f}%")
+    print(f"Session B: Peak Pos={pos_b:.3f}, RSD={rsd_b:.3f}%")
+    print(f"Peak Position Diff: {abs(pos_a - pos_b):.3f}")
+    print(f"Cosine Similarity: {cosine_sim:.6f}")
+    , file_ids=['2026-08-07/T075_a.csv', '2026-08-07/T075_b.csv'])
+[20:33:56.134] [CoALA EVALUATE] 후보 1개 — 평가 생략(논문 4.6: 단순 상황)
+    run_analysis(code=import numpy as np
+    from scipy import stats
+    
+    def process_session(file_data):
+        # Extract columns
+        ids = file_data['spectrum_id']
+        shifts = file_data['raman_shift_cm-1']
+        intensities = file_data['intensity']
+        
+        unique_ids = np.unique(ids)
+        n_spectra = len(unique_ids)
+        
+        # Assume all spectra have the same shift axis
+        axis = shifts[ids == unique_ids[0]]
+        spectra_matrix = []
+        for uid in unique_ids:
+            spectra_matrix.append(intensities[ids == uid])
+        
+        spectra_matrix = np.array(spectra_matrix) # (n_spectra, n_points)
+        mean_spectrum = np.mean(spectra_matrix, axis=0)
+        
+        # Find peak near 1001 cm-1
+        mask = (axis >= 980) & (axis <= 1020)
+        peak_idx = np.argmax(mean_spectrum[mask])
+        actual_indices = np.where(mask)[0]
+        best_idx = actual_indices[peak_idx]
+        peak_pos = axis[best_idx]
+        
+        # Peak intensities for each spectrum at this exact position
+        peak_intensities = spectra_matrix[:, best_idx]
+        mean_int = np.mean(peak_intensities)
+        std_int = np.std(peak_intensities, ddof=1)
+        rsd = (std_int / mean_int) * 100 if mean_int != 0 else 0
+        
+        return mean_spectrum, peak_pos, rsd
+    
+    # Load files
+    data_a = files[0]['table']
+    data_b = files[1]['table']
+    
+    mean_a, pos_a, rsd_a = process_session(data_a)
+    mean_b, pos_b, rsd_b = process_session(data_b)
+    
+    # Cosine similarity
+    dot_prod = np.dot(mean_a, mean_b)
+    norm_a = np.linalg.norm(mean_a)
+    norm_b = np.linalg.norm(mean_b)
+    cosine_sim = dot_prod / (norm_a * norm_b) if (norm_a * norm_b) != 0 else 0
+    
+    print(f"Session A: Peak Pos={pos_a:.3f}, RSD={rsd_a:.3f}%")
+    print(f"Session B: Peak Pos={pos_b:.3f}, RSD={rsd_b:.3f}%")
+    print(f"Peak Position Diff: {abs(pos_a - pos_b):.3f}")
+    print(f"Cosine Similarity: {cosine_sim:.6f}")
+    , file_ids=['2026-08-07/T075_a.csv', '2026-08-07/T075_b.csv'])
+[20:33:56.135] [CoALA SELECT] cycle 1 · 선택 → run_analysis(code=import numpy as np
+from scipy import stats
+
+def process_session(file_data):
+    # Extract columns
+    ids = file_data['spectrum_id']
+    shifts = file_data['raman_shift_cm-1']
+    intensities = file_data['intensity']
+    
+    unique_ids = np.unique(ids)
+    n_spectra = len(unique_ids)
+    
+    # Assume all spectra have the same shift axis
+    axis = shifts[ids == unique_ids[0]]
+    spectra_matrix = []
+    for uid in unique_ids:
+        spectra_matrix.append(intensities[ids == uid])
+    
+    spectra_matrix = np.array(spectra_matrix) # (n_spectra, n_points)
+    mean_spectrum = np.mean(spectra_matrix, axis=0)
+    
+    # Find peak near 1001 cm-1
+    mask = (axis >= 980) & (axis <= 1020)
+    peak_idx = np.argmax(mean_spectrum[mask])
+    actual_indices = np.where(mask)[0]
+    best_idx = actual_indices[peak_idx]
+    peak_pos = axis[best_idx]
+    
+    # Peak intensities for each spectrum at this exact position
+    peak_intensities = spectra_matrix[:, best_idx]
+    mean_int = np.mean(peak_intensities)
+    std_int = np.std(peak_intensities, ddof=1)
+    rsd = (std_int / mean_int) * 100 if mean_int != 0 else 0
+    
+    return mean_spectrum, peak_pos, rsd
+
+# Load files
+data_a = files[0]['table']
+data_b = files[1]['table']
+
+mean_a, pos_a, rsd_a = process_session(data_a)
+mean_b, pos_b, rsd_b = process_session(data_b)
+
+# Cosine similarity
+dot_prod = np.dot(mean_a, mean_b)
+norm_a = np.linalg.norm(mean_a)
+norm_b = np.linalg.norm(mean_b)
+cosine_sim = dot_prod / (norm_a * norm_b) if (norm_a * norm_b) != 0 else 0
+
+print(f"Session A: Peak Pos={pos_a:.3f}, RSD={rsd_a:.3f}%")
+print(f"Session B: Peak Pos={pos_b:.3f}, RSD={rsd_b:.3f}%")
+print(f"Peak Position Diff: {abs(pos_a - pos_b):.3f}")
+print(f"Cosine Similarity: {cosine_sim:.6f}")
+, file_ids=['2026-08-07/T075_a.csv', '2026-08-07/T075_b.csv'])
+    single execution candidate - evaluation skipped
+[20:33:56.135] [CoALA EXECUTE] run_analysis
+    {"code": "import numpy as np\nfrom scipy import stats\n\ndef process_session(file_data):\n    # Extract columns\n    ids = file_data['spectrum_id']\n    shifts = file_data['raman_shift_cm-1']\n    intensities = file_data['intensity']\n    \n    unique_ids = np.unique(ids)\n    n_spectra = len(unique_ids)\n    \n    # Assume all spectra have the same shift axis\n    axis = shifts[ids == unique_ids[0]]\n    spectra_matrix = []\n    for uid in unique_ids:\n        spectra_matrix.append(intensities[ids == uid])\n    \n    spectra_matrix = np.array(spectra_matrix) # (n_spectra, n_points)\n    mean_spectrum = np.mean(spectra_matrix, axis=0)\n    \n    # Find peak near 1001 cm-1\n    mask = (axis >= 980) & (axis <= 1020)\n    peak_idx = np.argmax(mean_spectrum[mask])\n    actual_indices = np.where(mask)[0]\n    best_idx = actual_indices[peak_idx]\n    peak_pos = axis[best_idx]\n    \n    # Peak intensities for each spectrum at this exact position\n    peak_intensities = spectra_matrix[:, best_idx]\n    mean_int = np.mean(peak_intensities)\n    std_int = np.std(peak_intensities, ddof=1)\n    rsd = (std_int / mean_int) * 100 if mean_int != 0 else 0\n    \n    return mean_spectrum, peak_pos,
+    … <677자 생략>
+[20:33:57.216] [CoALA OBSERVE] run_analysis · FAIL · 1080 ms · grounding
+    {"ok": false, "error": "ValueError: attempt to get argmax of an empty sequence", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 379, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 41, in <module>\n  File \"<analysis>\", line 24, in process_session\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\.venv\\Lib\\site-packages\\numpy\\_core\\fromnumeric.py\", line 1314, in argmax\n    return _wrapfunc(a, 'argmax', axis=axis, out=out, **kwds)\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\.venv\\Lib\\site-packages\\numpy\\_core\\fromnumeric.py\", line 54, in _wrapfunc\n    return bound(*args, **kwds)\nValueError: attempt to get argmax of an empty sequence\n"}
+[20:33:57.216] [CoALA CYCLE] ────── 사이클 2 시작 (propose 예산 147/150, 누적 dose 0.0 mJ) ──────
+[20:33:57.216] [CoALA PLAN] cycle 2 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[20:33:57.217] [Gemma <- PROMPT] step 4 · CoALA propose (cycle 2, plan 1) · 9 msgs
+    system(12320ch) · human(953ch) · ai(0ch)[list_uploaded_files] · tool(229ch) · ai(0ch)[inspect_file,inspect_file] · tool(947ch) · tool(948ch) · ai(0ch)[run_analysis] · tool(904ch)
+[20:34:28.069] [Gemma THINKING] step 4 · 1759ch
+    The previous `run_analysis` failed because it tried to find the peak using a mask `(axis >= 980) & (axis <= 1020)` on the Raman shift axis, but likely the Raman shift values in the file are not represented exactly as floating point numbers that fall in this range or there's something wrong with how I accessed the table.
+    
+    Wait, looking at `inspect_file` for both files:
+    `raman_shift_cm-1`: min 200.0, max 2000.0, mean 1100.0.
+    The columns are `["spectrum_id", "raman_shift_cm-1", "intensity"]`.
+    
+    The failure `ValueError: attempt to get argmax of an empty sequence` means `mean_spectrum[mask]` was empty. This implies the mask returned all False. Why?
+    If `axis` is a numpy array and it has values from 200 to 2000, then `(axis >= 980) & (axis <= 1020)` should definitely return some True values unless there's a type mismatch or the data isn't what I think.
+    
+    Let me check the table structure again.
+    `files[i]["table"]` is a dictionary mapping column name to numpy array for numeric columns.
+    So `file_data['raman_shift_cm-1']` should be a numpy array of numbers.
+    
+    Wait, looking at my code:
+    ```python
+        ids = file_data['spectrum_id']
+        shifts = file_data['raman_shift_cm-1']
+        intensities = file_data['intensity']
+        
+        unique_ids = np.unique(ids)
+        # ...
+        axis = shifts[ids == unique_ids[0]]
+    ```
+    If `ids` is a list or numpy array, this should work.
+    Let me debug the contents of the axis in the next run and be more robust about the mask. I'll also print the range of the axis just to be sure.
+    
+    Also, the goal asks for:
+    1. 1001 cm-1 peak position difference.
+    2. RSD (ddof=1, %) of peak intensity in each session.
+    3. Cosine similarity between mean spectra (common axis, L2).
+    
+    I will refine the code to be more robust and add prints for verification.
+[20:34:28.070] [Gemma TOOL_CALLS] step 4 · 1개
+    1) run_analysis({"code": "import numpy as np\n\ndef process_session(file_data):\n    # Extract columns\n    ids = np.array(file_data['spectrum_id'])\n    shifts = np.array(file_data['raman_shift_cm-1'])\n    intensities = np.array(file_data['intensity'])\n    \n    unique_ids = np.unique(ids)\n    n_spectra = len(unique_ids)\n    print(f\"Found {n_spectra} spectra in file.\")\n\n    # Identify the axis from one spectrum\n    mask_first = (ids == unique_ids[0])\n    axis = shifts[mask_first]\n    \n    # Check axis range to prevent empty masks\n    print(f\"Axis range: {axis.min():.2f} to {axis.max():.2f}, size={len(axis)}\")\n\n    spectra_matrix = []\n    for uid in unique_ids:\n        spec_mask = (ids == uid)\n        # Ensure we only take intensities for the axis shift values \n        # In case there
+    … <1916자 생략>)
+[20:34:28.070] [Gemma STATS] prompt 19479 tok · out 1470 tok · wall 30.85s · eval 23.75s (61.9 tok/s) · load 0.24s · done=stop
+[20:34:28.071] [CoALA PLAN] cycle 2 · 정보수집 종료 · 실행 후보 1건 확보 → evaluate/select 로
+    run_analysis(code=import numpy as np
+    
+    def process_session(file_data):
+        # Extract columns
+        ids = np.array(file_data['spectrum_id'])
+        shifts = np.array(file_data['raman_shift_cm-1'])
+        intensities = np.array(file_data['intensity'])
+        
+        unique_ids = np.unique(ids)
+        n_spectra = len(unique_ids)
+        print(f"Found {n_spectra} spectra in file.")
+    
+        # Identify the axis from one spectrum
+        mask_first = (ids == unique_ids[0])
+        axis = shifts[mask_first]
+        
+        # Check axis range to prevent empty masks
+        print(f"Axis range: {axis.min():.2f} to {axis.max():.2f}, size={len(axis)}")
+    
+        spectra_matrix = []
+        for uid in unique_ids:
+            spec_mask = (ids == uid)
+            # Ensure we only take intensities for the axis shift values 
+            # In case there are multiple entries per shift, though usually not.
+            spectra_matrix.append(intensities[spec_mask])
+        
+        spectra_matrix = np.array(spectra_matrix) # (n_spectra, n_points)
+        mean_spectrum = np.mean(spectra_matrix, axis=0)
+        
+        # Find peak near 1001 cm-1
+        # Broaden the search window slightly just in case
+        mask = (axis >= 950) & (axis <= 1050)
+        if not np.any(mask):
+            raise ValueError(f"No data found in range [950, 1050]. Axis values are {axis[:5]}...")
+        
+        window_intensities = mean_spectrum[mask]
+        peak_idx_in_window = np.argmax(window_intensities)
+        
+        actual_indices = np.where(mask)[0]
+        best_idx = actual_indices[peak_idx_in_window]
+        peak_pos = axis[best_idx]
+        
+        # Peak intensities for each spectrum at this position
+        peak_intensities = spectra_matrix[:, best_idx]
+        mean_int = np.mean(peak_intensities)
+        std_int = np.std(peak_intensities, ddof=1)
+        rsd = (std_int / mean_int) * 100 if mean_int != 0 else 0
+        
+        return mean_spectrum, peak_pos, rsd
+    
+    # Load files - ensure we access them correctly via file_ids order or indices
+    data_a = files[0]['table']
+    data_b = files[1]['table']
+    
+    print("Processing Session A...")
+    mean_a, pos_a, rsd_a = process_session(data_a)
+    print("\nProcessing Session B...")
+    mean_b, pos_b, rsd_b = process_session(data_b)
+    
+    # Cosine similarity (L2 norm based cosine)
+    dot_prod = np.dot(mean_a, mean_b)
+    norm_a = np.linalg.norm(mean_a)
+    norm_b = np.linalg.norm(mean_b)
+    cosine_sim = dot_prod / (norm_a * norm_b) if (norm_a * norm_b) != 0 else 0
+    
+    print(f"\n--- Results ---")
+    print(f"Session A: Peak Pos={pos_a:.3f}, RSD={rsd_a:.3f}%")
+    print(f"Session B: Peak Pos={pos_b:.3f}, RSD={rsd_b:.3f}%")
+    print(f"Peak Position Diff: {abs(pos_a - pos_b):.3f}")
+    print(f"Cosine Similarity: {cosine_sim:.6f}")
+    , file_ids=['2026-08-07/T075_a.csv', '2026-08-07/T075_b.csv'])
+[20:34:28.071] [CoALA EVALUATE] 후보 1개 — 평가 생략(논문 4.6: 단순 상황)
+    run_analysis(code=import numpy as np
+    
+    def process_session(file_data):
+        # Extract columns
+        ids = np.array(file_data['spectrum_id'])
+        shifts = np.array(file_data['raman_shift_cm-1'])
+        intensities = np.array(file_data['intensity'])
+        
+        unique_ids = np.unique(ids)
+        n_spectra = len(unique_ids)
+        print(f"Found {n_spectra} spectra in file.")
+    
+        # Identify the axis from one spectrum
+        mask_first = (ids == unique_ids[0])
+        axis = shifts[mask_first]
+        
+        # Check axis range to prevent empty masks
+        print(f"Axis range: {axis.min():.2f} to {axis.max():.2f}, size={len(axis)}")
+    
+        spectra_matrix = []
+        for uid in unique_ids:
+            spec_mask = (ids == uid)
+            # Ensure we only take intensities for the axis shift values 
+            # In case there are multiple entries per shift, though usually not.
+            spectra_matrix.append(intensities[spec_mask])
+        
+        spectra_matrix = np.array(spectra_matrix) # (n_spectra, n_points)
+        mean_spectrum = np.mean(spectra_matrix, axis=0)
+        
+        # Find peak near 1001 cm-1
+        # Broaden the search window slightly just in case
+        mask = (axis >= 950) & (axis <= 1050)
+        if not np.any(mask):
+            raise ValueError(f"No data found in range [950, 1050]. Axis values are {axis[:5]}...")
+        
+        window_intensities = mean_spectrum[mask]
+        peak_idx_in_window = np.argmax(window_intensities)
+        
+        actual_indices = np.where(mask)[0]
+        best_idx = actual_indices[peak_idx_in_window]
+        peak_pos = axis[best_idx]
+        
+        # Peak intensities for each spectrum at this position
+        peak_intensities = spectra_matrix[:, best_idx]
+        mean_int = np.mean(peak_intensities)
+        std_int = np.std(peak_intensities, ddof=1)
+        rsd = (std_int / mean_int) * 100 if mean_int != 0 else 0
+        
+        return mean_spectrum, peak_pos, rsd
+    
+    # Load files - ensure we access them correctly via file_ids order or indices
+    data_a = files[0]['table']
+    data_b = files[1]['table']
+    
+    print("Processing Session A...")
+    mean_a, pos_a, rsd_a = process_session(data_a)
+    print("\nProcessing Session B...")
+    mean_b, pos_b, rsd_b = process_session(data_b)
+    
+    # Cosine similarity (L2 norm based cosine)
+    dot_prod = np.dot(mean_a, mean_b)
+    norm_a = np.linalg.norm(mean_a)
+    norm_b = np.linalg.norm(mean_b)
+    cosine_sim = dot_prod / (norm_a * norm_b) if (norm_a * norm_b) != 0 else 0
+    
+    print(f"\n--- Results ---")
+    print(f"Session A: Peak Pos={pos_a:.3f}, RSD={rsd_a:.3f}%")
+    print(f"Session B: Peak Pos={pos_b:.3f}, RSD={rsd_b:.3f}%")
+    print(f"Peak Position Diff: {abs(pos_a - pos_b):.3f}")
+    print(f"Cosine Similarity: {cosine_sim:.6f}")
+    , file_ids=['2026-08-07/T075_a.csv', '2026-08-07/T075_b.csv'])
+[20:34:28.071] [CoALA SELECT] cycle 2 · 선택 → run_analysis(code=import numpy as np
+
+def process_session(file_data):
+    # Extract columns
+    ids = np.array(file_data['spectrum_id'])
+    shifts = np.array(file_data['raman_shift_cm-1'])
+    intensities = np.array(file_data['intensity'])
+    
+    unique_ids = np.unique(ids)
+    n_spectra = len(unique_ids)
+    print(f"Found {n_spectra} spectra in file.")
+
+    # Identify the axis from one spectrum
+    mask_first = (ids == unique_ids[0])
+    axis = shifts[mask_first]
+    
+    # Check axis range to prevent empty masks
+    print(f"Axis range: {axis.min():.2f} to {axis.max():.2f}, size={len(axis)}")
+
+    spectra_matrix = []
+    for uid in unique_ids:
+        spec_mask = (ids == uid)
+        # Ensure we only take intensities for the axis shift values 
+        # In case there are multiple entries per shift, though usually not.
+        spectra_matrix.append(intensities[spec_mask])
+    
+    spectra_matrix = np.array(spectra_matrix) # (n_spectra, n_points)
+    mean_spectrum = np.mean(spectra_matrix, axis=0)
+    
+    # Find peak near 1001 cm-1
+    # Broaden the search window slightly just in case
+    mask = (axis >= 950) & (axis <= 1050)
+    if not np.any(mask):
+        raise ValueError(f"No data found in range [950, 1050]. Axis values are {axis[:5]}...")
+    
+    window_intensities = mean_spectrum[mask]
+    peak_idx_in_window = np.argmax(window_intensities)
+    
+    actual_indices = np.where(mask)[0]
+    best_idx = actual_indices[peak_idx_in_window]
+    peak_pos = axis[best_idx]
+    
+    # Peak intensities for each spectrum at this position
+    peak_intensities = spectra_matrix[:, best_idx]
+    mean_int = np.mean(peak_intensities)
+    std_int = np.std(peak_intensities, ddof=1)
+    rsd = (std_int / mean_int) * 100 if mean_int != 0 else 0
+    
+    return mean_spectrum, peak_pos, rsd
+
+# Load files - ensure we access them correctly via file_ids order or indices
+data_a = files[0]['table']
+data_b = files[1]['table']
+
+print("Processing Session A...")
+mean_a, pos_a, rsd_a = process_session(data_a)
+print("\nProcessing Session B...")
+mean_b, pos_b, rsd_b = process_session(data_b)
+
+# Cosine similarity (L2 norm based cosine)
+dot_prod = np.dot(mean_a, mean_b)
+norm_a = np.linalg.norm(mean_a)
+norm_b = np.linalg.norm(mean_b)
+cosine_sim = dot_prod / (norm_a * norm_b) if (norm_a * norm_b) != 0 else 0
+
+print(f"\n--- Results ---")
+print(f"Session A: Peak Pos={pos_a:.3f}, RSD={rsd_a:.3f}%")
+print(f"Session B: Peak Pos={pos_b:.3f}, RSD={rsd_b:.3f}%")
+print(f"Peak Position Diff: {abs(pos_a - pos_b):.3f}")
+print(f"Cosine Similarity: {cosine_sim:.6f}")
+, file_ids=['2026-08-07/T075_a.csv', '2026-08-07/T075_b.csv'])
+    single execution candidate - evaluation skipped
+[20:34:28.072] [CoALA EXECUTE] run_analysis
+    {"code": "import numpy as np\n\ndef process_session(file_data):\n    # Extract columns\n    ids = np.array(file_data['spectrum_id'])\n    shifts = np.array(file_data['raman_shift_cm-1'])\n    intensities = np.array(file_data['intensity'])\n    \n    unique_ids = np.unique(ids)\n    n_spectra = len(unique_ids)\n    print(f\"Found {n_spectra} spectra in file.\")\n\n    # Identify the axis from one spectrum\n    mask_first = (ids == unique_ids[0])\n    axis = shifts[mask_first]\n    \n    # Check axis range to prevent empty masks\n    print(f\"Axis range: {axis.min():.2f} to {axis.max():.2f}, size={len(axis)}\")\n\n    spectra_matrix = []\n    for uid in unique_ids:\n        spec_mask = (ids == uid)\n        # Ensure we only take intensities for the axis shift values \n        # In case there are multiple entries per shift, though usually not.\n        spectra_matrix.append(intensities[spec_mask])\n    \n    spectra_matrix = np.array(spectra_matrix) # (n_spectra, n_points)\n    mean_spectrum = np.mean(spectra_matrix, axis=0)\n    \n    # Find peak near 1001 cm-1\n    # Broaden the search window slightly just in case\n    mask = (axis >= 950) & (axis <= 1050)\n    if not np.any(mask):\
+    … <1516자 생략>
+[20:34:28.603] [CoALA OBSERVE] run_analysis · ok · 531 ms · grounding
+    {"ok": true, "stdout": "Processing Session A...\nFound 5 spectra in file.\nAxis range: 200.00 to 2000.00, size=1801\n\nProcessing Session B...\nFound 5 spectra in file.\nAxis range: 200.00 to 2000.00, size=1801\n\n--- Results ---\nSession A: Peak Pos=1001.000, RSD=3.278%\nSession B: Peak Pos=1002.000, RSD=3.106%\nPeak Position Diff: 1.000\nCosine Similarity: 0.957068\n", "image_count": 0, "images": []}
+[20:34:28.603] [CoALA CYCLE] ────── 사이클 3 시작 (propose 예산 146/150, 누적 dose 0.0 mJ) ──────
+[20:34:28.603] [CoALA PLAN] cycle 3 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[20:34:28.604] [Gemma <- PROMPT] step 5 · CoALA propose (cycle 3, plan 1) · 11 msgs
+    system(12348ch) · human(953ch) · ai(0ch)[list_uploaded_files] · tool(229ch) · ai(0ch)[inspect_file,inspect_file] · tool(947ch) · tool(948ch) · ai(0ch)[run_analysis] · tool(904ch) · ai(0ch)[run_analysis] · tool(405ch)
+[20:34:42.451] [Gemma THINKING] step 5 · 334ch
+    The analysis is complete.
+    
+    Results summary:
+    - Session A (T075_a.csv): Peak position = 1001.0 cm-1, RSD = 3.278%
+    - Session B (T075_b.csv): Peak position = 1002.0 cm-1, RSD = 3.106%
+    - Peak Position Difference: |1001.0 - 1002.0| = 1.0 cm-1
+    - Cosine Similarity of mean spectra: 0.957068
+    
+    I have all the required values for the JSON block.
+[20:34:42.452] [Gemma TEXT] step 5
+    Based on the analysis of the provided data files `T075_a.csv` and `T075_b.csv`, here is the summary of the comparison between the two sessions:
+    
+    - **Peak Position (near 1001 cm⁻¹):**
+      - Session A: 1001.0 cm⁻¹
+      - Session B: 1002.0 cm⁻¹
+      - **Difference:** 1.0 cm⁻¹
+    - **Intensity Precision (RSD, ddof=1):**
+      - Session A: 3.278%
+      - Session B: 3.106%
+    - **Spectral Similarity:**
+      - The cosine similarity between the mean spectra of the two sessions is 0.957068.
+    
+    ```json
+    {"rsd_a_pct": 3.278, "rsd_b_pct": 3.106, "cosine_of_means": 0.957068, "peak_position_diff": 1.0}
+    ```
+[20:34:42.452] [Gemma STATS] prompt 20633 tok · out 386 tok · wall 13.85s · eval 6.24s (61.9 tok/s) · load 0.35s · done=stop
+[20:34:42.452] [CoALA PLAN] cycle 3 · 도구 후보 없음 → 최종 보고서로 턴 종료
+[20:34:42.453] [FINAL] 93.23s · LLM 5회 · 도구 2회 · dose 0.00 mJ
+    Based on the analysis of the provided data files `T075_a.csv` and `T075_b.csv`, here is the summary of the comparison between the two sessions:
+    
+    - **Peak Position (near 1001 cm⁻¹):**
+      - Session A: 1001.0 cm⁻¹
+      - Session B: 1002.0 cm⁻¹
+      - **Difference:** 1.0 cm⁻¹
+    - **Intensity Precision (RSD, ddof=1):**
+      - Session A: 3.278%
+      - Session B: 3.106%
+    - **Spectral Similarity:**
+      - The cosine similarity between the mean spectra of the two sessions is 0.957068.
+    
+    ```json
+    {"rsd_a_pct": 3.278, "rsd_b_pct": 3.106, "cosine_of_means": 0.957068, "peak_position_diff": 1.0}
+    ```
+══════════════════════════════════════════════════════════════════════════════
+

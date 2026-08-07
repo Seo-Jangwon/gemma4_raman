@@ -1,0 +1,150 @@
+{
+  "task": "T046",
+  "axis": "data processing",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Compare the peaks of T046_sample.csv with the polystyrene reference T046_ref.csv and compute the match ratio. Detect peaks with prominence at 5% of range, pair them 1:1 by nearest neighbour within 3 cm-1, and define the ratio as matched peaks / reference peaks.",
+  "criteria": "NUM(±0.02) + SET(pairs EXACT)",
+  "checks": [
+    {
+      "name": "match ratio",
+      "passed": true,
+      "score": 1.0,
+      "detail": "1 (expected 1, |Δ|=0 ≤ 0.02)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T046_sample.csv",
+    "T046_ref.csv"
+  ],
+  "answer_text": "Based on the analysis of the provided Raman spectra, here are the results:\n\n1.  **Peak Detection**: Peaks were detected using a prominence threshold of 5% of the total intensity range for each spectrum.\n    *   **Reference (`T046_ref.csv`)**: 9 peaks were identified at approximately 620, 795, 1001, 1031, 1155, 1183, 1450, 1583, and 1602 cm⁻¹.\n    *   **Sample (`T046_sample.csv`)**: 9 peaks were identified at approximately 620, 796, 1001, 1031, 1154, 1183, 1451, 1583, and 1602 cm⁻¹.\n\n2.  **Peak Pairing**: The reference peaks were paired with the nearest neighbor in the sample spectrum within a tolerance of $\\pm3$ cm⁻¹. All 9 reference peaks found a corresponding match in the sample data.\n\n3.  **Match Ratio**: With 9 out of 9 reference peaks matched, the final match ratio is 1.0.\n\n```json\n{\"match_ratio\": 1.0}\n```",
+  "answer_json": {
+    "match_ratio": 1.0
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T046_ref.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T046_sample.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_peaks(x, y):\n    prominence = 0.05 * (np.max(y) - np.min(y))\n    indices, properties = find_peaks(y, prominence=prominence)\n    return x[indices]\n\n# Extract data from files\n# Reference spectrum\nref_data = files[0] if files[0]['filename'] == 'T046_ref.csv' else files[1]\nref_x = ref_data['table']['raman_shift_cm-1']\nref_y = ref_data['table']['intensity']\n\n# Sample spectrum\nsample_data = files[1] if files[0]['filename'] == 'T046_ref.csv' else files[0]\nsample_x = sample_data['table']['raman_shift_cm-1']\nsample_y = sample_data['table']['intensity']\n\n# Detect peaks\nref_peaks = get_peaks(ref_x, ref_y)\nsample_peaks = get_peaks(sample_x, sample_y)\n\nprint(f\"Reference peaks found: {len(ref_peaks)}\")\nprint(f\"Sample peaks found: {len(sample_peaks)}\")\nprint(f\"Ref peak positions: {ref_peaks}\")\nprint(f\"Sample peak positions: {sample_peaks}\")\n\n# Pair them 1:1 by nearest neighbour within 3 cm-1\nmatched_count = 0\navailable_sample_peaks = list(sample_peaks)\n\nfor rp in ref_peaks:\n    if not available_sample_peaks:\n        break\n    \n    # Find the closest sample peak\n    diffs = np.abs(np.array(available_sample_peaks) - rp)\n    idx = np.argmin(diffs)\n    min_diff = diffs[idx]\n    \n    if min_diff <= 3:\n        matched_count += 1\n        # Remove the used sample peak to ensure 1:1 pairing\n        available_sample_peaks.pop(idx)\n\nmatch_ratio = matched_count / len(ref_peaks) if len(ref_peaks) > 0 else 0\nprint(f\"Matched peaks: {matched_count}\")\nprint(f\"Match ratio: {match_ratio}\")\n",
+        "file_ids": [
+          "2026-08-07/T046_ref.csv",
+          "2026-08-07/T046_sample.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T046_e8ec15",
+  "elapsed_s": 61.24,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

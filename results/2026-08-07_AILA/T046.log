@@ -1,0 +1,175 @@
+══════════════════════════════════════════════════════════════════════════════
+ AILA · T046 · gemma4:31b @ http://192.168.1.15:11434
+ session : bench_2026-08-07_AILA_AILA_T046_b8492e
+ started : 2026-08-07 14:29:10
+ thinking: ON — gemma4:31b capabilities=['completion', 'vision', 'tools', 'thinking'] → thinking 지원
+══════════════════════════════════════════════════════════════════════════════
+
+[14:29:10.410] [QUESTION]
+    Compare the peaks of T046_sample.csv with the polystyrene reference T046_ref.csv and compute the match ratio. Detect peaks with prominence at 5% of range, pair them 1:1 by nearest neighbour within 3 cm-1, and define the ratio as matched peaks / reference peaks. 
+    
+    ---
+    When you are done, end your reply with a JSON block holding the values you were asked to
+    report, like this:
+    
+    ```json
+    {"key": value, ...}
+    ```
+    
+    The JSON block must include these keys, spelled exactly like this, with the shape described for each:
+      "match_ratio": number - fraction of reference peaks that matched, 0 to 1
+    
+    Give plain JSON numbers and strings - no units, no LaTeX, no thousands separators. If the
+    task asked you to refuse, explain, or ask a question instead of measuring, say so in plain
+    text and omit the block.
+[14:29:10.421] [Gemma <- PROMPT] step 1 · ReAct propose · 2 msgs
+    system(9236ch) · human(793ch)
+[14:29:21.735] [Gemma THINKING] step 1 · 1124ch
+    The user wants me to compare two Raman spectra provided as CSV files: `T046_sample.csv` and `T046_ref.csv`.
+    Specifically, I need to:
+    1.  Detect peaks in both spectra using a prominence threshold of 5% of the intensity range.
+    2.  Pair these peaks 1:1 based on the nearest neighbor within a $\pm 3 \text{ cm}^{-1}$ window.
+    3.  Calculate the match ratio as (number of matched peaks) / (number of reference peaks).
+    
+    Plan:
+    1.  List uploaded files to get `file_id`s for `T046_sample.csv` and `T046_ref.csv`.
+    2.  Inspect both files to identify the Raman shift and intensity columns.
+    3.  Run an analysis script in `run_analysis` to:
+        *   Load the data from both files.
+        *   Perform peak detection using `scipy.signal.find_peaks` with prominence set to 0.05 * (max - min) of intensities.
+        *   Implement the matching logic (nearest neighbor within $3 \text{ cm}^{-1}$, 1:1 pairing).
+        *   Compute the match ratio.
+        *   Plot the spectra for verification (optional but good practice, though I can't see it, the numerical results are what matter).
+    4.  Report the `match_ratio`.
+    
+    Let's start by listing and inspecting files.
+[14:29:21.736] [Gemma TOOL_CALLS] step 1 · 1개
+    1) list_uploaded_files({})
+[14:29:21.736] [Gemma STATS] prompt 15355 tok · out 339 tok · wall 11.31s · eval 5.40s (62.7 tok/s) · load 0.24s · done=stop
+[14:29:21.736] [ReAct REASONING] step 1 · 도구 1개 실행 결정 → list_uploaded_files
+[14:29:21.736] [ReAct ACTING] step 1 · list_uploaded_files
+    {}
+[14:29:21.738] [ReAct OBSERVATION] step 1 · list_uploaded_files · ok · 1 ms
+    {"ok": true, "count": 2, "files": [{"file_id": "2026-08-07/T046_ref.csv", "filename": "T046_ref.csv", "kind": "text", "bytes": 35736}, {"file_id": "2026-08-07/T046_sample.csv", "filename": "T046_sample.csv", "kind": "text", "bytes": 36442}]}
+[14:29:21.738] [Gemma <- PROMPT] step 2 · ReAct propose · 4 msgs
+    system(9236ch) · human(793ch) · ai(0ch)[list_uploaded_files] · tool(241ch)
+[14:29:23.706] [Gemma THINKING] step 2 · 73ch
+    Now I inspect both files to understand their column names and data types.
+[14:29:23.707] [Gemma TOOL_CALLS] step 2 · 2개
+    1) inspect_file({"file_id": "2026-08-07/T046_ref.csv"})
+    2) inspect_file({"file_id": "2026-08-07/T046_sample.csv"})
+[14:29:23.707] [Gemma STATS] prompt 15832 tok · out 84 tok · wall 1.97s · eval 1.33s (63.1 tok/s) · load 0.24s · done=stop
+[14:29:23.707] [ReAct REASONING] step 2 · 도구 2개 실행 결정 → inspect_file, inspect_file
+[14:29:23.707] [ReAct ACTING] step 2 · inspect_file
+    {"file_id": "2026-08-07/T046_ref.csv"}
+[14:29:23.726] [ReAct OBSERVATION] step 2 · inspect_file · ok · 19 ms
+    {"ok": true, "file_id": "2026-08-07/T046_ref.csv", "filename": "T046_ref.csv", "kind": "text", "bytes": 35736, "n_rows": 1801, "n_cols": 2, "columns": ["raman_shift_cm-1", "intensity"], "dtypes": {"raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 1801}, "intensity": {"min": 0.072777, "max": 1000.0, "mean": 20.97099, "n_valid": 1801}}, "head": [[200.0, 0.072777], [201.0, 0.072997], [202.0, 0.073218], [203.0, 0.07344], [204.0, 0.073663]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-07/T046_ref.csv']."}
+[14:29:23.726] [ReAct ACTING] step 2 · inspect_file
+    {"file_id": "2026-08-07/T046_sample.csv"}
+[14:29:23.736] [ReAct OBSERVATION] step 2 · inspect_file · ok · 10 ms
+    {"ok": true, "file_id": "2026-08-07/T046_sample.csv", "filename": "T046_sample.csv", "kind": "text", "bytes": 36442, "n_rows": 1801, "n_cols": 2, "columns": ["raman_shift_cm-1", "intensity"], "dtypes": {"raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 1801}, "intensity": {"min": -16.186829, "max": 1001.263081, "mean": 20.986718, "n_valid": 1801}}, "head": [[200.0, 1.849842], [201.0, 4.967955], [202.0, -1.601685], [203.0, -0.151576], [204.0, -8.559367]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-07/T046_sample.csv']."}
+[14:29:23.736] [Gemma <- PROMPT] step 3 · ReAct propose · 7 msgs
+    system(9236ch) · human(793ch) · ai(0ch)[list_uploaded_files] · tool(241ch) · ai(0ch)[inspect_file,inspect_file] · tool(868ch) · tool(889ch)
+[14:29:47.275] [Gemma THINKING] step 3 · 2065ch
+    The files both have `raman_shift_cm-1` and `intensity` columns.
+    Range of Raman shift is 200 to 2000 cm$^{-1}$.
+    
+    Now I will write the `run_analysis` code to perform peak detection and matching.
+    
+    Algorithm:
+    1.  Get intensity range $\Delta I = \max(I) - \min(I)$.
+    2.  Prominence threshold $p = 0.05 \times \Delta I$.
+    3.  Detect peaks in reference spectrum (`ref`) and sample spectrum (`samp`).
+    4.  For each peak in `ref`, find the closest peak in `samp`.
+    5.  If distance $\le 3 \text{ cm}^{-1}$ and that sample peak hasn't been paired yet, pair them. (Since it's a 1:1 pairing by nearest neighbor, I should probably iterate through reference peaks and greedily match or use a more robust matching if needed. The request says "pair them 1:1 by nearest neighbour within 3 cm-1". This usually means for each ref peak, look for the closest sample peak; if it's $\le 3$, they are a pair).
+    6.  Actually, to be strict about "1:1", if two ref peaks compete for one sample peak, the closer one should win, or we just process them in order. The simplest interpretation is: iterate through reference peaks and match each to its nearest available sample peak within $3 \text{ cm}^{-1}$. Or better: find all pairs with distance $\le 3$, sort by distance, and pick greedily. Let's stick to the most common implementation for these types of benchmarks: iterate ref peaks and find the best available match in samp.
+    
+    Wait, "nearest neighbour" usually implies that if multiple candidates exist, you take the closest one.
+    Let's refine:
+    1.  Reference peaks $R = \{r_1, r_2, ...\}$, Sample peaks $S = \{s_1, s_2, ...\}$.
+    2.  For each $r \in R$:
+        *   Find all $s \in S$ such that $|r-s| \le 3$.
+        *   If any exist, the closest one is the candidate.
+    3.  To ensure 1:1 pairing (no sample peak used twice), I'll use a greedy approach: find the global minimum distance among all $R \times S$ pairs, pair them, remove both from sets, and repeat until no more pairs with dist $\le 3$ exist. This is the most standard way to implement "1:1 nearest neighbour".
+    
+    Let's implement this in Python.
+[14:29:47.275] [Gemma TOOL_CALLS] step 3 · 1개
+    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal import find_peaks\nimport matplotlib.pyplot as plt\n\n# Data extraction\nref_data = files['2026-08-07/T046_ref.csv']['table']\nsamp_data = files['2026-08-07/T046_sample.csv']['table']\n\nx_ref = ref_data['raman_shift_cm-1']\ny_ref = ref_data['intensity']\nx_samp = samp_data['raman_shift_cm-1']\ny_samp = samp_data['intensity']\n\ndef get_peaks(x, y):\n    # Prominence at 5% of range\n    prom = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=prom)\n    return x[peaks], y[peaks]\n\npx_ref, py_ref = get_peaks(x_ref, y_ref)\npx_samp, py_samp = get_peaks(x_samp, y_samp)\n\nprint(f\"Ref peaks: {len(px_ref)} found. Pos: {px_ref}\")\nprint(f\"Samp peaks: {len(px_samp)} found. Pos: {px_samp}\")\n\n# 1:1 matching by nearest neig
+    … <1471자 생략>)
+[14:29:47.276] [Gemma STATS] prompt 16747 tok · out 1421 tok · wall 23.54s · eval 22.75s (62.5 tok/s) · load 0.24s · done=stop
+[14:29:47.276] [ReAct REASONING] step 3 · 도구 1개 실행 결정 → run_analysis
+[14:29:47.276] [ReAct ACTING] step 3 · run_analysis
+    {"code": "import numpy as np\nfrom scipy.signal import find_peaks\nimport matplotlib.pyplot as plt\n\n# Data extraction\nref_data = files['2026-08-07/T046_ref.csv']['table']\nsamp_data = files['2026-08-07/T046_sample.csv']['table']\n\nx_ref = ref_data['raman_shift_cm-1']\ny_ref = ref_data['intensity']\nx_samp = samp_data['raman_shift_cm-1']\ny_samp = samp_data['intensity']\n\ndef get_peaks(x, y):\n    # Prominence at 5% of range\n    prom = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=prom)\n    return x[peaks], y[peaks]\n\npx_ref, py_ref = get_peaks(x_ref, y_ref)\npx_samp, py_samp = get_peaks(x_samp, y_samp)\n\nprint(f\"Ref peaks: {len(px_ref)} found. Pos: {px_ref}\")\nprint(f\"Samp peaks: {len(px_samp)} found. Pos: {px_samp}\")\n\n# 1:1 matching by nearest neighbor within 3 cm-1\nmatches = 0\nused_samp = set()\nsorted_ref = px_ref # already sorted usually, but ensure it's numeric\nsorted_samp = px_samp\n\n# Greedy approach for 1:1 pairing based on distance\nall_pairs = []\nfor i, r in enumerate(px_ref):\n    for j, s in enumerate(px_samp):\n        dist = abs(r - s)\n        if dist <= 3.0:\n            all_pairs.append((dist, i, j))\n\n# Sort pairs by 
+    … <1071자 생략>
+[14:29:48.407] [ReAct OBSERVATION] step 3 · run_analysis · FAIL · 1131 ms
+    {"ok": false, "error": "TypeError: list indices must be integers or slices, not str", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 379, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 6, in <module>\nTypeError: list indices must be integers or slices, not str\n"}
+[14:29:48.408] [Gemma <- PROMPT] step 4 · ReAct propose · 9 msgs
+    system(9236ch) · human(793ch) · ai(0ch)[list_uploaded_files] · tool(241ch) · ai(0ch)[inspect_file,inspect_file] · tool(868ch) · tool(889ch) · ai(0ch)[run_analysis] · tool(486ch)
+[14:30:04.314] [Gemma THINKING] step 4 · 504ch
+    The error `TypeError: list indices must be integers or slices, not str` indicates that `files` is a list of dictionaries, and I tried to access it like a dictionary using the filename/ID as a key.
+    
+    According to the system prompt: `files (list[dict] - each item has file_id, filename, sheet, columns (list[str]), n_rows, and table (dict mapping column name -> np.ndarray for numeric columns, list[str] for text columns))`.
+    
+    So I need to iterate through `files` and find the one with the correct `file_id`.
+[14:30:04.314] [Gemma TOOL_CALLS] step 4 · 1개
+    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal import find_peaks\nimport matplotlib.pyplot as plt\n\n# Find files in the list\nref_file = next(f for f in files if f['file_id'] == '2026-08-07/T046_ref.csv')\nsamp_file = next(f for f in files if f['file_id'] == '2026-08-07/T046_sample.csv')\n\nx_ref = ref_file['table']['raman_shift_cm-1']\ny_ref = ref_file['table']['intensity']\nx_samp = samp_file['table']['raman_shift_cm-1']\ny_samp = samp_file['table']['intensity']\n\ndef get_peaks(x, y):\n    # Prominence at 5% of range\n    prom = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=prom)\n    return x[peaks], y[peaks]\n\npx_ref, py_ref = get_peaks(x_ref, y_ref)\npx_samp, py_samp = get_peaks(x_samp, y_samp)\n\nprint(f\"Ref peaks: {len(px_ref)} found. Pos: {px_ref}\")\
+    … <1344자 생략>)
+[14:30:04.315] [Gemma STATS] prompt 18332 tok · out 949 tok · wall 15.91s · eval 15.25s (62.2 tok/s) · load 0.24s · done=stop
+[14:30:04.315] [ReAct REASONING] step 4 · 도구 1개 실행 결정 → run_analysis
+[14:30:04.315] [ReAct ACTING] step 4 · run_analysis
+    {"code": "import numpy as np\nfrom scipy.signal import find_peaks\nimport matplotlib.pyplot as plt\n\n# Find files in the list\nref_file = next(f for f in files if f['file_id'] == '2026-08-07/T046_ref.csv')\nsamp_file = next(f for f in files if f['file_id'] == '2026-08-07/T046_sample.csv')\n\nx_ref = ref_file['table']['raman_shift_cm-1']\ny_ref = ref_file['table']['intensity']\nx_samp = samp_file['table']['raman_shift_cm-1']\ny_samp = samp_file['table']['intensity']\n\ndef get_peaks(x, y):\n    # Prominence at 5% of range\n    prom = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=prom)\n    return x[peaks], y[peaks]\n\npx_ref, py_ref = get_peaks(x_ref, y_ref)\npx_samp, py_samp = get_peaks(x_samp, y_samp)\n\nprint(f\"Ref peaks: {len(px_ref)} found. Pos: {px_ref}\")\nprint(f\"Samp peaks: {len(px_samp)} found. Pos: {px_samp}\")\n\n# 1:1 matching by nearest neighbor within 3 cm-1\nmatches = 0\nall_pairs = []\nfor i, r in enumerate(px_ref):\n    for j, s in enumerate(px_samp):\n        dist = abs(r - s)\n        if dist <= 3.0:\n            all_pairs.append((dist, i, j))\n\n# Sort pairs by distance (closest first)\nall_pairs.sort()\n\nmatched_ref = set()\nmatche
+    … <944자 생략>
+[14:30:05.360] [ReAct OBSERVATION] step 4 · run_analysis · FAIL · 1045 ms
+    {"ok": false, "error": "NameError: name 'next' is not defined", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 379, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 6, in <module>\nNameError: name 'next' is not defined\n"}
+[14:30:05.361] [Gemma <- PROMPT] step 5 · ReAct propose · 11 msgs
+    system(9236ch) · human(793ch) · ai(0ch)[list_uploaded_files] · tool(241ch) · ai(0ch)[inspect_file,inspect_file] · tool(868ch) · tool(889ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(442ch)
+[14:30:19.872] [Gemma THINKING] step 5 · 99ch
+    It seems `next` is not available or something is weird. I will use a simple loop to find the files.
+[14:30:19.873] [Gemma TOOL_CALLS] step 5 · 1개
+    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal import find_peaks\nimport matplotlib.pyplot as plt\n\n# Find files in the list using loops\nref_file = None\nsamp_file = None\nfor f in files:\n    if f['file_id'] == '2026-08-07/T046_ref.csv':\n        ref_file = f\n    elif f['file_id'] == '2026-08-07/T046_sample.csv':\n        samp_file = f\n\nx_ref = ref_file['table']['raman_shift_cm-1']\ny_ref = ref_file['table']['intensity']\nx_samp = samp_file['table']['raman_shift_cm-1']\ny_samp = samp_file['table']['intensity']\n\ndef get_peaks(x, y):\n    # Prominence at 5% of range\n    prom = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=prom)\n    return x[peaks], y[peaks]\n\npx_ref, py_ref = get_peaks(x_ref, y_ref)\npx_samp, py_samp = get_peaks(x_samp, y_samp)\n\nprint(
+    … <1396자 생략>)
+[14:30:19.873] [Gemma STATS] prompt 19441 tok · out 860 tok · wall 14.51s · eval 13.86s (62.1 tok/s) · load 0.24s · done=stop
+[14:30:19.873] [ReAct REASONING] step 5 · 도구 1개 실행 결정 → run_analysis
+[14:30:19.874] [ReAct ACTING] step 5 · run_analysis
+    {"code": "import numpy as np\nfrom scipy.signal import find_peaks\nimport matplotlib.pyplot as plt\n\n# Find files in the list using loops\nref_file = None\nsamp_file = None\nfor f in files:\n    if f['file_id'] == '2026-08-07/T046_ref.csv':\n        ref_file = f\n    elif f['file_id'] == '2026-08-07/T046_sample.csv':\n        samp_file = f\n\nx_ref = ref_file['table']['raman_shift_cm-1']\ny_ref = ref_file['table']['intensity']\nx_samp = samp_file['table']['raman_shift_cm-1']\ny_samp = samp_file['table']['intensity']\n\ndef get_peaks(x, y):\n    # Prominence at 5% of range\n    prom = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=prom)\n    return x[peaks], y[peaks]\n\npx_ref, py_ref = get_peaks(x_ref, y_ref)\npx_samp, py_samp = get_peaks(x_samp, y_samp)\n\nprint(f\"Ref peaks: {len(px_ref)} found. Pos: {px_ref}\")\nprint(f\"Samp peaks: {len(px_samp)} found. Pos: {px_samp}\")\n\n# 1:1 matching by nearest neighbor within 3 cm-1\nmatches = 0\nall_pairs = []\nfor i, r in enumerate(px_ref):\n    for j, s in enumerate(px_samp):\n        dist = abs(r - s)\n        if dist <= 3.0:\n            all_pairs.append((dist, i, j))\n\n# Sort pairs by distance (closest fir
+    … <996자 생략>
+[14:30:21.161] [ReAct OBSERVATION] step 5 · run_analysis · ok · 1287 ms
+    {"ok": true, "stdout": "Ref peaks: 9 found. Pos: [ 620.  795. 1001. 1031. 1155. 1183. 1450. 1583. 1602.]\nSamp peaks: 9 found. Pos: [ 620.  796. 1001. 1031. 1154. 1183. 1451. 1583. 1602.]\nMatches: 9\nRef peak count: 9\nMatch ratio: 1.0\n", "image_count": 1, "images": ["/api/results/2026-08-07/bench_2026-08-07_AILA_AILA_T046_b8492e/fig143020_993_0.png"], "saved": {"title": "Peak Matching Analysis", "image_url": "/api/results/2026-08-07/bench_2026-08-07_AILA_AILA_T046_b8492e/fig143020_993_0.png"}}
+[14:30:21.168] [Gemma <- PROMPT] step 6 · ReAct propose · 13 msgs
+    system(9402ch) · human(793ch) · ai(0ch)[list_uploaded_files] · tool(241ch) · ai(0ch)[inspect_file,inspect_file] · tool(868ch) · tool(889ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(442ch) · ai(0ch)[run_analysis] · tool(501ch)
+[14:30:35.835] [Gemma THINKING] step 6 · 340ch
+    The analysis is complete:
+    - Reference peaks found: 9 at [620, 795, 1001, 1031, 1155, 1183, 1450, 1583, 1602]
+    - Sample peaks found: 9 at [620, 796, 1001, 1031, 1154, 1183, 1451, 1583, 1602]
+    - Matches (within $3 \text{ cm}^{-1}$): 9
+    - Match ratio: $9 / 9 = 1.0$.
+    
+    All reference peaks were matched to a unique sample peak within the tolerance.
+[14:30:35.835] [Gemma TEXT] step 6
+    The peak comparison between `T046_sample.csv` and the polystyrene reference `T046_ref.csv` was performed using a prominence threshold of 5% of the intensity range for peak detection. Both spectra exhibited 9 peaks in the measured range (200–2000 cm⁻¹).
+    
+    The detected peaks were paired 1:1 based on the nearest neighbor within a $\pm 3 \text{ cm}^{-1}$ window. All 9 reference peaks found matches in the sample spectrum, resulting in a match ratio of 1.0.
+    
+    **Detected Peaks:**
+    - **Reference:** 620, 795, 1001, 1031, 1155, 1183, 1450, 1583, 1602 cm⁻¹
+    - **Sample:** 620, 796, 1001, 1031, 1154, 1183, 1451, 1583, 1602 cm⁻¹
+    
+    ```json
+    {"match_ratio": 1.0}
+    ```
+[14:30:35.836] [Gemma STATS] prompt 20716 tok · out 439 tok · wall 14.67s · eval 7.08s (62.0 tok/s) · load 0.23s · done=stop
+[14:30:35.836] [ReAct REASONING] step 6 · 도구 호출 없음 → 최종 보고서 작성으로 턴 종료
+[14:30:35.836] [FINAL] 85.47s · LLM 6회 · 도구 6회 · dose 0.00 mJ
+    The peak comparison between `T046_sample.csv` and the polystyrene reference `T046_ref.csv` was performed using a prominence threshold of 5% of the intensity range for peak detection. Both spectra exhibited 9 peaks in the measured range (200–2000 cm⁻¹).
+    
+    The detected peaks were paired 1:1 based on the nearest neighbor within a $\pm 3 \text{ cm}^{-1}$ window. All 9 reference peaks found matches in the sample spectrum, resulting in a match ratio of 1.0.
+    
+    **Detected Peaks:**
+    - **Reference:** 620, 795, 1001, 1031, 1155, 1183, 1450, 1583, 1602 cm⁻¹
+    - **Sample:** 620, 796, 1001, 1031, 1154, 1183, 1451, 1583, 1602 cm⁻¹
+    
+    ```json
+    {"match_ratio": 1.0}
+    ```
+══════════════════════════════════════════════════════════════════════════════
+

@@ -1,0 +1,237 @@
+{
+  "task": "T126",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Identify the material of each of T126_1.csv through T126_5.csv against reference_library.csv, and report them in that order.",
+  "criteria": "EXACT(5 materials, in order) - all five must be right",
+  "checks": [
+    {
+      "name": "5 materials",
+      "passed": true,
+      "score": 1.0,
+      "detail": "5/5 matched (submitted 5) ['polystyrene', 'silicon', 'PET', 'calcite', 'PMMA'] vs ['polystyrene', 'silicon', 'PET', 'calcite', 'PMMA']",
+      "weight": 2.0,
+      "kind": "SET"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T126_1.csv",
+    "T126_2.csv",
+    "T126_3.csv",
+    "T126_4.csv",
+    "T126_5.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "Based on a correlation analysis of the provided Raman spectra against the reference library, the materials have been identified as follows:\n\n- **T126_1.csv**: Polystyrene (Correlation $r = 0.9944$)\n- **T126_2.csv**: Silicon (Correlation $r = 0.9900$)\n- **T126_3.csv**: PET (Correlation $r = 0.9955$)\n- **T126_4.csv**: Calcite (Correlation $r = 0.9922$)\n- **T126_5.csv**: PMMA (Correlation $r = 0.9955$)\n\n```json\n{\"materials\": [\"polystyrene\", \"silicon\", \"PET\", \"calcite\", \"PMMA\"]}\n```",
+  "answer_json": {
+    "materials": [
+      "polystyrene",
+      "silicon",
+      "PET",
+      "calcite",
+      "PMMA"
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T126_1.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T126_2.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T126_3.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T126_4.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T126_5.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\ndef normalize(y):\n    return (y - np.min(y)) / (np.max(y) - np.min(y))\n\n# 1. Parse reference library\nref_data = files[0] # Assuming reference_library is the first one if passed in order, but safer to use index or name\n# I will pass all file_ids and identify them by filename inside code if needed, \n# but simpler to just rely on the order of file_ids list passed.\n\nref_shift = files[0]['table']['raman_shift_cm-1']\nref_intensity = files[0]['table']['intensity']\nref_materials = files[0]['table']['material']\nref_ids = files[0]['table']['spectrum_id']\n\nunique_refs = np.unique(ref_ids)\nlibrary = {}\nfor rid in unique_refs:\n    mask = (ref_ids == rid)\n    mat = ref_materials[mask][0]\n    shift = ref_shift[mask]\n    intensity = ref_intensity[mask]\n    library[rid] = {'material': mat, 'shift': shift, 'intensity': normalize(intensity)}\n\n# 2. Process sample files\nsample_files = ['T126_1.csv', 'T126_2.csv', 'T126_3.csv', 'T126_4.csv', 'T126_5.csv']\nresults = []\n\n# Map file_ids to their indices in the files list\nfile_map = {f['filename']: i for i, f in enumerate(files)}\n\nfor s_name in sample_files:\n    f_idx = file_map[s_name]\n    s_shift = files[f_idx]['table']['raman_shift_cm-1']\n    s_intensity = files[f_idx]['table']['intensity']\n    s_norm = normalize(s_intensity)\n    \n    best_mat = None\n    best_corr = -1.0\n    \n    for rid, ref_info in library.items():\n        # Ensure they are on the same grid\n        # Since both are 200-2000 with step 1 (likely), we can just check length\n        if len(s_shift) == len(ref_info['shift']):\n            corr = np.corrcoef(s_norm, ref_info['intensity'])[0, 1]\n        else:\n            # Interpolate reference to sample grid\n            f_interp = interp1d(ref_info['shift'], ref_info['intensity'], bounds_error=False, fill_value=0)\n            ref_resampled = f_interp(s_shift)\n            corr = np.corrcoef(s_norm, ref_resampled)[0, 1]\n        \n        if corr > best_corr:\n            best_corr = corr\n            best_mat = ref_info['material']\n    \n    results.append(best_mat)\n    print(f\"{s_name}: {best_mat} (corr={best_corr:.4f})\")\n\nprint(\"\\nFinal list:\", results)\n",
+        "file_ids": [
+          "2026-08-07/reference_library.csv",
+          "2026-08-07/T126_1.csv",
+          "2026-08-07/T126_2.csv",
+          "2026-08-07/T126_3.csv",
+          "2026-08-07/T126_4.csv",
+          "2026-08-07/T126_5.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Identify files by filename\nref_file = next(f for f in files if f['filename'] == 'reference_library.csv')\nsample_filenames = ['T126_1.csv', 'T126_2.csv', 'T126_3.csv', 'T126_4.csv', 'T126_5.csv']\n\n# Load reference data\nref_shift = ref_file['table']['raman_shift_cm-1']\nref_intensity = ref_file['table']['intensity']\nref_materials = ref_file['table']['material']\nref_ids = ref_file['table']['spectrum_id']\n\nunique_refs = np.unique(ref_ids)\nlibrary = []\nfor rid in unique_refs:\n    mask = (ref_ids == rid)\n    library.append({\n        'material': ref_materials[mask][0],\n        'shift': ref_shift[mask],\n        'intensity': ref_intensity[mask]\n    })\n\n# Process samples\nresults = []\nfor s_name in sample_filenames:\n    s_file = next(f for f in files if f['filename'] == s_name)\n    s_shift = s_file['table']['raman_shift_cm-1']\n    s_intensity = s_file['table']['intensity']\n    \n    best_mat = None\n    max_corr = -1.0\n    \n    for ref in library:\n        # Resample reference to sample grid if needed\n        if len(ref['shift']) != len(s_shift):\n            f_interp = interp1d(ref['shift'], ref['intensity'], bounds_error=False, fill_value=0)\n            ref_y = f_interp(s_shift)\n        else:\n            ref_y = ref['intensity']\n        \n        # Pearson correlation (invariant to shift and scale)\n        corr = np.corrcoef(s_intensity, ref_y)[0, 1]\n        if corr > max_corr:\n            max_corr = corr\n            best_mat = ref['material']\n    \n    results.append(best_mat)\n    print(f\"{s_name}: {best_mat} (r={max_corr:.4f})\")\n\nprint(\"\\nFinal list:\", results)\n",
+        "file_ids": [
+          "2026-08-07/reference_library.csv",
+          "2026-08-07/T126_1.csv",
+          "2026-08-07/T126_2.csv",
+          "2026-08-07/T126_3.csv",
+          "2026-08-07/T126_4.csv",
+          "2026-08-07/T126_5.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Find reference file and samples\nref_file = None\nfor f in files:\n    if f['filename'] == 'reference_library.csv':\n        ref_file = f\n        break\n\nsample_filenames = ['T126_1.csv', 'T126_2.csv', 'T126_3.csv', 'T126_4.csv', 'T126_5.csv']\nsample_files = []\nfor s_name in sample_filenames:\n    for f in files:\n        if f['filename'] == s_name:\n            sample_files.append(f)\n            break\n\n# Load reference library\nref_shift = ref_file['table']['raman_shift_cm-1']\nref_intensity = ref_file['table']['intensity']\nref_materials = ref_file['table']['material']\nref_ids = ref_file['table']['spectrum_id']\n\nunique_refs = np.unique(ref_ids)\nlibrary = []\nfor rid in unique_refs:\n    mask = (ref_ids == rid)\n    library.append({\n        'material': ref_materials[mask][0],\n        'shift': ref_shift[mask],\n        'intensity': ref_intensity[mask]\n    })\n\n# Identify samples\nresults = []\nfor s_file in sample_files:\n    s_shift = s_file['table']['raman_shift_cm-1']\n    s_intensity = s_file['table']['intensity']\n    \n    best_mat = None\n    max_corr = -1.0\n    \n    for ref in library:\n        if len(ref['shift']) != len(s_shift):\n            f_interp = interp1d(ref['shift'], ref['intensity'], bounds_error=False, fill_value=0)\n            ref_y = f_interp(s_shift)\n        else:\n            ref_y = ref['intensity']\n        \n        # Correlation coefficient\n        corr = np.corrcoef(s_intensity, ref_y)[0, 1]\n        if corr > max_corr:\n            max_corr = corr\n            best_mat = ref['material']\n    \n    results.append(best_mat)\n    print(f\"{s_file['filename']}: {best_mat} (r={max_corr:.4f})\")\n\nprint(\"\\nFinal result list:\", results)\n",
+        "file_ids": [
+          "2026-08-07/reference_library.csv",
+          "2026-08-07/T126_1.csv",
+          "2026-08-07/T126_2.csv",
+          "2026-08-07/T126_3.csv",
+          "2026-08-07/T126_4.csv",
+          "2026-08-07/T126_5.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Helper to find file by name\ndef get_file(name):\n    for f in files:\n        if f['filename'] == name:\n            return f\n    return None\n\nref_f = get_file('reference_library.csv')\nsample_names = ['T126_1.csv', 'T126_2.csv', 'T126_3.csv', 'T126_4.csv', 'T126_5.csv']\n\n# Reference library extraction\nref_ids = ref_f['table']['spectrum_id'] # list of strings\nref_mats = ref_f['table']['material']   # list of strings\nref_shift = ref_f['table']['raman_shift_cm-1'] # np.ndarray\nref_ints = ref_f['table']['intensity']        # np.ndarray\n\nunique_ids = []\nfor uid in ref_ids:\n    if uid not in unique_ids:\n        unique_ids.append(uid)\n\nlibrary = []\nfor uid in unique_ids:\n    # Manual mask for list\n    mask = np.array([sid == uid for sid in ref_ids])\n    library.append({\n        'id': uid,\n        'material': ref_mats[mask][0] if isinstance(ref_mats, np.ndarray) else ref_mats[np.where(mask)[0][0]],\n        'intensity': ref_ints[mask]\n    })\n\nresults = []\nfor s_name in sample_names:\n    s_f = get_file(s_name)\n    s_y = s_f['table']['intensity']\n    \n    best_mat = None\n    max_corr = -1.0\n    \n    for ref in library:\n        ref_y = ref['intensity']\n        # Ensure lengths match for correlation\n        if len(s_y) == len(ref_y):\n            corr = np.corrcoef(s_y, ref_y)[0, 1]\n        else:\n            # If they don't match, we need to interpolate or truncate. \n            # But based on the data (1801 pts each), they should match.\n            # Let's just handle it by slicing if needed.\n            min_len = min(len(s_y), len(ref_y))\n            corr = np.corrcoef(s_y[:min_len], ref_y[:min_len])[0, 1]\n            \n        if corr > max_corr:\n            max_corr = corr\n            best_mat = ref['material']\n    \n    results.append(best_mat)\n    print(f\"{s_name}: {best_mat} (r={max_corr:.4f})\")\n\nprint(\"\\nFinal results:\", results)\n",
+        "file_ids": [
+          "2026-08-07/reference_library.csv",
+          "2026-08-07/T126_1.csv",
+          "2026-08-07/T126_2.csv",
+          "2026-08-07/T126_3.csv",
+          "2026-08-07/T126_4.csv",
+          "2026-08-07/T126_5.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T126_3f4d1c",
+  "elapsed_s": 150.85,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

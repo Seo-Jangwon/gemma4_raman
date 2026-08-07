@@ -1,0 +1,232 @@
+{
+  "task": "T075",
+  "axis": "data processing",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 4,
+  "checks_total": 4,
+  "question": "Compare the two sessions in T075_a.csv and T075_b.csv and report in one summary: the 1001 cm-1 peak position difference, the RSD (ddof=1, %) of the peak intensity in each session, and the cosine similarity between the two mean spectra (common axis, L2).",
+  "criteria": "NUM ×4 (position difference ±1 cm-1 / RSD 5% / similarity ±0.01)",
+  "checks": [
+    {
+      "name": "RSD(a)",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3.2782 (expected 3.27818, rel.err=6.105e-06 ≤ 0.05)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "RSD(b)",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3.1544 (expected 3.10577, rel.err=0.01566 ≤ 0.05)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "similarity of the means",
+      "passed": true,
+      "score": 1.0,
+      "detail": "0.9571 (expected 0.957068, |Δ|=3.191e-05 ≤ 0.01)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "peak position difference",
+      "passed": true,
+      "score": 1.0,
+      "detail": "1.2 (expected 1, |Δ|=0.2 ≤ 1.0)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T075_a.csv",
+    "T075_b.csv"
+  ],
+  "answer_text": "To compare the two Raman measurement sessions provided in `T075_a.csv` and `T075_b.csv`, I analyzed the spectra from both files, focusing on the peak located around $1001 \\text{ cm}^{-1}$. \n\nFor each session, I grouped the data by spectrum ID, identified the local maximum in the range $[950, 1050] \\text{ cm}^{-1}$, and extracted the position and intensity of this peak for all spectra in that group. I also computed the mean spectrum for each session to evaluate their overall similarity.\n\n**Summary of Results:**\n- **Peak Position:** The mean position of the $1001 \\text{ cm}^{-1}$ peak was found to be $1001.0 \\text{ cm}^{-1}$ for Session A and $1002.2 \\text{ cm}^{-1}$ for Session B, resulting in a difference of $1.2 \\text{ cm}^{-1}$.\n- **Intensity Precision:** The relative standard deviation (RSD) of the peak intensity within each session ($\\text{ddof}=1$) was $3.278\\%$ for Session A and $3.154\\%$ for Session B, indicating consistent measurement precision across both sets.\n- **Spectral Similarity:** The cosine similarity between the mean spectra of the two sessions (calculated using L2 norms on a common axis) is $0.9571$, suggesting a high degree of spectral shape correlation despite the small shift in peak position.\n\n```json\n{\"rsd_a_pct\": 3.2782, \"rsd_b_pct\": 3.1544, \"cosine_of_means\": 0.9571, \"peak_position_diff\": 1.2}\n```",
+  "answer_json": {
+    "rsd_a_pct": 3.2782,
+    "rsd_b_pct": 3.1544,
+    "cosine_of_means": 0.9571,
+    "peak_position_diff": 1.2
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T075_a.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T075_b.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\n\ndef analyze_session(file_data):\n    ids = file_data['spectrum_id']\n    shifts = file_data['raman_shift_cm-1']\n    intensities = file_data['intensity']\n    \n    unique_ids = np.unique(ids)\n    all_spectra_y = []\n    all_x = None\n    \n    peak_positions = []\n    peak_intensities = []\n    \n    for sid in unique_ids:\n        mask = (ids == sid)\n        x = shifts[mask]\n        y = intensities[mask]\n        \n        if all_x is None:\n            all_x = x\n        \n        # Focus on region around 1001 cm-1 to find the peak\n        region_mask = (x >= 950) & (x <= 1050)\n        rx = x[region_mask]\n        ry = y[region_mask]\n        \n        # Find local max in this region\n        idx = np.argmax(ry)\n        peak_pos = rx[idx]\n        peak_val = ry[idx]\n        \n        peak_positions.append(peak_pos)\n        peak_intensities.append(peak_val)\n        all_spectra_y.append(y)\n    \n    mean_spectrum = np.mean(all_spectra_y, axis=0)\n    return {\n        'mean_pos': np.mean(peak_positions),\n        'intensities': np.array(peak_intensities),\n        'mean_spec': mean_spectrum,\n        'x': all_x\n    }\n\n# Process File A\nres_a = analyze_session(files[0]['table'])\n# Process File B\nres_b = analyze_session(files[1]['table'])\n\n# 1. Peak position difference\npos_diff = abs(res_a['mean_pos'] - res_b['mean_pos'])\n\n# 2. RSD (%) of peak intensity (ddof=1)\ndef calc_rsd(data):\n    std = np.std(data, ddof=1)\n    mean = np.mean(data)\n    return (std / mean) * 100 if mean != 0 else 0\n\nrsd_a = calc_rsd(res_a['intensities'])\nrsd_b = calc_rsd(res_b['intensities'])\n\n# 3. Cosine similarity between mean spectra\nvec_a = res_a['mean_spec']\nvec_b = res_b['mean_spec']\ncos_sim = np.dot(vec_a, vec_b) / (np.linalg.norm(vec_a) * np.linalg.norm(vec_b))\n\nprint(f\"Session A: Mean Pos={res_a['mean_pos']:.4f}, RSD={rsd_a:.4f}%\")\nprint(f\"Session B: Mean Pos={res_b['mean_pos']:.4f}, RSD={rsd_b:.4f}%\")\nprint(f\"Pos Diff: {pos_diff:.4f}\")\nprint(f\"Cosine Similarity: {cos_sim:.4f}\")\n",
+        "file_ids": [
+          "2026-08-07/T075_a.csv",
+          "2026-08-07/T075_b.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\ndef analyze_session(file_data, session_name):\n    ids = file_data['spectrum_id']\n    shifts = file_data['raman_shift_cm-1']\n    intensities = file_data['intensity']\n    \n    unique_ids = np.unique(ids)\n    all_spectra_y = []\n    all_x = None\n    \n    peak_positions = []\n    peak_intensities = []\n    \n    for sid in unique_ids:\n        mask = (ids == sid)\n        x = shifts[mask]\n        y = intensities[mask]\n        \n        if all_x is None:\n            all_x = x\n        \n        # Debug region check\n        region_mask = (x >= 950) & (x <= 1050)\n        rx = x[region_mask]\n        ry = y[region_mask]\n        \n        if len(ry) == 0:\n            print(f\"Error in {session_name} spectrum {sid}: No data in [950, 1050]. Min x={x.min()}, Max x={x.max()}\")\n            continue\n            \n        idx = np.argmax(ry)\n        peak_pos = rx[idx]\n        peak_val = ry[idx]\n        \n        peak_positions.append(peak_pos)\n        peak_intensities.append(peak_val)\n        all_spectra_y.append(y)\n    \n    mean_spectrum = np.mean(all_spectra_y, axis=0)\n    return {\n        'mean_pos': np.mean(peak_positions),\n        'intensities': np.array(peak_intensities),\n        'mean_spec': mean_spectrum,\n        'x': all_x\n    }\n\nres_a = analyze_session(files[0]['table'], \"Session A\")\nres_b = analyze_session(files[1]['table'], \"Session B\")\n\npos_diff = abs(res_a['mean_pos'] - res_b['mean_pos'])\n\ndef calc_rsd(data):\n    std = np.std(data, ddof=1)\n    mean = np.mean(data)\n    return (std / mean) * 100 if mean != 0 else 0\n\nrsd_a = calc_rsd(res_a['intensities'])\nrsd_b = calc_rsd(res_b['intensities'])\n\nvec_a = res_a['mean_spec']\nvec_b = res_b['mean_spec']\ncos_sim = np.dot(vec_a, vec_b) / (np.linalg.norm(vec_a) * np.linalg.norm(vec_b))\n\nprint(f\"Session A: Mean Pos={res_a['mean_pos']:.4f}, RSD={rsd_a:.4f}%\")\nprint(f\"Session B: Mean Pos={res_b['mean_pos']:.4f}, RSD={rsd_b:.4f}%\")\nprint(f\"Pos Diff: {pos_diff:.4f}\")\nprint(f\"Cosine Similarity: {cos_sim:.4f}\")\n",
+        "file_ids": [
+          "2026-08-07/T075_a.csv",
+          "2026-08-07/T075_b.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\nfor i, f in enumerate(files):\n    name = f['filename']\n    ids = f['table']['spectrum_id']\n    counts = {}\n    for sid in np.unique(ids):\n        counts[sid] = np.sum(ids == sid)\n    print(f\"File {name} has unique IDs: {list(counts.keys())}\")\n    print(f\"Row counts per ID: {counts}\")\n",
+        "file_ids": [
+          "2026-08-07/T075_a.csv",
+          "2026-08-07/T075_b.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\nfor i, f in enumerate(files):\n    print(f\"File {f['filename']} spectrum_id type: {type(f['table']['spectrum_id'])}\")\n    print(f\"First 5 elements of spectrum_id: {f['table']['spectrum_id'][:5]}\")\n",
+        "file_ids": [
+          "2026-08-07/T075_a.csv",
+          "2026-08-07/T075_b.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\nfor i, f in enumerate(files):\n    print(f\"File {f['filename']} spectrum_id first 10: {f['table']['spectrum_id'][:10]}\")\n",
+        "file_ids": [
+          "2026-08-07/T075_a.csv",
+          "2026-08-07/T075_b.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\ndef process_file(table):\n    ids = table['spectrum_id']\n    shifts = table['raman_shift_cm-1']\n    intensities = table['intensity']\n    \n    # Grouping by ID manually to avoid masking issues\n    groups = {}\n    for i in range(len(ids)):\n        sid = ids[i]\n        if sid not in groups:\n            groups[sid] = {'x': [], 'y': []}\n        groups[sid]['x'].append(shifts[i])\n        groups[sid]['y'].append(intensities[i])\n    \n    # Convert to arrays and analyze\n    peak_pos = []\n    peak_int = []\n    mean_spec_y = []\n    final_x = None\n    \n    for sid in sorted(groups.keys()):\n        x = np.array(groups[sid]['x'])\n        y = np.array(groups[sid]['y'])\n        \n        if final_x is None:\n            final_x = x\n            \n        # Region around 1001 cm-1\n        mask = (x >= 950) & (x <= 1050)\n        rx = x[mask]\n        ry = y[mask]\n        \n        if len(ry) > 0:\n            idx = np.argmax(ry)\n            peak_pos.append(rx[idx])\n            peak_int.append(ry[idx])\n            mean_spec_y.append(y)\n    \n    return {\n        'mean_pos': np.mean(peak_pos),\n        'intensities': np.array(peak_int),\n        'mean_spec': np.mean(mean_spec_y, axis=0),\n        'x': final_x\n    }\n\nres_a = process_file(files[0]['table'])\nres_b = process_file(files[1]['table'])\n\npos_diff = abs(res_a['mean_pos'] - res_b['mean_pos'])\n\ndef calc_rsd(data):\n    std = np.std(data, ddof=1)\n    mu = np.mean(data)\n    return (std / mu) * 100 if mu != 0 else 0\n\nrsd_a = calc_rsd(res_a['intensities'])\nrsd_b = calc_rsd(res_b['intensities'])\n\nvec_a = res_a['mean_spec']\nvec_b = res_b['mean_spec']\ncos_sim = np.dot(vec_a, vec_b) / (np.linalg.norm(vec_a) * np.linalg.norm(vec_b))\n\nprint(f\"Sess A: Mean Pos={res_a['mean_pos']:.4f}, RSD={rsd_a:.4f}%\")\nprint(f\"Sess B: Mean Pos={res_b['mean_pos']:.4f}, RSD={rsd_b:.4f}%\")\nprint(f\"Pos Diff: {pos_diff:.4f}\")\nprint(f\"Cosine Sim: {cos_sim:.4f}\")\n",
+        "file_ids": [
+          "2026-08-07/T075_a.csv",
+          "2026-08-07/T075_b.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "session_id": "bench_2026-08-07_AILA_AILA_T075_8dbab2",
+  "elapsed_s": 106.65,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}
