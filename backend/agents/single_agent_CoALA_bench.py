@@ -11,7 +11,11 @@ tool_call을 그대로 실행하고, 장기기억이 없으며, 오케스트레�
 실험의 독립변수는 오직 오케스트레이션 아키텍처(ReAct vs CoALA)다. 따라서:
   - LLM 계층은 AILA와 100% 동일하다: ChatOllama(gemma4)만 쓰고 다른 LLM은 쓰지 않는다.
   - 공유 자원(RAMAN_TOOLS/TOOL_DISPATCH/knowledge)만 공유하고 AILA 코드는 import하지
-    않는다. 얇은 유틸(_slim, _msg_text, dose 차단기 등)은 결합을 피하려 여기에 다시 둔다.
+    않는다. 얇은 유틸(_msg_text 등)은 결합을 피하려 여기에 다시 둔다.
+    단, **두 에이전트가 어긋나면 비교 자체가 무너지는 값**은 사본으로 두지 않고 공통
+    상위 모듈에 둔다 — backend.llm_config(모델·num_ctx), backend.safety_limits(조사량
+    상한), backend.tool_slim(관측 축약). AILA 를 import 하는 게 아니라 양쪽이 같은
+    상위 모듈을 보는 것이므로 위의 독립성 원칙과 충돌하지 않는다.
 
 [CoALA 매핑 — 논문 §4]
   · Working memory  : WorkingMemory dataclass — LLM 호출 간 지속되는 자료구조
@@ -994,20 +998,14 @@ def _get_dispatch():
 _INJECTED_IMAGE = "_injected_image"     # 이미지 주입용 HumanMessage 표시
 
 
-# 길이 필터를 면제하는 키 — AILA의 _SLIM_KEEP_KEYS와 동일해야 비교가 공정하다.
-# files(list_uploaded_files)를 버리면 모델은 count만 받고 file_id를 얻을 길이 없어
-# 같은 도구를 수십 번 재호출한다. 항목당 4필드짜리 짧은 dict라 부담은 작다.
-# artifacts/saved_files 를 예외로 두는 이유는 AILA 의 같은 상수 주석 참고.
-_SLIM_KEEP_KEYS = {"files", "artifacts", "saved_files"}
-
-
-def _slim(result):
-    """대용량 배열(스펙트럼 원본 등)은 컨텍스트에 싣지 않는다 — 토큰 낭비/혼란 방지.
-    길이 32 초과 리스트를 버린다(_SLIM_KEEP_KEYS 제외). 기억 조회 결과는 짧아 걸리지 않는다."""
-    if isinstance(result, dict):
-        return {k: v for k, v in result.items()
-                if k in _SLIM_KEEP_KEYS or not (isinstance(v, list) and len(v) > 32)}
-    return result
+# 관측 축약은 backend.tool_slim 단일 출처다(2026-08-09). 이 자리의 옛 주석이 이미
+# "AILA의 _SLIM_KEEP_KEYS와 동일해야 비교가 공정하다"고 적고 있었는데, 그러면서도
+# 네 파일(AILA·AILA 벤치·CoALA 대화 사본·이 파일)에 사본으로 두고 있었다 —
+# 갈라지면 두 에이전트가 서로 다른 관측을 받게 되고, 그 순간 비교의 독립변수가
+# 오케스트레이션 하나가 아니게 된다. tool_slim 은 AILA 를 import 하는 게 아니라 두
+# 에이전트의 공통 상위 의존이므로, 서로를 import 하지 않는다는 원칙을 깨지 않는다
+# (backend/safety_limits.py 가 조사량 상한에 대해 같은 논리로 만들어졌다).
+from backend.tool_slim import slim as _slim
 
 
 def _msg_text(msg) -> str:

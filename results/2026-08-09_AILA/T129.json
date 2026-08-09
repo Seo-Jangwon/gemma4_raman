@@ -1,0 +1,211 @@
+{
+  "task": "T129",
+  "axis": "identification",
+  "mode": "live",
+  "result": "fail",
+  "reason": "shift: 3 (expected 2.7, |Δ|=0.3 ≤ 0.2)  [answer]",
+  "checks_passed": 1,
+  "checks_total": 2,
+  "question": "All peaks of T129.csv are shifted by the same unknown amount. Estimate the shift by cross-correlation against reference_library.csv, correct it, identify the material, and report the estimated shift. Report the shift as positive when the sample peaks sit at higher wavenumbers than the reference, i.e. the value you subtract to correct them.",
+  "criteria": "NUM(delta ±0.2 cm-1, sign included) + EXACT(material)",
+  "checks": [
+    {
+      "name": "shift",
+      "passed": false,
+      "score": 0.0,
+      "detail": "3 (expected 2.7, |Δ|=0.3 ≤ 0.2)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'polystyrene' (expected 'polystyrene')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [
+    {
+      "check": "shift",
+      "kind": "NUM",
+      "reason": "3 (expected 2.7, |Δ|=0.3 ≤ 0.2)  [answer]"
+    }
+  ],
+  "blocked": [],
+  "input_files": [
+    "T129.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "The estimated Raman shift for sample T129 was determined by performing a cross-correlation between the normalized intensity of the sample spectrum and the spectra in the reference library. The material with the highest correlation was identified as polystyrene, with an estimated peak shift of 3.0 $\\text{cm}^{-1}$. This indicates that the peaks in the sample are shifted toward higher wavenumbers relative to the reference.\n\nThe sample spectrum was corrected by subtracting this shift from its Raman axis, and the processed result has been saved as `T129_corrected`.\n\n```json\n{\"shift_cm1\": 3.0, \"material\": \"polystyrene\"}\n```",
+  "answer_json": {
+    "shift_cm1": 3.0,
+    "material": "polystyrene"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-09/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-09/T129.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\n\n# Load data\nsample_id = '2026-08-09/T129.csv'\nref_id = '2026-08-09/reference_library.csv'\n\n# Sample spectrum\ns_shift = files[0]['table']['raman_shift_cm-1'] if files[0]['filename'] == 'T129.csv' else files[1]['table']['raman_shift_cm-1']\ns_int = files[0]['table']['intensity'] if files[0]['filename'] == 'T129.csv' else files[1]['table']['intensity']\n\n# Reference library\nref_file = [f for f in files if f['filename'] == 'reference_library.csv'][0]\nref_mat_all = ref_file['table']['material']\nref_shift_all = ref_file['table']['raman_shift_cm-1']\nref_int_all = ref_file['table']['intensity']\n\nmaterials = np.unique(ref_mat_all)\nbest_corr = -np.inf\nbest_mat = None\nbest_shift = 0\n\n# Z-normalize sample\ns_norm = (s_int - np.mean(s_int)) / np.std(s_int)\n\nfor mat in materials:\n    mask = (ref_mat_all == mat)\n    r_shift = ref_shift_all[mask]\n    r_int = ref_int_all[mask]\n    \n    # Ensure reference is on the same grid as sample or interpolate\n    # According to inspection, both are 200-2000. Let's check if lengths match.\n    if len(r_int) != len(s_int):\n        # Interpolate reference to sample grid\n        r_int = np.interp(s_shift, r_shift, r_int)\n    \n    r_norm = (r_int - np.mean(r_int)) / np.std(r_int)\n    \n    # Cross-correlation\n    corr = signal.correlate(s_norm, r_norm, mode='same')\n    # 'same' mode centers the result. The peak is at index 0 if no shift.\n    # If sample peaks are higher (shifted right), they align with ref when shifted left.\n    # Let's check the lag:\n    lags = np.arange(-len(s_norm)//2, len(s_norm)//2)\n    # Wait, signal.correlate index mapping can be tricky. \n    # Better use mode='full' and find peak relative to center.\n    corr_full = signal.correlate(s_norm, r_norm, mode='full')\n    lags_full = np.arange(-len(r_norm)+1, len(s_norm))\n    \n    peak_idx = np.argmax(corr_full)\n    lag = lags_full[peak_idx] # Shift in indices\n    # If lag > 0, sample is shifted \"forward\" relative to ref? \n    # Let's test: S = [0, 1], R = [1, 0]. shift=1. \n    # corr([0,1], [1,0]) -> [0*1, 0*0+1*1, 1*0] = [0, 1, 0]. Peak at index 1. Lag = 1 - (2-1) = 0? No.\n    # Let's use a simpler method for lag:\n    # shift = (peak_index - length_of_ref + 1) * step\n    shift_val = lag * 1.0 # since step is 1 cm-1\n    \n    max_c = corr_full[peak_idx]\n    if max_c > best_corr:\n        best_corr = max_c\n        best_mat = mat\n        best_shift = shift_val\n\nprint(f\"Best material: {best_mat}\")\nprint(f\"Estimated shift: {best_shift} cm-1\")\nprint(f\"Max correlation value: {best_corr}\")\n\n# Now correct the sample and save it\ncorrected_shift = s_shift - best_shift\nsave_result('T129_corrected', s_int, raman_shift=corrected_shift)\n",
+        "file_ids": [
+          "2026-08-09/T129.csv",
+          "2026-08-09/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\n\n# Identify files correctly\nsample_file = [f for f in files if f['filename'] == 'T129.csv'][0]\nref_file = [f for f in files if f['filename'] == 'reference_library.csv'][0]\n\n# Sample data - force to 1D float arrays\ns_shift = sample_file['table']['raman_shift_cm-1'].astype(float)\ns_int = sample_file['table']['intensity'].astype(float)\n\n# Reference library data\nref_mat_all = ref_file['table']['material']\nref_shift_all = ref_file['table']['raman_shift_cm-1'].astype(float)\nref_int_all = ref_file['table']['intensity'].astype(float)\n\nmaterials = np.unique(ref_mat_all)\nbest_corr = -np.inf\nbest_mat = None\nbest_shift = 0\n\n# Z-normalize sample once\ns_norm = (s_int - np.mean(s_int)) / np.std(s_int)\n\nfor mat in materials:\n    mask = (ref_mat_all == mat)\n    r_shift = ref_shift_all[mask]\n    r_int = ref_int_all[mask]\n    \n    # Both are expected to be on 200-2000 grid.\n    # If lengths differ, we must interpolate. \n    # Let's check the range and spacing of reference for this material.\n    if len(r_int) != len(s_int):\n        # Interpolate reference intensities onto sample shift axis\n        r_int_interp = np.interp(s_shift, r_shift, r_int)\n    else:\n        r_int_interp = r_int\n\n    # Z-normalize reference\n    r_norm = (r_int_interp - np.mean(r_int_interp)) / np.std(r_int_interp)\n    \n    # Full cross-correlation\n    corr = signal.correlate(s_norm, r_norm, mode='full')\n    lags = signal.correlation_lags(len(s_norm), len(r_norm))\n    \n    peak_idx = np.argmax(corr)\n    lag = lags[peak_idx]\n    \n    # In scipy.signal.correlate: \n    # If sample is shifted right (higher nu), we need to shift it left (negative lag) \n    # to align with ref? No, wait.\n    # Example: S = [0, 1], R = [1, 0]. Peak should be at lag=1 if S[1]=R[0]?\n    # Let's check indices: s_norm[n] and r_norm[n-lag]\n    # If shift is positive (S peaks > R peaks), then S(nu) matches R(nu - shift).\n    # In array index terms, if S[i+shift] corresponds to R[i], \n    # then the peak in correlate(s_norm, r_norm) occurs at lag = +shift.\n    \n    max_c = corr[peak_idx]\n    if max_c > best_corr:\n        best_corr = max_c\n        best_mat = mat\n        best_shift = float(lag)\n\nprint(f\"Best material: {best_mat}\")\nprint(f\"Estimated shift: {best_shift} cm-1\")\nprint(f\"Max correlation value: {best_corr}\")\n\n# Correct the sample spectrum and save it\ncorrected_shift = s_shift - best_shift\nsave_result('T129_corrected', s_int, raman_shift=corrected_shift)\n",
+        "file_ids": [
+          "2026-08-09/T129.csv",
+          "2026-08-09/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\n\n# Identify files correctly\nsample_file = [f for f in files if f['filename'] == 'T129.csv'][0]\nref_file = [f for f in files if f['filename'] == 'reference_library.csv'][0]\n\n# Sample data - force to 1D float arrays and flatten\ns_shift = sample_file['table']['raman_shift_cm-1'].astype(float).flatten()\ns_int = sample_file['table']['intensity'].astype(float).flatten()\n\n# Reference library data\nref_mat_all = ref_file['table']['material']\nref_shift_all = ref_file['table']['raman_shift_cm-1'].astype(float).flatten()\nref_int_all = ref_file['table']['intensity'].astype(float).flatten()\n\nmaterials = np.unique(ref_mat_all)\nbest_corr = -np.inf\nbest_mat = None\nbest_shift = 0\n\n# Z-normalize sample once\ns_norm = (s_int - np.mean(s_int)) / np.std(s_int)\n\nfor mat in materials:\n    mask = (ref_mat_all == mat)\n    r_shift = ref_shift_all[mask]\n    r_int = ref_int_all[mask]\n    \n    # Reference spectra are likely the same size. Just in case, we flatten and check.\n    r_int = r_int.flatten()\n    \n    if len(r_int) != len(s_int):\n        # This should not happen based on analysis, but for robustness:\n        # Use a simple linear interpolation if needed\n        r_int_final = np.interp(s_shift, r_shift, r_int)\n    else:\n        r_int_final = r_int\n\n    # Z-normalize reference\n    r_norm = (r_int_final - np.mean(r_int_final)) / np.std(r_int_final)\n    \n    # Full cross-correlation\n    corr = signal.correlate(s_norm, r_norm, mode='full')\n    lags = signal.correlation_lags(len(s_norm), len(r_norm))\n    \n    peak_idx = np.argmax(corr)\n    lag = lags[peak_idx]\n    \n    max_c = corr[peak_idx]\n    if max_c > best_corr:\n        best_corr = max_c\n        best_mat = mat\n        best_shift = float(lag)\n\nprint(f\"Best material: {best_mat}\")\nprint(f\"Estimated shift: {best_shift} cm-1\")\nprint(f\"Max correlation value: {best_corr}\")\n\n# Correct the sample spectrum and save it\ncorrected_shift = s_shift - best_shift\nsave_result('T129_corrected', s_int, raman_shift=corrected_shift)\n",
+        "file_ids": [
+          "2026-08-09/T129.csv",
+          "2026-08-09/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\n\nsample_file = [f for f in files if f['filename'] == 'T129.csv'][0]\nref_file = [f for f in files if f['filename'] == 'reference_library.csv'][0]\n\ns_shift = sample_file['table']['raman_shift_cm-1'].astype(float).flatten()\ns_int = sample_file['table']['intensity'].astype(float).flatten()\n\nref_mat_all = ref_file['table']['material']\nref_shift_all = ref_file['table']['raman_shift_cm-1'].astype(float).flatten()\nref_int_all = ref_file['table']['intensity'].astype(float).flatten()\n\nmaterials = np.unique(ref_mat_all)\nbest_corr = -np.inf\nbest_mat = None\nbest_shift = 0\n\ns_norm = (s_int - np.mean(s_int)) / np.std(s_int)\n\nfor mat in materials:\n    mask = (ref_mat_all == mat)\n    r_shift = ref_shift_all[mask]\n    r_int = ref_int_all[mask].flatten()\n    \n    print(f\"Material {mat}: r_int len={len(r_int)}, s_int len={len(s_int)}\")\n    \n    if len(r_int) == len(s_int):\n        r_int_final = r_int\n    else:\n        # Force 1D for interp\n        x = s_shift.astype(float)\n        xp = r_shift.astype(float)\n        fp = r_int.astype(float)\n        r_int_final = np.interp(x, xp, fp)\n\n    r_norm = (r_int_final - np.mean(r_int_final)) / np.std(r_int_final)\n    corr = signal.correlate(s_norm, r_norm, mode='full')\n    lags = signal.correlation_lags(len(s_norm), len(r_norm))\n    peak_idx = np.argmax(corr)\n    lag = lags[peak_idx]\n    max_c = corr[peak_idx]\n    if max_c > best_corr:\n        best_corr = max_c\n        best_mat = mat\n        best_shift = float(lag)\n\nprint(f\"FINAL RESULTS -> Best material: {best_mat}, Shift: {best_shift}\")\n\ncorrected_shift = s_shift - best_shift\nsave_result('T129_corrected', s_int, raman_shift=corrected_shift)\n",
+        "file_ids": [
+          "2026-08-09/T129.csv",
+          "2026-08-09/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\n\nsample_file = [f for f in files if f['filename'] == 'T129.csv'][0]\nref_file = [f for f in files if f['filename'] == 'reference_library.csv'][0]\n\ns_shift = sample_file['table']['raman_shift_cm-1'].astype(float).flatten()\ns_int = sample_file['table']['intensity'].astype(float).flatten()\n\nref_mat_all = np.array(ref_file['table']['material']).flatten()\nref_shift_all = ref_file['table']['raman_shift_cm-1'].astype(float).flatten()\nref_int_all = ref_file['table']['intensity'].astype(float).flatten()\n\nprint(\"Sample length:\", len(s_int))\nprint(\"Reference total length:\", len(ref_int_all))\nprint(\"Unique materials:\", np.unique(ref_mat_all))\n\nmaterials = np.unique(ref_mat_all)\nbest_corr = -np.inf\nbest_mat = None\nbest_shift = 0\n\ns_norm = (s_int - np.mean(s_int)) / np.std(s_int)\n\nfor mat in materials:\n    mask = (ref_mat_all == mat)\n    r_shift = ref_shift_all[mask]\n    r_int = ref_int_all[mask]\n    \n    if len(r_int) == 0:\n        print(f\"Warning: No data found for material {mat}\")\n        continue\n\n    # Ensure they are 1D arrays\n    xp = r_shift.flatten()\n    fp = r_int.flatten()\n    x = s_shift.flatten()\n\n    if len(fp) == len(x):\n        r_int_final = fp\n    else:\n        # Interp requires 1D arrays of floats\n        r_int_final = np.interp(x, xp, fp)\n\n    r_norm = (r_int_final - np.mean(r_int_final)) / np.std(r_int_final)\n    corr = signal.correlate(s_norm, r_norm, mode='full')\n    lags = signal.correlation_lags(len(s_norm), len(r_norm))\n    peak_idx = np.argmax(corr)\n    lag = lags[peak_idx]\n    max_c = corr[peak_idx]\n    if max_c > best_corr:\n        best_corr = max_c\n        best_mat = mat\n        best_shift = float(lag)\n\nprint(f\"FINAL RESULTS -> Best material: {best_mat}, Shift: {best_shift}\")\ncorrected_shift = s_shift - best_shift\nsave_result('T129_corrected', s_int, raman_shift=corrected_shift)\n",
+        "file_ids": [
+          "2026-08-09/T129.csv",
+          "2026-08-09/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-09_AILA_AILA_T129_4211ed/spectra/01_T129_corrected.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "session_id": "bench_2026-08-09_AILA_AILA_T129_4211ed",
+  "elapsed_s": 142.39,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

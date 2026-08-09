@@ -385,28 +385,17 @@ def _get_dispatch():
 # 도구 호출
 # ══════════════════════════════════════════════════════════════════════════════
 
-# 길이 필터를 면제하는 키.
-# files(list_uploaded_files)를 버리면 모델은 count만 받고 file_id를 얻을 길이 없어
-# "ok인데 목록이 없다"며 같은 도구를 수십 번 재호출한다(실측: 업로드 62개일 때 25회).
-# 항목당 4필드짜리 짧은 dict라 통째로 실어도 토큰 부담은 작다 —
-# 이 필터가 원래 막으려던 건 수천 점짜리 숫자 배열이다.
-# artifacts/saved_files: list_session_artifacts 와 run_analysis 의 산출물 목록.
-# 항목당 몇 필드짜리 짧은 dict 이고, 버리면 모델이 "저장은 됐다는데 경로가 없다"며
-# 같은 저장을 반복한다(files 를 예외로 둔 것과 정확히 같은 이유).
-_SLIM_KEEP_KEYS = {"files", "artifacts", "saved_files"}
-
-
-def _slim(result):
-    """대용량 배열(스펙트럼 원본 등)은 컨텍스트에 그대로 싣지 않는다 —
-    토큰 낭비 + 모델 혼란 방지(구 hw_manager의 동일 정책 계승).
-
-    길이 32 초과 리스트를 통째로 버린다(_SLIM_KEEP_KEYS 제외). KB 검색 결과는
-    최대 3개짜리 리스트라 이 필터에 걸리지 않는다.
-    """
-    if isinstance(result, dict):
-        return {k: v for k, v in result.items()
-                if k in _SLIM_KEEP_KEYS or not (isinstance(v, list) and len(v) > 32)}
-    return result
+# 관측 축약(도구 결과 중 무엇을 모델 컨텍스트에 싣는가)은 backend.tool_slim 단일
+# 출처다(2026-08-09). 예전에는 같은 _slim() 과 _SLIM_KEEP_KEYS 가 이 파일·대화 사본·
+# CoALA·CoALA 벤치 사본 네 곳에 한 글자도 다르지 않게 복사돼 있었다 — CoALA 쪽 주석이
+# 이미 "AILA의 _SLIM_KEEP_KEYS와 동일해야 비교가 공정하다"고 적을 만큼 갈라지면 안 되는
+# 값인데도 사본으로 두고 있었다. tool_slim 은 Config.ini 에도 장비 SDK 에도 의존하지
+# 않아 항상 import 된다(backend/llm_config.py, backend/safety_limits.py 와 같은 논리).
+#
+# 옛 규칙은 최상위 한 겹만 봐서, 배열이 dict 안에 든 kinetic 측정을 그대로 통과시켰다
+# (5프레임 하나가 224,078자). 그게 num_ctx 를 넘겨 Ollama 가 프롬프트를 조용히 잘라냈고
+# 2026-08-09 N07 의 빈 응답("실행실패") 실제 원인이었다 — 경위는 tool_slim 머리말 참고.
+from backend.tool_slim import slim as _slim
 
 
 def _search_knowledge_base(args: dict) -> dict:
