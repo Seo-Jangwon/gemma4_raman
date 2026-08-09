@@ -6,9 +6,16 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# hardware_manager 경로 확보
+# 이 파일은 `python llm_client.py` 로 단독 실행되기도 해서 backend/ 를 sys.path 에 넣는다.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from hardware_manager import OLLAMA_MODEL
+# 모델명은 backend.llm_config 단일 출처(2026-08-09). 패키지 모드(서버)와 단독 스크립트
+# 모드를 모두 받는다 — optics_map.py 가 쓰는 것과 같은 이중 import 패턴이다.
+# 예전에는 hardware_manager 를 거쳤는데, 그 모듈은 장비 SDK 를 끌고 들어와 하드웨어가
+# 없으면 import 자체가 실패한다(모델명 한 줄 때문에 그럴 이유가 없다).
+try:
+    from backend.llm_config import OLLAMA_MODEL
+except ImportError:
+    from llm_config import OLLAMA_MODEL   # type: ignore[no-redef]
 
 SYSTEM_PROMPT = """당신은 라만 분광기 제어 AI입니다.
 사용 가능한 tool을 순서대로 호출해 사용자의 요청을 수행하세요.

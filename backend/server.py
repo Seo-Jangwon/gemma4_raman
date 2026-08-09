@@ -37,6 +37,11 @@ from pydantic import BaseModel
 # ── 백엔드 모듈 ────────────────────────────────────────────────────────────────
 from backend.hardware_manager import HardwareManager, get_manager
 import backend.llm_client as llm_client
+# ★ Ollama 모델·호스트·num_ctx·타임아웃을 바꾸려면 backend/llm_config.py 한 곳이다.
+#   (여기 두지 않은 이유: vbench 는 서버를 안 거치고 에이전트를 직접 import 하므로
+#    server.py 가 로드되지 않는다 — llm_config 머리말 참고.)
+#   파일을 고치지 않고 바꾸려면:  RAMAN_OLLAMA_MODEL=gemma4:12b python -m backend.server
+import backend.llm_config as _llm_config
 # 렌즈 시야·보정계수는 여기서 직접 쓰지 않는다 — 픽셀↔mm 변환은
 # backend.hw_tools.optics_map 단일 출처(/api/stage/move-pixel 참고).
 from backend.config import CAMERA_WIDTH, CAMERA_HEIGHT
@@ -82,6 +87,12 @@ async def lifespan(app: FastAPI):
     state = AppState()
     app.state.s = state
     loop = asyncio.get_event_loop()
+
+    # 어떤 LLM 으로 도는지 기동 로그 첫 줄에 박아 둔다. 모델을 바꿔 가며 돌릴 때
+    # (예: gemma4:31b → gemma4:12b) '지금 뜬 서버가 어느 모델인가'를 로그만 보고
+    # 확정할 수 있어야 한다 — 설정은 backend/llm_config.py 한 곳이고, 파일을 고치는
+    # 대신 RAMAN_OLLAMA_MODEL 환경변수로 띄우는 것이 권장 경로다.
+    print(f"[SERVER] LLM: {_llm_config.describe()}")
 
     # ── Phase 1: 빠른 장비 (스테이지/카메라/레이저/Ollama) ──
     fast_inits = [
@@ -485,7 +496,12 @@ async def agents_health(agent: str = "AILA"):
     return {
         "status": "ok",
         "agents": [f"single_agent_{name}"],
-        "model": "gemma4 (ollama)",
+        # 실제로 바인딩된 모델을 그대로 보고한다. 예전에는 "gemma4 (ollama)" 라는
+        # 고정 문자열이라, 모델을 바꿔 돌려도 health 는 늘 같은 답을 했다 —
+        # 어느 모델로 벤치를 돌렸는지 사후에 확인할 방법이 없었다.
+        "model": mod.OLLAMA_MODEL,
+        "host": mod.OLLAMA_HOST,
+        "num_ctx": _llm_config.NUM_CTX,
         "tools": len(mod.ALL_TOOLS),
     }
 

@@ -78,22 +78,21 @@ from backend.agents.knowledge import search_kb
 from backend.hw_tools.raman_tool_schemas import RAMAN_TOOLS
 from backend.spectrum_store import spectrum_event
 
-# hardware_manager는 장비 PC의 Config.ini를 읽으므로 개발 PC에서 import가 실패할 수
-# 있다. 모델명/호스트는 실패해도 기본값으로 굴러가야 하므로 try로 감싼다.
-try:
-    from backend.hardware_manager import OLLAMA_HOST, OLLAMA_MODEL
-except Exception:
-    OLLAMA_HOST = "http://192.168.1.15:11434"
-    OLLAMA_MODEL = "gemma4:31b"
+# LLM 백엔드 설정(모델·호스트·num_ctx·타임아웃)은 backend.llm_config 단일 출처다
+# (2026-08-09). 예전에는 hardware_manager 에서 import 하고 실패하면 같은 문자열을 여기
+# except 절에 다시 적었는데, hardware_manager 는 장비 PC 의 Config.ini 와 Andor SDK 를
+# 끌고 들어와 개발 PC 에서는 항상 실패한다 — 즉 **실제로 쓰이던 것은 폴백 사본**이었고,
+# 같은 사본이 CoALA·두 벤치 사본·reason_log 에도 각각 있어 모델을 바꾸려면 일곱 군데를
+# 고쳐야 했다. llm_config 는 Config.ini 에도 SDK 에도 의존하지 않아 항상 import 되므로
+# 폴백이 필요 없다(backend/safety_limits.py 와 같은 논리).
+from backend.llm_config import (
+    LLM_TIMEOUT_S as _LLM_TIMEOUT_S,
+    NUM_CTX as _NUM_CTX,
+    OLLAMA_HOST,
+    OLLAMA_MODEL,
+)
 
 _MAX_AGENT_STEPS = 100   # LLM 무한 루프 방지
-
-# Ollama 컨텍스트 윈도우(토큰). ChatOllama에 명시하지 않으면 Ollama가 호스트/모델
-# 기본값(대개 작음)을 쓰고, 프롬프트가 넘치면 '경고 없이' 앞부분(시스템 프롬프트+도구
-# 스키마)을 잘라내 모델이 빈 응답을 낸다("Failed to generate a response."의 실제 원인).
-# 5×5 그리드처럼 한 턴에 수십 개 도구 결과가 쌓여도(≈9k 토큰) 여유가 남도록 넉넉히 잡는다.
-# (원격 GPU 32GB VRAM 기준. VRAM이 부족해 OOM이면 이 값을 낮출 것.)
-_NUM_CTX = 100000
 
 # 조사량 하드 상한 (대화 한 턴 기준, mJ 단위 근사치의 누계).
 # 별도 위치별 추적이나 시료별 클램프 없이 "이번 턴에 쏜 총량"만 본다 —
@@ -104,16 +103,8 @@ _NUM_CTX = 100000
 # safety_limits 는 Config.ini 에 의존하지 않으므로 하드웨어 없이도 항상 import 된다.
 from backend.safety_limits import MAX_DOSE_MJ_PER_TURN as _MAX_DOSE_MJ_PER_TURN, estimate_dose_mj
 
-# LLM HTTP 호출 상한(초). ChatOllama 1.1.0 에는 timeout 파라미터가 없고, 밑단
-# ollama.Client(httpx)의 기본값도 무제한이라 '연결은 살아 있는데 응답이 안 오는'
-# 상태가 되면 llm.invoke()가 영원히 안 돌아온다. _MAX_AGENT_STEPS 는 반복 횟수
-# 카운터일 뿐 벽시계 가드가 아니라서 이 경우를 전혀 못 막는다.
-# (실측: Ollama 쪽 요청이 유실되자 소켓만 ESTABLISHED 로 남고 서버가 13분 넘게 정지.
-#  같은 상황을 로컬에서 재현하면 timeout 없이는 20초 후에도 반환되지 않는다.)
-# client_kwargs 의 timeout 은 httpx 로 그대로 전달되어 connect/read 양쪽에 걸린다.
-# 값은 정상 호출의 최악값(모델 로드 ~60s + 32k 컨텍스트 장문 생성)보다 넉넉히 크게 잡아
-# 멀쩡한 호출을 자르지 않으면서, 무한 정지만 '명확한 에러'로 강등한다.
-_LLM_TIMEOUT_S = float(os.getenv("RAMAN_LLM_TIMEOUT_S", "600"))
+# (_LLM_TIMEOUT_S 는 위 llm_config 에서 온다. 환경변수 이름은 RAMAN_LLM_TIMEOUT_S 로
+#  종전과 같다 — 이유와 실측 근거는 llm_config.LLM_TIMEOUT_S 주석 참고.)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

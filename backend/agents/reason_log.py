@@ -64,11 +64,10 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_ROOT = _PROJECT_ROOT / "results"
 FALLBACK_ROOT = _PROJECT_ROOT / "DetailLog" / "reasoning"
 
-try:
-    from backend.hardware_manager import OLLAMA_HOST, OLLAMA_MODEL
-except Exception:
-    OLLAMA_HOST = "http://192.168.1.15:11434"
-    OLLAMA_MODEL = "gemma4:31b"
+# 로그 머리말에 '어떤 모델로 돌았는가'를 적는 데 쓴다. 에이전트가 실제로 쓰는 값과
+# 반드시 같아야 하므로(다르면 로그가 거짓말을 한다) 같은 단일 출처를 읽는다 —
+# 예전에는 hardware_manager 폴백 사본이라 개발 PC 에서 조용히 갈라질 수 있었다.
+from backend.llm_config import OLLAMA_HOST, OLLAMA_MODEL
 
 
 def _flag(name: str, default: str = "1") -> bool:

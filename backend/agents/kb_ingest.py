@@ -246,11 +246,16 @@ def _caption_page(page: Any, fname: str, pno: int) -> str:
         "화면에 보이는 버튼/입력란 이름은 원문 그대로 유지하세요. "
         "페이지에 내용이 없으면 '내용 없음'이라고만 답하세요."
     )
+    # 캡션 모델은 에이전트가 쓰는 것과 같은 모델이다(backend.llm_config 단일 출처).
+    # 예전에는 여기만 "gemma4:31b" 로 박혀 있어, 모델을 바꿔도 KB 캡션은 옛 모델을
+    # 계속 불렀다 — 그 모델이 호스트에 없으면 색인이 통째로 캡션 없이 끝난다.
+    from backend.llm_config import OLLAMA_MODEL
+
     try:
         resp = requests.post(
             f"{_ollama_host().rstrip('/')}/api/generate",
             json={
-                "model": "gemma4:31b",
+                "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "images": [base64.b64encode(png).decode()],
                 "stream": False,

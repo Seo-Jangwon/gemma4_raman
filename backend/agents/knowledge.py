@@ -129,16 +129,15 @@ SPECTRA_MAX_CM = 3200.0
 
 
 def _ollama_host() -> str:
-    """Ollama 서버 주소. hw_manager와 같은 값을 쓰되 import 실패에 대비한다.
+    """Ollama 서버 주소 — backend.llm_config 단일 출처(2026-08-09).
 
-    hardware_manager는 pythoncom/장비 SDK를 끌고 들어올 수 있어서, 개발 PC에서
-    이 모듈만 단독으로 쓸 때 import가 터질 수 있다. 그래서 try로 감싸고 기본값을 둔다.
+    예전에는 hardware_manager 에서 import 하고 실패하면 기본값을 따로 적었다. 그런데
+    hardware_manager 는 pythoncom/장비 SDK 를 끌고 들어와 개발 PC 에서는 늘 실패하므로,
+    **실제로 쓰이는 것은 언제나 그 폴백 사본**이었다. llm_config 는 Config.ini 에도
+    SDK 에도 의존하지 않아 항상 import 되므로 try 가 필요 없다.
     """
-    try:
-        from backend.hardware_manager import OLLAMA_HOST  # type: ignore
-        return OLLAMA_HOST
-    except Exception:
-        return os.environ.get("OLLAMA_HOST", "http://192.168.1.15:11434")
+    from backend.llm_config import OLLAMA_HOST
+    return OLLAMA_HOST
 
 
 # ══════════════════════════════════════════════════════════════════════════════

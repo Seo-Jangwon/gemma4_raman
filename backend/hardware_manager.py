@@ -68,8 +68,13 @@ except ImportError:
 STAGE_DLL_PATH   = str(_BACKEND / "hw_tools" / "Tango_DLL.dll")
 
 LASER_PORT       = "COM4"
-OLLAMA_HOST      = "http://192.168.1.15:11434"
-OLLAMA_MODEL     = "gemma4:31b"
+
+# LLM 백엔드 설정은 backend.llm_config 단일 출처다(2026-08-09). 여기서 정의하지 않고
+# 재수출만 한다 — 이 모듈은 Config.ini 와 Andor SDK 를 끌고 들어와 개발 PC 에서 import 가
+# 실패하므로, 정본을 여기 두면 하드웨어 없는 환경의 모든 호출부가 각자 폴백 사본을
+# 갖게 된다(실제로 그랬다: 에이전트 4개 + reason_log 에 같은 문자열이 다섯 벌).
+# 기존 `from hardware_manager import OLLAMA_MODEL` 호출부를 깨지 않으려고 이름은 유지한다.
+from backend.llm_config import OLLAMA_HOST, OLLAMA_MODEL   # noqa: E402,F401
 
 # CCD 온도 목표 (°C)
 CCD_COOL_TARGET = -40   # 냉각 목표 — 안정화될 때까지 블로킹

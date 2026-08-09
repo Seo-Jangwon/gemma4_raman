@@ -85,25 +85,26 @@ from backend.agents.knowledge import search_kb
 from backend.hw_tools.raman_tool_schemas import RAMAN_TOOLS
 from backend.spectrum_store import spectrum_event
 
-# hardware_manager는 장비 PC의 Config.ini를 읽으므로 개발 PC에서 import가 실패할 수
-# 있다. 모델명/호스트는 실패해도 기본값으로 굴러가야 하므로 try로 감싼다.
-# (AILA와 동일한 폴백 — LLM 백엔드를 완전히 일치시키기 위함.)
-try:
-    from backend.hardware_manager import OLLAMA_HOST, OLLAMA_MODEL
-except Exception:
-    OLLAMA_HOST = "http://192.168.1.15:11434"
-    OLLAMA_MODEL = "gemma4:31b"
+# LLM 백엔드 설정(모델·호스트·num_ctx·타임아웃)은 backend.llm_config 단일 출처다
+# (2026-08-09). AILA 와 **같은 모듈에서 같은 값**을 읽는 것이 핵심이다 — 비교 실험의
+# 독립변수는 오케스트레이션 하나여야 하므로 LLM 백엔드가 갈라지면 실험이 무너진다.
+# 예전에는 양쪽이 hardware_manager import 실패 시 각자 except 절에 같은 문자열을 다시
+# 적었고(개발 PC 에서는 그 폴백이 늘 쓰였다), 사본이 벤치 사본 2개·reason_log 까지
+# 다섯 벌이라 한쪽만 고치면 조용히 갈라졌다.
+# llm_config 는 AILA 를 import 하는 것이 아니라 두 에이전트의 공통 상위 의존이므로,
+# '두 에이전트를 결합하지 않는다'는 이 파일의 원칙은 그대로다(safety_limits 와 같다).
+from backend.llm_config import (
+    LLM_TIMEOUT_S as _LLM_TIMEOUT_S,
+    NUM_CTX as _NUM_CTX,
+    OLLAMA_HOST,
+    OLLAMA_MODEL,
+)
 
 # ── 사이클/계획 예산 ──────────────────────────────────────────────────────────
 _MAX_CYCLES = 150            # 최대 의사결정 사이클 수 (= commit 행동 실행 횟수)
 _MAX_PLANNING_STEPS = 6     # 한 사이클 내 planning(정보수집) 라운드 상한
 _SOFT_PLAN_LIMIT = 4        # 이 라운드부터 "이제 실행/보고서로" 진행 문구를 강화
 _MAX_AGENT_STEPS = 150       # 턴 전체 propose() 호출 총량 가드(무한 루프 방지)
-
-# Ollama 컨텍스트 윈도우(토큰) — AILA와 동일한 이유·값. 명시하지 않으면 Ollama가
-# 호스트 기본값으로 프롬프트 앞부분(시스템 프롬프트+도구 스키마)을 조용히 잘라 빈 응답이 난다.
-# (원격 GPU 32GB VRAM 기준. VRAM 부족으로 OOM이면 낮출 것.)
-_NUM_CTX = 100000
 
 # 조사량 하드 상한 (대화 한 턴 기준). AILA와 동일한 물리적 회로차단기 —
 # "판단"이 아니라 폭주 방지용 최후 안전장치.
@@ -112,11 +113,9 @@ _NUM_CTX = 100000
 # 원칙은 그대로다. safety_limits 는 Config.ini 에 의존하지 않아 항상 import 된다.
 from backend.safety_limits import MAX_DOSE_MJ_PER_TURN as _MAX_DOSE_MJ_PER_TURN, estimate_dose_mj
 
-# LLM HTTP 호출 상한(초) — AILA 와 동일 정책(single_agent_AILA.py 의 _LLM_TIMEOUT_S 주석 참고).
-# ChatOllama 1.1.0 은 timeout 파라미터가 없고 밑단 httpx 기본값도 무제한이라, 응답이
-# 유실되면 invoke()가 영원히 안 돌아온다. CoALA 는 한 턴에 propose/evaluate 를 수십 번
-# 호출하므로 이 가드가 없으면 정지 지점을 특정하기가 AILA 보다 더 어렵다.
-_LLM_TIMEOUT_S = float(os.getenv("RAMAN_LLM_TIMEOUT_S", "600"))
+# (_LLM_TIMEOUT_S 는 위 llm_config 에서 온다 — AILA 와 같은 값·같은 환경변수
+#  RAMAN_LLM_TIMEOUT_S. CoALA 는 한 턴에 propose/evaluate 를 수십 번 호출하므로 이
+#  가드가 없으면 정지 지점을 특정하기가 AILA 보다 더 어렵다.)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
