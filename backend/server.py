@@ -225,7 +225,7 @@ class ExperimentRequest(BaseModel):
     # 어떤 에이전트 아키텍처로 실행할지 선택. 기본값 "AILA"(ReAct baseline)라
     # 이 필드를 보내지 않던 기존 프론트엔드/벤치마크는 그대로 동작한다.
     # "CoALA"를 주면 single_agent_CoALA(의사결정 사이클 + 장기기억)로 라우팅된다.
-    agent: Optional[str] = "AILA"
+    agent: Optional[str] = "CoALA"
 
 
 def _agent_module(name: Optional[str], bench: bool = False):

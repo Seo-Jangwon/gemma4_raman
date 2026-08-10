@@ -1,0 +1,183 @@
+{
+  "task": "T125",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Report the material in reference_library.csv most similar to T125.csv, and present at least two basis peaks that distinguish it from the second-ranked candidate.",
+  "criteria": "EXACT(material) + SET(basis peaks >=2 items, ±3 cm-1)",
+  "checks": [
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'PET' (expected 'PET')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T125.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "Based on a correlation analysis between the target spectrum `T125.csv` and the materials in `reference_library.csv`, the material most similar to T125 is **PET**.\n\nThe Pearson correlation coefficient for PET was approximately 0.995, while the second-ranked candidate, PMMA, showed a significantly lower correlation of approximately 0.151. The spectrum of T125 almost perfectly matches the characteristic peaks of PET.\n\nTo distinguish PET from the second-ranked material (PMMA), the following basis peaks can be used:\n1.  **$1614\\text{ cm}^{-1}$**: This is a strong, characteristic peak for PET that is entirely absent in the PMMA spectrum.\n2.  **$1096\\text{ cm}^{-1}$**: Another prominent PET feature that does not appear in PMMA (which instead shows peaks around $1122\\text{ cm}^{-1}$ and $1188\\text{ cm}^{-1}$).\n\n```json\n{\"material\": \"PET\"}\n```",
+  "answer_json": {
+    "material": "PET"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/T125.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\n# Load T125\nt125 = files[0] if files[0]['filename'] == 'T125.csv' else files[1]\nx_target = t125['table']['raman_shift_cm-1']\ny_target = t125['table']['intensity']\n\n# Normalize target (min-max)\ny_target_norm = (y_target - np.min(y_target)) / (np.max(y_target) - np.min(y_target))\n\n# Load reference library\nref_lib = files[1] if files[0]['filename'] == 'T125.csv' else files[0]\nref_ids = ref_lib['table']['spectrum_id']\nref_mats = ref_lib['table']['material']\nref_shifts = ref_lib['table']['raman_shift_cm-1']\nref_ints = ref_lib['table']['intensity']\n\n# Group reference spectra\nunique_ids = np.unique(ref_ids)\nresults = []\n\nfor sid in unique_ids:\n    mask = (ref_ids == sid)\n    x_ref = ref_shifts[mask]\n    y_ref = ref_ints[mask]\n    mat = ref_mats[mask][0]\n    \n    # Ensure same length/axis as target\n    if len(x_ref) == len(x_target):\n        corr, _ = pearsonr(y_target_norm, y_ref)\n        results.append({'id': sid, 'material': mat, 'correlation': corr})\n\n# Sort by correlation\nresults.sort(key=lambda x: x['correlation'], reverse=True)\n\nprint(f\"Top 5 matches:\\n{results[:5]}\")\n",
+        "file_ids": [
+          "2026-08-10/reference_library.csv",
+          "2026-08-10/T125.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\n# Map files correctly\ndata = {f['filename']: f for f in files}\nt125 = data['T125.csv']\nref_lib = data['reference_library.csv']\n\nx_target = t125['table']['raman_shift_cm-1']\ny_target = t125['table']['intensity']\n\n# Reference data\nref_ids = ref_lib['table']['spectrum_id']\nref_mats = ref_lib['table']['material']\nref_shifts = ref_lib['table']['raman_shift_cm-1']\nref_ints = ref_lib['table']['intensity']\n\nunique_ids = np.unique(ref_ids)\nprint(f\"Unique IDs found: {len(unique_ids)}\")\n\nresults = []\nfor sid in unique_ids:\n    mask = (ref_ids == sid)\n    x_ref = ref_shifts[mask]\n    y_ref = ref_ints[mask]\n    mat = ref_mats[mask][0]\n    \n    # Check if axis matches exactly; if not, interpolate or truncate\n    if len(x_ref) != len(x_target):\n        # Linear interpolation of reference to target grid\n        y_ref_interp = np.interp(x_target, x_ref, y_ref)\n    else:\n        y_ref_interp = y_ref\n\n    corr, _ = pearsonr(y_target, y_ref_interp)\n    results.append({'id': sid, 'material': mat, 'correlation': corr})\n\nresults.sort(key=lambda x: x['correlation'], reverse=True)\nprint(\"Top 5 matches:\")\nfor r in results[:5]:\n    print(r)\n",
+        "file_ids": [
+          "2026-08-10/reference_library.csv",
+          "2026-08-10/T125.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\nfrom scipy.signal import find_peaks\n\n# Map files correctly\ndata = {f['filename']: f for f in files}\nt125 = data['T125.csv']\nref_lib = data['reference_library.csv']\n\nx_target = np.ravel(t125['table']['raman_shift_cm-1'])\ny_target = np.ravel(t125['table']['intensity'])\n\n# Reference data\nref_ids = np.ravel(ref_lib['table']['spectrum_id'])\nref_mats = np.ravel(ref_lib['table']['material'])\nref_shifts = np.ravel(ref_lib['table']['raman_shift_cm-1'])\nref_ints = np.ravel(ref_lib['table']['intensity'])\n\nunique_ids = np.unique(ref_ids)\nresults = []\n\nfor sid in unique_ids:\n    mask = (ref_ids == sid)\n    x_ref = ref_shifts[mask]\n    y_ref = ref_ints[mask]\n    mat = ref_mats[mask][0]\n    \n    # Ensure 1D for interp\n    if len(x_ref) != len(x_target):\n        y_ref_interp = np.interp(x_target, x_ref, y_ref)\n    else:\n        y_ref_interp = y_ref\n\n    corr, _ = pearsonr(y_target, y_ref_interp)\n    results.append({'id': sid, 'material': mat, 'correlation': corr})\n\n# Sort by correlation\nresults.sort(key=lambda x: x['correlation'], reverse=True)\n\ntop1 = results[0]\ntop2 = results[1]\n\nprint(f\"Top 1: {top1}\")\nprint(f\"Top 2: {top2}\")\n\n# Extract the spectra for top 2 to find peaks\ndef get_spectrum(sid):\n    mask = (ref_ids == sid)\n    return ref_shifts[mask], ref_ints[mask]\n\nx1, y1 = get_spectrum(top1['id'])\nx2, y2 = get_spectrum(top2['id'])\n\n# Simple peak detection on normalized data\ndef find_main_peaks(x, y):\n    y_norm = (y - np.min(y)) / (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y_norm, height=0.1, distance=20)\n    # Get top 5 peaks by intensity\n    peak_vals = y_norm[peaks]\n    sorted_indices = np.argsort(peak_vals)[::-1]\n    return x[peaks[sorted_indices[:5]]]\n\np_target = find_main_peaks(x_target, y_target)\np1 = find_main_peaks(x1, y1)\np2 = find_main_peaks(x2, y2)\n\nprint(f\"Target peaks: {p_target}\")\nprint(f\"Top 1 ({top1['material']}) peaks: {p1}\")\nprint(f\"Top 2 ({top2['material']}) peaks: {p2}\")\n",
+        "file_ids": [
+          "2026-08-10/reference_library.csv",
+          "2026-08-10/T125.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\n# Map files correctly\ndata = {f['filename']: f for f in files}\nt125 = data['T125.csv']\nref_lib = data['reference_library.csv']\n\nx_target = np.ravel(t125['table']['raman_shift_cm-1'])\ny_target = np.ravel(t125['table']['intensity'])\n\n# Reference data\nref_ids = np.ravel(ref_lib['table']['spectrum_id'])\nref_mats = np.ravel(ref_lib['table']['material'])\nref_shifts = np.ravel(ref_lib['table']['raman_shift_cm-1'])\nref_ints = np.ravel(ref_lib['table']['intensity'])\n\nunique_ids = np.unique(ref_ids)\nmat_results = {} # Store best correlation per material\n\nfor sid in unique_ids:\n    mask = (ref_ids == sid)\n    x_ref = ref_shifts[mask]\n    y_ref = ref_ints[mask]\n    mat = ref_mats[mask][0]\n    \n    if len(x_ref) != len(x_target):\n        y_ref_interp = np.interp(x_target, x_ref, y_ref)\n    else:\n        y_ref_interp = y_ref\n\n    corr, _ = pearsonr(y_target, y_ref_interp)\n    if mat not in mat_results or corr > mat_results[mat]['correlation']:\n        mat_results[mat] = {'id': sid, 'correlation': corr}\n\n# Sort materials by best correlation\nsorted_mats = sorted(mat_results.items(), key=lambda x: x[1]['correlation'], reverse=True)\n\nprint(f\"Material rankings:\\n{sorted_mats}\")\n\ntop_mat = sorted_mats[0][0]\nsecond_mat = sorted_mats[1][0]\n\ndef get_spectrum(sid):\n    mask = (ref_ids == sid)\n    return ref_shifts[mask], ref_ints[mask]\n\nx1, y1 = get_spectrum(mat_results[top_mat]['id'])\nx2, y2 = get_spectrum(mat_results[second_mat]['id'])\n\nfrom scipy.signal import find_peaks\n\ndef find_main_peaks(x, y):\n    y_norm = (y - np.min(y)) / (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y_norm, height=0.1, distance=20)\n    peak_vals = y_norm[peaks]\n    sorted_indices = np.argsort(peak_vals)[::-1]\n    return x[peaks[sorted_indices[:10]]]\n\np_target = find_main_peaks(x_target, y_target)\np_top = find_main_peaks(x1, y1)\np_second = find_main_peaks(x2, y2)\n\nprint(f\"Target peaks: {p_target}\")\nprint(f\"{top_mat} peaks: {p_top}\")\nprint(f\"{second_mat} peaks: {p_second}\")\n",
+        "file_ids": [
+          "2026-08-10/reference_library.csv",
+          "2026-08-10/T125.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-10_CoALA_CoALA_T125_73c928",
+  "elapsed_s": 158.81,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}
