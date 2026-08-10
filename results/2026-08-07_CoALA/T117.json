@@ -1,0 +1,238 @@
+{
+  "task": "T117",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Identify the material of T117.csv against reference_library.csv, which includes PET and PMMA references.",
+  "criteria": "EXACT(material)",
+  "checks": [
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'PET' (expected 'PET')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T117.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "Based on a correlation analysis between the spectrum in `T117.csv` and the references provided in `reference_library.csv`, the sample shows an extremely high Pearson correlation with the PET reference spectra (specifically $r = 0.9953$ for `PET_01` and $r = 0.9789$ for `PET_02`). In contrast, the correlations with other materials such as PMMA, polystyrene, silicon, calcite, and aragonite were very low (all below $0.15$).\n\n```json\n{\"material\": \"PET\"}\n```",
+  "answer_json": {
+    "material": "PET"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T117.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\n# T117 spectrum\nt117 = files[0] if files[0]['filename'] == 'T117.csv' else files[1]\nt117_x = t117['table']['raman_shift_cm-1']\nt117_y = t117['table']['intensity']\n\n# Reference library\nref_file = files[1] if files[0]['filename'] == 'T117.csv' else files[0]\nref_data = ref_file['table']\nmaterials = np.unique(ref_data['material'])\n\nresults = {}\n\nfor mat in materials:\n    # Get indices for this material\n    mask = (ref_data['material'] == mat)\n    mat_x = ref_data['raman_shift_cm-1'][mask]\n    mat_y = ref_data['intensity'][mask]\n    \n    # Since reference library likely has multiple spectra per material or \n    # is concatenated, we need to be careful. \n    # Looking at the structure: spectrum_id, material, raman_shift, intensity.\n    # It's probably long-form data. Let's check if x axes match.\n    \n    # We should compare T117 with each unique spectrum_id of that material.\n    unique_ids = np.unique(ref_data['spectrum_id'][mask])\n    mat_correlations = []\n    \n    for sid in unique_ids:\n        sid_mask = (ref_data['spectrum_id'] == sid)\n        sx = ref_data['raman_shift_cm-1'][sid_mask]\n        sy = ref_data['intensity'][sid_mask]\n        \n        # Ensure x axes are aligned. T117 is 200-2000, step 1.\n        if len(sx) == len(t117_x) and np.allclose(sx, t117_x):\n            corr, _ = pearsonr(t117_y, sy)\n            mat_correlations.append(corr)\n    \n    if mat_correlations:\n        results[mat] = np.max(mat_correlations)\n\n# Sort materials by correlation\nsorted_mats = sorted(results.items(), key=lambda x: x[1], reverse=True)\nprint(\"Correlations with T117:\")\nfor mat, corr in sorted_mats:\n    print(f\"{mat}: {corr:.4f}\")\n\nbest_mat = sorted_mats[0][0]\nprint(f\"\\nBest match: {best_mat}\")\n",
+        "file_ids": [
+          "2026-08-07/T117.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\n# Find files by filename\nt117_file = next(f for f in files if 'T117.csv' in f['filename'])\nref_file = next(f for f in files if 'reference_library.csv' in f['filename'])\n\nt117_x = t117_file['table']['raman_shift_cm-1']\nt117_y = t117_file['table']['intensity']\n\nref_data = ref_file['table']\nmaterials = np.unique(ref_data['material'])\n\nfinal_results = {}\n\nfor mat in materials:\n    # Get indices for this material\n    mask = (ref_data['material'] == mat)\n    mat_sids = np.unique(ref_data['spectrum_id'][mask])\n    \n    corrs_for_this_mat = []\n    for sid in mat_sids:\n        sid_mask = (ref_data['spectrum_id'] == sid)\n        sx = ref_data['raman_shift_cm-1'][sid_mask]\n        sy = ref_data['intensity'][sid_mask]\n        \n        # Align lengths\n        if len(sx) == len(t117_x):\n            corr, _ = pearsonr(t117_y, sy)\n            corrs_for_this_mat.append(corr)\n    \n    if corrs_for_this_mat:\n        final_results[mat] = max(corrs_for_this_mat)\n\n# Sort and print\nsorted_res = sorted(final_results.items(), key=lambda x: x[1], reverse=True)\nprint(\"Material Correlation Results:\")\nfor mat, val in sorted_res:\n    print(f\"{mat}: {val:.4f}\")\n\nif sorted_res:\n    print(f\"\\nBest Match: {sorted_res[0][0]}\")\nelse:\n    print(\"\\nNo matches found.\")\n",
+        "file_ids": [
+          "2026-08-07/T117.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\nfrom scipy.signal import find_peaks\n\n# Identity files by filename manually without using next()\nt117_f = None\nref_f = None\nfor f in files:\n    if 'T117.csv' in f['filename']:\n        t117_f = f\n    elif 'reference_library.csv' in f['filename']:\n        ref_f = f\n\nif t117_f is None or ref_f is None:\n    print(\"Error: Could not find both files.\")\nelse:\n    tx = t117_f['table']['raman_shift_cm-1']\n    ty = t117_f['table']['intensity']\n    \n    ref_data = ref_f['table']\n    mats = np.unique(ref_data['material'])\n    \n    results = {}\n    best_corr = -1.0\n    best_mat = None\n    best_sy = None\n    best_sx = None\n\n    for m in mats:\n        mask = (ref_data['material'] == m)\n        sids = np.unique(ref_data['spectrum_id'][mask])\n        \n        m_corrs = []\n        for sid in sids:\n            sid_mask = (ref_data['spectrum_id'] == sid)\n            sx = ref_data['raman_shift_cm-1'][sid_mask]\n            sy = ref_data['intensity'][sid_mask]\n            \n            if len(sx) == len(tx):\n                c, _ = pearsonr(ty, sy)\n                m_corrs.append(c)\n                if c > best_corr:\n                    best_corr = c\n                    best_mat = m\n                    best_sy = sy\n                    best_sx = sx\n        \n        if m_corrs:\n            results[m] = max(m_corrs)\n\n    print(\"Correlations:\")\n    for m, v in sorted(results.items(), key=lambda x: x[1], reverse=True):\n        print(f\"{m}: {v:.4f}\")\n    \n    print(f\"\\nBest match is {best_mat} with correlation {best_corr:.4f}\")\n\n    # Peak check for verification\n    def get_peaks(x, y):\n        # Basic normalization to find peaks on similar scale\n        y_norm = (y - np.min(y)) / (np.max(y) - np.min(y))\n        peaks, _ = find_peaks(y_norm, height=0.1, distance=10)\n        return x[peaks]\n\n    t_peaks = get_peaks(tx, ty)\n    r_peaks = get_peaks(best_sx, best_sy)\n    print(f\"T117 peaks: {t_peaks}\")\n    print(f\"{best_mat} peaks: {r_peaks}\")\n\n    import matplotlib.pyplot as plt\n    plt.figure(figsize=(10, 6))\n    plt.plot(tx, ty, label='T117', color='blue')\n    plt.plot(best_sx, best_sy, label=f'Ref {best_mat}', color='red', alpha=0.7)\n    plt.xlabel('Raman Shift (cm-1)')\n    plt.ylabel('Intensity')\n    plt.legend()\n    plt.title(f'Comparison of T117 and Best Match ({best_mat})')\n    plt.savefig('comparison_plot.png')\n",
+        "file_ids": [
+          "2026-08-07/T117.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\nt117_f = None\nref_f = None\nfor f in files:\n    if 'T117.csv' in f['filename']: t117_f = f\n    elif 'reference_library.csv' in f['filename']: ref_f = f\n\ntx = t117_f['table']['raman_shift_cm-1']\nty = t117_f['table']['intensity']\nprint(f\"T117 length: {len(tx)}, min x: {tx[0]}, max x: {tx[-1]}\")\n\nref_data = ref_f['table']\nsids = np.unique(ref_data['spectrum_id'])\nprint(f\"Reference IDs: {sids}\")\n\nfor sid in sids:\n    mask = (ref_data['spectrum_id'] == sid)\n    sx = ref_data['raman_shift_cm-1'][mask]\n    sy = ref_data['intensity'][mask]\n    print(f\"ID {sid}: length={len(sx)}, min x={sx[0]}, max x={sx[-1]}\")\n",
+        "file_ids": [
+          "2026-08-07/T117.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\n# Identity files\nt117_f = None\nref_f = None\nfor f in files:\n    if 'T117.csv' in f['filename']: t117_f = f\n    elif 'reference_library.csv' in f['filename']: ref_f = f\n\ntx = t117_f['table']['raman_shift_cm-1']\nty = t117_f['table']['intensity']\n\nref_data = ref_f['table']\nsids = np.unique(ref_data['spectrum_id'])\nmaterials = ref_data['material']\n\nfinal_results = []\n\nfor sid in sids:\n    mask = (ref_data['spectrum_id'] == sid)\n    sx = ref_data['raman_shift_cm-1'][mask]\n    sy = ref_data['intensity'][mask]\n    mat = ref_data['material'][mask][0] if len(mask) > 0 else \"unknown\"\n    \n    if len(sx) == len(tx):\n        corr, _ = pearsonr(ty, sy)\n        final_results.append((mat, sid, corr))\n    else:\n        print(f\"Skipping {sid}: length mismatch ({len(sx)} vs {len(tx)})\")\n\n# Sort results by correlation\nfinal_results.sort(key=lambda x: x[2], reverse=True)\n\nprint(\"Correlation Results:\")\nfor res in final_results:\n    print(f\"Material: {res[0]}, ID: {res[1]}, Corr: {res[2]:.4f}\")\n\nif final_results:\n    best_mat = final_results[0][0]\n    print(f\"\\nBest Match Material: {best_mat}\")\nelse:\n    print(\"\\nNo valid matches found.\")\n",
+        "file_ids": [
+          "2026-08-07/T117.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\n# 1. Identify files\nt117_f = None\nref_f = None\nfor f in files:\n    if 'T117.csv' in f['filename']:\n        t117_f = f\n    elif 'reference_library.csv' in f['filename']:\n        ref_f = f\n\nif t117_f is None or ref_f is None:\n    print(\"Error: Required files not found.\")\n    exit()\n\n# 2. Load T117 data\ntx = t117_f['table']['raman_shift_cm-1']\nty = t117_f['table']['intensity']\n\n# 3. Reference library processing\nref_table = ref_f['table']\nall_ids = np.unique(ref_table['spectrum_id'])\nall_mats = ref_table['material']\nall_x = ref_table['raman_shift_cm-1']\nall_y = ref_table['intensity']\n\nresults = []\n\nfor sid in all_ids:\n    # Create mask for the specific spectrum ID\n    mask = (ref_table['spectrum_id'] == sid)\n    sx = all_x[mask]\n    sy = all_y[mask]\n    # The material is constant for a given spectrum ID\n    mat = all_mats[mask][0]\n    \n    if len(sx) == len(tx):\n        # Use pearsonr to find correlation\n        corr, _ = pearsonr(ty, sy)\n        results.append({\n            'material': mat,\n            'id': sid,\n            'correlation': corr\n        })\n    else:\n        print(f\"Skipping {sid}: length mismatch ({len(sx)} vs {len(tx)})\")\n\n# 4. Find the best match\nif not results:\n    print(\"No compatible spectra found in library.\")\nelse:\n    # Sort by correlation descending\n    results.sort(key=lambda x: x['correlation'], reverse=True)\n    \n    print(\"Top Matches:\")\n    for i in range(min(5, len(results))):\n        res = results[i]\n        print(f\"{res['material']} ({res['id']}): {res['correlation']:.4f}\")\n    \n    best_match = results[0]['material']\n    print(f\"\\nBest match is: {best_match}\")\n",
+        "file_ids": [
+          "2026-08-07/T117.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\n# Find files manually\nt117_f = None\nref_f = None\nfor f in files:\n    if 'T117.csv' in f['filename']:\n        t117_f = f\n    elif 'reference_library.csv' in f['filename']:\n        ref_f = f\n\n# Extract T117 data\ntx = t117_f['table']['raman_shift_cm-1']\nty = t117_f['table']['intensity']\n\n# Reference library data\nref_t = ref_f['table']\nids = np.unique(ref_t['spectrum_id'])\nmats = ref_t['material']\nrx = ref_t['raman_shift_cm-1']\nry = ref_t['intensity']\n\ncorrelations = []\n\nfor sid in ids:\n    # Filter by spectrum id\n    mask = (ref_t['spectrum_id'] == sid)\n    sx = rx[mask]\n    sy = ry[mask]\n    # Material for this ID\n    sm = mats[mask][0]\n    \n    if len(sx) == len(tx):\n        corr, _ = pearsonr(ty, sy)\n        correlations.append((sm, sid, corr))\n\n# Sort by correlation descending\ncorrelations.sort(key=lambda x: x[2], reverse=True)\n\nprint(\"Correlation results (Top 10):\")\nfor i in range(min(10, len(correlations))):\n    m, s, c = correlations[i]\n    print(f\"Material: {m}, ID: {s}, Corr: {c:.4f}\")\n\nif correlations:\n    best_mat = correlations[0][0]\n    print(f\"\\nConclusion: The best match is {best_mat}\")\nelse:\n    print(\"\\nNo matches found.\")\n",
+        "file_ids": [
+          "2026-08-07/T117.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\nt117_f = None\nref_f = None\nfor f in files:\n    if 'T117.csv' in f['filename']: t117_f = f\n    elif 'reference_library.csv' in f['filename']: ref_f = f\n\ntx = t117_f['table']['raman_shift_cm-1']\nty = t117_f['table']['intensity']\nprint(f\"T117: len={len(tx)}, range=[{tx[0]}, {tx[-1]}]\")\n\nref_t = ref_f['table']\nids = np.unique(ref_t['spectrum_id'])\nfor sid in ids:\n    mask = (ref_t['spectrum_id'] == sid)\n    sx = ref_t['raman_shift_cm-1'][mask]\n    sy = ref_t['intensity'][mask]\n    print(f\"ID {sid}: len={len(sx)}, range=[{sx[0]}, {sx[-1]}], material={ref_t['material'][mask][0]}\")\n",
+        "file_ids": [
+          "2026-08-07/T117.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\n# Identify files manually\nt117_f = None\nref_f = None\nfor f in files:\n    if 'T117.csv' in f['filename']: t117_f = f\n    elif 'reference_library.csv' in f['filename']: ref_f = f\n\n# Extract T117 data and ensure they are numpy arrays\ntx = np.array(t117_f['table']['raman_shift_cm-1'], dtype=float)\nty = np.array(t117_f['table']['intensity'], dtype=float)\n\n# Reference library data - force to numpy arrays\nref_table = ref_f['table']\nall_ids = np.array(ref_table['spectrum_id'])\nall_mats = np.array(ref_table['material'])\nall_x = np.array(ref_table['raman_shift_cm-1'], dtype=float)\nall_y = np.array(ref_table['intensity'], dtype=float)\n\nunique_ids = np.unique(all_ids)\nresults = []\n\nfor sid in unique_ids:\n    # Use boolean indexing on the numpy arrays\n    mask = (all_ids == sid)\n    sx = all_x[mask]\n    sy = all_y[mask]\n    sm = all_mats[mask][0]\n    \n    if len(sx) == len(tx):\n        # Check if x-axes match exactly or are very close\n        if np.allclose(sx, tx, atol=1e-2):\n            corr, _ = pearsonr(ty, sy)\n            results.append((sm, sid, corr))\n        else:\n            print(f\"ID {sid} ({sm}): Length matches but X axis differs.\")\n    else:\n        print(f\"ID {sid} ({sm}): Length mismatch {len(sx)} vs {len(tx)}\")\n\n# Sort by correlation descending\nresults.sort(key=lambda x: x[2], reverse=True)\n\nprint(\"\\nCorrelation Results:\")\nfor m, s, c in results:\n    print(f\"Material: {m}, ID: {s}, Correlation: {c:.4f}\")\n\nif results:\n    best_mat = results[0][0]\n    print(f\"\\nConclusion: Best match is {best_mat}\")\nelse:\n    print(\"\\nNo matches found.\")\n",
+        "file_ids": [
+          "2026-08-07/T117.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T117_72b55c",
+  "elapsed_s": 247.4,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

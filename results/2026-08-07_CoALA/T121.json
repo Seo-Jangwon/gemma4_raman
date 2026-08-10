@@ -1,0 +1,213 @@
+{
+  "task": "T121",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "Compare T121.csv with all 8 references in reference_library_8.csv and sort every reference by similarity, descending. Use cosine similarity computed on the reference wavenumber axis (linear interpolation) after L2-normalizing both spectra. If two scores are equal, order them by spectrum_id ascending.",
+  "criteria": "EXACT(8 items in order) + NUM(scores ±0.01)",
+  "checks": [
+    {
+      "name": "all 8 references in order",
+      "passed": true,
+      "score": 1.0,
+      "detail": "8/8 matched (submitted 8) ['PS_01', 'PS_03', 'PS_02', 'PET_02', 'PMMA_01', 'PET_01']... vs ['PS_01', 'PS_03', 'PS_02', 'PET_02', 'PMMA_01', 'PET_01']...",
+      "weight": 2.0,
+      "kind": "SET"
+    },
+    {
+      "name": "similarity scores",
+      "passed": true,
+      "score": 1.0,
+      "detail": "8/8 matched (submitted 8) [0.995, 0.994, 0.978, 0.229, 0.179, 0.167]... vs [0.995, 0.994, 0.978, 0.229, 0.179, 0.167]...",
+      "weight": 1.0,
+      "kind": "SET"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T121.csv",
+    "reference_library_8.csv"
+  ],
+  "answer_text": "I have compared the target spectrum in `T121.csv` with the 8 reference spectra provided in `reference_library_8.csv`. The similarity was calculated using cosine similarity on L2-normalized intensity vectors, where reference spectra were linearly interpolated to match the wavenumber axis of the target spectrum.\n\nThe results show that the target spectrum is most similar to the polystyrene (PS) references, with PS_01 being the closest match.\n\n```json\n{\n  \"ranking\": [\n    {\"spectrum_id\": \"PS_01\", \"score\": 0.9945520603357233},\n    {\"spectrum_id\": \"PS_03\", \"score\": 0.9939536123787809},\n    {\"spectrum_id\": \"PS_02\", \"score\": 0.9782286993020178},\n    {\"spectrum_id\": \"PET_02\", \"score\": 0.2286385137572982},\n    {\"spectrum_id\": \"PMMA_01\", \"score\": 0.17938862644812548},\n    {\"spectrum_id\": \"PET_01\", \"score\": 0.16748671116755182},\n    {\"spectrum_id\": \"CAL_01\", \"score\": 0.031255749562738314},\n    {\"spectrum_id\": \"SI_01\", \"score\": 0.010961384388093723}\n  ]\n}\n```",
+  "answer_json": {
+    "ranking": [
+      {
+        "spectrum_id": "PS_01",
+        "score": 0.9945520603357233
+      },
+      {
+        "spectrum_id": "PS_03",
+        "score": 0.9939536123787809
+      },
+      {
+        "spectrum_id": "PS_02",
+        "score": 0.9782286993020178
+      },
+      {
+        "spectrum_id": "PET_02",
+        "score": 0.2286385137572982
+      },
+      {
+        "spectrum_id": "PMMA_01",
+        "score": 0.17938862644812548
+      },
+      {
+        "spectrum_id": "PET_01",
+        "score": 0.16748671116755182
+      },
+      {
+        "spectrum_id": "CAL_01",
+        "score": 0.031255749562738314
+      },
+      {
+        "spectrum_id": "SI_01",
+        "score": 0.010961384388093723
+      }
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T121.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library_8.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# 1. Load data from files dictionary\nt121 = files['2026-08-07/T121.csv']\nlib = files['2026-08-07/reference_library_8.csv']\n\nx_target = t121['table']['raman_shift_cm-1']\ny_target = t121['table']['intensity']\n\n# L2 Normalize target spectrum\nnorm_target = np.linalg.norm(y_target)\ny_target_norm = y_target / norm_target if norm_target > 0 else y_target\n\n# Identify unique spectra in library\nspectrum_ids = np.unique(lib['table']['spectrum_id'])\nresults = []\n\nfor sid in spectrum_ids:\n    mask = lib['table']['spectrum_id'] == sid\n    x_ref = lib['table']['raman_shift_cm-1'][mask]\n    y_ref = lib['table']['intensity'][mask]\n    \n    # Linear interpolation of reference onto target axis\n    y_ref_interp = np.interp(x_target, x_ref, y_ref)\n    \n    # L2 Normalize interpolated reference spectrum\n    norm_ref = np.linalg.norm(y_ref_interp)\n    y_ref_norm = y_ref_interp / norm_ref if norm_ref > 0 else y_ref_interp\n    \n    # Cosine similarity (dot product of L2-normalized vectors)\n    score = np.dot(y_target_norm, y_ref_norm)\n    results.append({'spectrum_id': sid, 'score': float(score)})\n\n# Sort by score descending, then spectrum_id ascending\nsorted_results = sorted(results, key=lambda x: (-x['score'], x['spectrum_id']))\n\nprint(\"Ranking results:\")\nfor rank in sorted_results:\n    print(f\"{rank['spectrum_id']}: {rank['score']}\")\n",
+        "file_ids": [
+          "2026-08-07/T121.csv",
+          "2026-08-07/reference_library_8.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Helper function to get a file by its id from the files list\ndef get_file(fid):\n    for f in files:\n        if f['file_id'] == fid:\n            return f\n    return None\n\n# 1. Load data\nt121_obj = get_file('2026-08-07/T121.csv')\nlib_obj = get_file('2026-08-07/reference_library_8.csv')\n\nif t121_obj is None or lib_obj is None:\n    print(\"Error: One of the files could not be found in the injected 'files' list.\")\nelse:\n    x_target = t121_obj['table']['raman_shift_cm-1']\n    y_target = t121_obj['table']['intensity']\n\n    # L2 Normalize target spectrum\n    norm_target = np.linalg.norm(y_target)\n    y_target_norm = y_target / norm_target if norm_target > 0 else y_target\n\n    # Identify unique spectra in library\n    spectrum_ids = np.unique(lib_obj['table']['spectrum_id'])\n    results = []\n\n    for sid in spectrum_ids:\n        mask = lib_obj['table']['spectrum_id'] == sid\n        x_ref = lib_obj['table']['raman_shift_cm-1'][mask]\n        y_ref = lib_obj['table']['intensity'][mask]\n        \n        # Linear interpolation of reference onto target axis\n        y_ref_interp = np.interp(x_target, x_ref, y_ref)\n        \n        # L2 Normalize interpolated reference spectrum\n        norm_ref = np.linalg.norm(y_ref_interp)\n        y_ref_norm = y_ref_interp / norm_ref if norm_ref > 0 else y_ref_interp\n        \n        # Cosine similarity (dot product of L2-normalized vectors)\n        score = np.dot(y_target_norm, y_ref_norm)\n        results.append({'spectrum_id': sid, 'score': float(score)})\n\n    # Sort by score descending, then spectrum_id ascending\n    sorted_results = sorted(results, key=lambda x: (-x['score'], x['spectrum_id']))\n\n    print(\"Ranking results:\")\n    for rank in sorted_results:\n        print(f\"{rank['spectrum_id']}: {rank['score']}\")\n",
+        "file_ids": [
+          "2026-08-07/T121.csv",
+          "2026-08-07/reference_library_8.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Helper to find the correct file object from the files list\ndef find_file(filename):\n    for f in files:\n        if f['filename'] == filename:\n            return f\n    return None\n\nt121_obj = find_file('T121.csv')\nlib_obj = find_file('reference_library_8.csv')\n\nif t121_obj is None or lib_obj is None:\n    print(\"Error: Required files not found.\")\nelse:\n    # Target spectrum\n    x_target = np.asarray(t121_obj['table']['raman_shift_cm-1'])\n    y_target = np.asarray(t121_obj['table']['intensity'])\n    \n    # L2 normalize target\n    norm_target = np.linalg.norm(y_target)\n    y_target_norm = y_target / norm_target if norm_target > 0 else y_target\n\n    # Reference library\n    sids_raw = lib_obj['table']['spectrum_id']\n    sids = np.asarray(sids_raw)\n    x_lib = np.asarray(lib_obj['table']['raman_shift_cm-1'])\n    y_lib = np.asarray(lib_obj['table']['intensity'])\n\n    unique_sids = np.unique(sids)\n    results = []\n\n    for sid in unique_sids:\n        mask = (sids == sid)\n        x_ref = x_lib[mask]\n        y_ref = y_lib[mask]\n        \n        # Linear interpolation of reference onto target axis\n        # np.interp(x, xp, fp) -> interp y values at x based on data (xp, fp)\n        y_ref_interp = np.interp(x_target, x_ref, y_ref)\n        \n        # L2 normalize the interpolated reference\n        norm_ref = np.linalg.norm(y_ref_interp)\n        y_ref_norm = y_ref_interp / norm_ref if norm_ref > 0 else y_ref_interp\n        \n        # Cosine similarity (dot product of normalized vectors)\n        score = np.dot(y_target_norm, y_ref_norm)\n        results.append({'spectrum_id': sid, 'score': float(score)})\n\n    # Sort by score descending, then spectrum_id ascending\n    sorted_ranking = sorted(results, key=lambda x: (-x['score'], x['spectrum_id']))\n\n    print(\"Final Ranking:\")\n    for rank in sorted_ranking:\n        print(f\"{rank['spectrum_id']}: {rank['score']}\")\n",
+        "file_ids": [
+          "2026-08-07/T121.csv",
+          "2026-08-07/reference_library_8.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T121_8d5726",
+  "elapsed_s": 119.74,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

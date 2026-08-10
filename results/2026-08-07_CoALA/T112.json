@@ -1,0 +1,204 @@
+{
+  "task": "T112",
+  "axis": "diagnostics",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "In T112.csv a strong background hides the Raman peaks. Apply IPBSA baseline correction with order 5, report the peaks recovered (prominence 5% of range), and state how many peaks were invisible before the correction.",
+  "criteria": "ARRAY(cos>=0.99, NRMSE<=0.02) + SET(peak ±3 cm-1) + EXACT(count)",
+  "checks": [
+    {
+      "name": "peak positions",
+      "passed": true,
+      "score": 1.0,
+      "detail": "9/9 matched (submitted 9) [620.0, 796.0, 1001.0, 1031.0, 1155.0, 1184.0]... vs [620.0, 796.0, 1001.0, 1031.0, 1155.0, 1184.0]...",
+      "weight": 1.0,
+      "kind": "SET"
+    },
+    {
+      "name": "result array",
+      "passed": true,
+      "score": 1.0,
+      "detail": "cos=0.99931 NRMSE=0.00273",
+      "weight": 2.0,
+      "kind": "ARRAY"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T112.csv"
+  ],
+  "answer_text": "The Raman spectrum in `T112.csv` exhibited a strong fluorescence background that obscured several spectral features. I applied the Iterative Polynomial Background Subtraction Algorithm (IPBSA) with a polynomial order of 5 to remove this baseline.\n\nTo identify the peaks, I used a prominence threshold of 5% of the intensity range for both the raw and corrected spectra. In the raw spectrum, only 4 peaks were detectable above the background noise and curvature. After the baseline correction, the signal-to-background ratio was significantly improved, allowing for the recovery of several additional peaks.\n\nThe recovered peaks are located at **620, 796, 1001, 1031, 1155, 1184, 1450, 1583, and 1602 cm⁻¹**. Comparing these to the raw data, **5 peaks** were invisible before the correction.\n\n```json\n{\"peaks\": [620, 796, 1001, 1031, 1155, 1184, 1450, 1583, 1602], \"invisible_peaks\": 5}\n```",
+  "answer_json": {
+    "peaks": [
+      620,
+      796,
+      1001,
+      1031,
+      1155,
+      1184,
+      1450,
+      1583,
+      1602
+    ],
+    "invisible_peaks": 5
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T112.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "apply_background_subtraction",
+      "args": {
+        "poly_order": 5,
+        "save_result": true,
+        "source": "2026-08-07/T112.csv",
+        "version_label": "T112_corrected_v1"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load the uploaded file\nt112 = files[0]\nx = t112['table']['raman_shift_cm-1']\ny = t112['table']['intensity']\n\n# Save it so other tools can access it via a simple name\nsave_result('t112_raw', y, raman_shift=x)\n\nprint(f\"Saved T112.csv as t112_raw. Length: {len(x)}\")\n",
+        "file_ids": [
+          "2026-08-07/T112.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "apply_background_subtraction",
+      "args": {
+        "poly_order": 5,
+        "save_result": true,
+        "source": "runs/bench_2026-08-07_CoALA_CoALA_T112_a67069/spectra/01_t112_raw.csv",
+        "version_label": "T112_IPBSA_v5"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\nimport matplotlib.pyplot as plt\n\ndef get_peaks(x, y):\n    # Prominence 5% of the range of y\n    prom = 0.05 * (np.max(y) - np.min(y))\n    peaks, properties = find_peaks(y, prominence=prom)\n    return peaks\n\n# Load raw data from files[0] which was already inspected/loaded in the first call of this session\n# but for safety and clarity I'll use the loaded objects if available or reload.\n# Since run_analysis takes file_ids, I can just use them again.\nraw = files[0]\nx_raw = raw['table']['raman_shift_cm-1']\ny_raw = raw['table']['intensity']\n\n# Load corrected data from saved result\ncorrected = load_spectrum('runs/bench_2026-08-07_CoALA_CoALA_T112_a67069/spectra/02_bg_corrected_T112_IPBSA_v5.csv')\nx_corr = corrected['raman_shift']\ny_corr = corrected['intensity']\n\npeaks_raw_idx = get_peaks(x_raw, y_raw)\npeaks_raw_pos = x_raw[peaks_raw_idx]\n\npeaks_corr_idx = get_peaks(x_corr, y_corr)\npeaks_corr_pos = x_corr[peaks_corr_idx]\n\nprint(f\"Raw peaks: {peaks_raw_pos}\")\nprint(f\"Corrected peaks: {peaks_corr_pos}\")\nprint(f\"Number of raw peaks: {len(peaks_raw_pos)}\")\nprint(f\"Number of corrected peaks: {len(peaks_corr_pos)}\")\n\n# Invisible peaks = those in corrected that are not in raw (within a tolerance)\ninvisible_count = 0\ntol = 2.0 # cm-1\nfor p_c in peaks_corr_pos:\n    if not any(abs(p_c - p_r) < tol for p_r in peaks_raw_pos):\n        invisible_count += 1\n\nprint(f\"Invisible before correction: {invisible_count}\")\n\n# Plotting for verification (though I can't see it, the numbers are key)\nplt.figure(figsize=(10, 5))\nplt.subplot(2, 1, 1)\nplt.plot(x_raw, y_raw, label='Raw')\nplt.plot(peaks_raw_pos, y_raw[peaks_raw_idx], 'ro')\nplt.legend()\nplt.subplot(2, 1, 2)\nplt.plot(x_corr, y_corr, label='Corrected', color='green')\nplt.plot(peaks_corr_pos, y_corr[peaks_corr_idx], 'ro')\nplt.legend()\nplt.savefig('peak_comparison.png')\n",
+        "file_ids": [
+          "2026-08-07/T112.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\nimport matplotlib.pyplot as plt\n\ndef ipbsa_correction(x, y, order=5, iterations=20):\n    # Initial fit to get a starting baseline\n    coeffs = np.polyfit(x, y, order)\n    baseline = np.polyval(coeffs, x)\n    \n    for i in range(iterations):\n        # Calculate residual\n        residual = y - baseline\n        # Mask out points that are \"too high\" (peaks)\n        # We use a threshold based on the noise/standard deviation of the signal \n        # or simply any point above the current fit. \n        # A common IPBSA strategy: mask if residual > 0\n        mask = residual <= 0\n        if np.sum(mask) < order + 1: # Safety check for polyfit\n            break\n        coeffs = np.polyfit(x[mask], y[mask], order)\n        baseline = np.polyval(coeffs, x)\n    return baseline\n\n# Load raw data\nt112 = files[0]\nx = t112['table']['raman_shift_cm-1']\ny_raw = t112['table']['intensity']\n\n# 1. Analyze Raw Spectrum\nrange_raw = np.max(y_raw) - np.min(y_raw)\nprom_raw = 0.05 * range_raw\npeaks_raw_idx, _ = find_peaks(y_raw, prominence=prom_raw)\npeaks_raw_pos = x[peaks_raw_idx]\n\n# 2. Apply IPBSA Correction (Order 5)\nbaseline = ipbsa_correction(x, y_raw, order=5)\ny_corr = y_raw - baseline\n\n# 3. Analyze Corrected Spectrum\nrange_corr = np.max(y_corr) - np.min(y_corr)\nprom_corr = 0.05 * range_corr\npeaks_corr_idx, _ = find_peaks(y_corr, prominence=prom_corr)\npeaks_corr_pos = x[peaks_corr_idx]\n\nprint(f\"Raw Range: {range_raw:.2f}, Prominence Threshold: {prom_raw:.2f}\")\nprint(f\"Raw Peaks found: {peaks_raw_pos}\")\nprint(f\"Corrected Range: {range_corr:.2f}, Prominence Threshold: {prom_corr:.2f}\")\nprint(f\"Corrected Peaks found: {peaks_corr_pos}\")\n\n# Calculate how many peaks were invisible before correction\n# A peak is \"invisible\" if it exists in the corrected set but not in the raw set (within 2 cm-1)\ninvisible_count = 0\nfor pc in peaks_corr_pos:\n    if not any(abs(pc - pr) < 2.0 for pr in peaks_raw_pos):\n        invisible_count += 1\n\nprint(f\"Invisible Peaks Count: {invisible_count}\")\n\n# Visualization\nplt.figure(figsize=(10, 8))\nplt.subplot(3, 1, 1)\nplt.plot(x, y_raw, label='Raw Signal')\nplt.plot(peaks_raw_pos, y_raw[peaks_raw_idx], 'ro', label='Raw Peaks')\nplt.title(\"Raw Spectrum\")\nplt.legend()\n\nplt.subplot(3, 1, 2)\nplt.plot(x, baseline, 'k--', label='IPBSA Baseline (Order 5)')\nplt.plot(x, y_raw, alpha=0.5)\nplt.title(\"Baseline Fit\")\nplt.legend()\n\nplt.subplot(3, 1, 3)\nplt.plot(x, y_corr, color='green', label='Corrected Signal')\nplt.plot(peaks_corr_pos, y_corr[peaks_corr_idx], 'ro', label='Recovered Peaks')\nplt.title(\"Baseline Corrected Spectrum\")\nplt.legend()\n\nplt.tight_layout()\nplt.savefig('t112_baseline_correction.png')\n",
+        "file_ids": [
+          "2026-08-07/T112.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-07_CoALA_CoALA_T112_a67069/spectra/01_t112_raw.csv",
+    "runs/bench_2026-08-07_CoALA_CoALA_T112_a67069/spectra/02_bg_corrected_T112_IPBSA_v5.csv",
+    "/api/results/2026-08-07/bench_2026-08-07_CoALA_CoALA_T112_a67069/fig214503_924_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T112_a67069",
+  "elapsed_s": 204.07,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

@@ -1,0 +1,153 @@
+{
+  "task": "T072",
+  "axis": "data processing",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "Apply IPBSA baseline order 5 and L2 normalization to each spectrum of the map T072.csv, mean-center the resulting matrix, run PCA with 3 components and report each component's explained variance ratio.",
+  "criteria": "NUM(±0.01) ×3",
+  "checks": [
+    {
+      "name": "3 explained variance ratios",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3/3 matched (submitted 3) [0.984, 0.001, 0.001] vs [0.984, 0.001, 0.001]",
+      "weight": 2.0,
+      "kind": "SET"
+    },
+    {
+      "name": "descending and sums to <= 1",
+      "passed": true,
+      "score": 1.0,
+      "detail": "[0.984, 0.001, 0.001] sum=0.9860",
+      "weight": 1.0,
+      "kind": "REL"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T072.csv"
+  ],
+  "answer_text": "The data from `T072.csv` was processed by extracting 25 spectra (each with 1801 points). For each spectrum, an iterative polynomial background subtraction (IPBSA) of order 5 was applied to remove the baseline. The resulting spectra were then L2-normalized and mean-centered to form a data matrix. Principal Component Analysis (PCA) was performed via Singular Value Decomposition (SVD), revealing that the first component accounts for the vast majority of the variance.\n\n```json\n{\"explained_variance_ratio\": [0.984014709, 0.000998344721, 0.000982468574]}\n```",
+  "answer_json": {
+    "explained_variance_ratio": [
+      0.984014709,
+      0.000998344721,
+      0.000982468574
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T072.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.optimize import curve_fit\n\ndef ipbsa(x, y, order=5, max_iter=100, tol=1e-4):\n    \"\"\"Iterative Polynomial Background Subtraction Algorithm\"\"\"\n    current_y = np.copy(y)\n    prev_poly = None\n    \n    for i in range(max_iter):\n        # Fit polynomial of given order\n        coeffs = np.polyfit(x, current_y, order)\n        poly_func = np.poly1d(coeffs)\n        baseline = poly_func(x)\n        \n        if prev_poly is not None:\n            diff = np.linalg.norm(baseline - prev_poly) / np.linalg.norm(prev_poly)\n            if diff < tol:\n                break\n        \n        prev_poly = baseline\n        # Mask points above the baseline and replace them with the baseline value\n        current_y = np.where(y > baseline, baseline, y)\n        \n    return poly_func(x)\n\n# Load data\ndata = files[0][\"table\"]\nx_coords = data[\"x\"]\ny_coords = data[\"y\"]\nshifts = data[\"raman_shift_cm-1\"]\nintensities = data[\"intensity\"]\n\nunique_pos = []\nfor x, y in zip(x_coords, y_coords):\n    if [x, y] not in unique_pos:\n        unique_pos.append([x, y])\n\n# Extract spectra\nspectra_list = []\nspectrum_axis = None\n\nfor pos in unique_pos:\n    mask = (x_coords == pos[0]) & (y_coords == pos[1])\n    s_shifts = shifts[mask]\n    s_ints = intensities[mask]\n    if spectrum_axis is None:\n        spectrum_axis = s_shifts\n    spectra_list.append(s_ints)\n\nX = np.array(spectra_list) # shape (n_samples, n_features)\nn_samples, n_features = X.shape\nprint(f\"Matrix shape: {X.shape}\")\n\n# 1. Apply IPBSA baseline order 5\nprocessed_X = []\nfor i in range(n_samples):\n    baseline = ipbsa(spectrum_axis, X[i], order=5)\n    corrected = X[i] - baseline\n    processed_X.append(corrected)\n\nX_bc = np.array(processed_X)\n\n# 2. L2 Normalization\nnorm_factors = np.linalg.norm(X_bc, axis=1, keepdims=True)\nX_norm = X_bc / norm_factors\n\n# 3. Mean-centering\nmean_spectrum = np.mean(X_norm, axis=0)\nX_centered = X_norm - mean_spectrum\n\n# 4. PCA with 3 components (using SVD)\n# U, S, Vh = np.linalg.svd(X_centered, full_matrices=False)\n# Variance explained is proportional to the square of singular values\nU, S, Vh = np.linalg.svd(X_centered, full_matrices=False)\nexplained_variance = S**2\ntotal_variance = np.sum(explained_variance)\nevr = explained_variance / total_variance\n\nprint(f\"Explained variance ratios: {evr[:3]}\")\n",
+        "file_ids": [
+          "2026-08-07/T072.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T072_fbf62d",
+  "elapsed_s": 77.53,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

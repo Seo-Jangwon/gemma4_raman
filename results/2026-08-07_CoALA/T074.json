@@ -1,0 +1,210 @@
+{
+  "task": "T074",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "In the map T074.csv, compute the element-wise median spectrum, judge the positions whose cosine similarity to it (after L2 normalization) is below 0.80 as anomalous, and re-measure a spectrum once at those positions only.",
+  "criteria": "SET(coords EXACT) + PROC",
+  "checks": [
+    {
+      "name": "re-measured positions",
+      "passed": true,
+      "score": 1.0,
+      "detail": "2/2 matched (submitted 2) [[37.8, 25.4], [38.0, 25.2]] vs [[37.8, 25.4], [38.0, 25.2]]",
+      "weight": 2.0,
+      "kind": "SET"
+    },
+    {
+      "name": "acquire_spectrum calls",
+      "passed": true,
+      "score": 1.0,
+      "detail": "2 calls (exactly 2 calls)",
+      "weight": 2.0,
+      "kind": "PROC"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T074.csv"
+  ],
+  "answer_text": "Based on the analysis of the uploaded map `T074.csv`, I have completed the anomaly detection and subsequent measurements.\n\n### 1. Analysis and Anomaly Detection\nI processed the data in `T074.csv` by reconstructing the spectra for each coordinate and computing the element-wise median spectrum across all points. To identify anomalies, I performed L2 normalization on each spectrum (including the median) and calculated the cosine similarity.\n\n*   **Total Points Analyzed**: 9\n*   **Anomaly Threshold**: Cosine Similarity < 0.80\n*   **Identified Anomalies**: Two positions were found to be anomalous:\n    1.  **(37.8, 25.4)**: Cosine similarity $\\approx 0.185$\n    2.  **(38.0, 25.2)**: Cosine similarity $\\approx 0.187$\n\n### 2. Re-measurement Procedure\nI proceeded to re-measure the Raman spectra at these two specific positions. Since no protocol was available for \"T074\", I selected conservative parameters to ensure signal quality without risking photodamage.\n\n*   **Laser Power**: 20%\n*   **Exposure Time**: 1.0 s\n*   **Acquisition Mode**: Single shot\n\n### 3. Results Summary\nThe measurements were completed successfully:\n- **Position (37.8, 25.4)**: Spectrum acquired (Max Intensity: 527.0 ADU).\n- **Position (38.0, 25.2)**: Spectrum acquired (Max Intensity: 405.0 ADU).\n\nThe experience has been recorded in long-term memory to assist in future map anomaly detection tasks.\n\n```json\n{\"anomalous_positions\": [[37.8, 25.4], [38.0, 25.2]]}\n```",
+  "answer_json": {
+    "anomalous_positions": [
+      [
+        37.8,
+        25.4
+      ],
+      [
+        38.0,
+        25.2
+      ]
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T074.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# Load data from the attached file\ndata = files[0]['table']\nx_vals = data['x']\ny_vals = data['y']\nshifts = data['raman_shift_cm-1']\nintensities = data['intensity']\n\n# Get unique positions and shifts\nunique_pos = np.unique(np.stack([x_vals, y_vals], axis=1), axis=0)\nunique_shifts = np.unique(shifts)\n\n# Reconstruct the data into a (n_points, n_shifts) matrix\nn_points = len(unique_pos)\nn_shifts = len(unique_shifts)\nspectra_matrix = np.zeros((n_points, n_shifts))\n\nfor i in range(n_points):\n    px, py = unique_pos[i]\n    mask = (x_vals == px) & (y_vals == py)\n    # The data is sorted by shift for each point based on the head() we saw\n    # Let's ensure we map correctly to unique_shifts\n    point_shifts = shifts[mask]\n    point_ints = intensities[mask]\n    \n    # Create a mapping from shift to intensity\n    shift_map = dict(zip(point_shifts, point_ints))\n    for j in range(n_shifts):\n        spectra_matrix[i, j] = shift_map.get(unique_shifts[j], 0)\n\n# Compute element-wise median spectrum\nmedian_spectrum = np.median(spectra_matrix, axis=0)\n\ndef l2_norm(v):\n    norm = np.linalg.norm(v)\n    return v / norm if norm > 0 else v\n\ndef cosine_similarity(v1, v2):\n    # Cosine similarity of L2 normalized vectors is their dot product\n    return np.dot(l2_norm(v1), l2_norm(v2))\n\n# Normalize median spectrum once\nmedian_norm = l2_norm(median_spectrum)\n\nanomalous_points = []\nfor i in range(n_points):\n    sim = np.dot(l2_norm(spectra_matrix[i]), median_norm)\n    if sim < 0.80:\n        anomalous_points.append({'x': unique_pos[i][0], 'y': unique_pos[i][1], 'similarity': sim})\n\nprint(f\"Number of points: {n_points}\")\nprint(f\"Number of anomalous points: {len(anomalous_points)}\")\nfor p in anomalous_points:\n    print(p)\n\nsave_result('anomalous_positions.csv', np.array([list(p.values()) for p in anomalous_points]))\n",
+        "file_ids": [
+          "2026-08-07/T074.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "recall_experiences",
+      "args": {
+        "query": "map anomaly re-measure"
+      },
+      "ok": true
+    },
+    {
+      "name": "search_knowledge_base",
+      "args": {
+        "query": "T074"
+      },
+      "ok": true
+    },
+    {
+      "name": "move_stage",
+      "args": {
+        "x": 37.8,
+        "y": 25.4
+      },
+      "ok": true
+    },
+    {
+      "name": "get_hardware_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 1,
+        "power": 20
+      },
+      "ok": true
+    },
+    {
+      "name": "move_stage",
+      "args": {
+        "x": 38,
+        "y": 25.2
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 1,
+        "power": 20
+      },
+      "ok": true
+    },
+    {
+      "name": "record_experience",
+      "args": {
+        "is_success": true,
+        "lesson": "Element-wise median can be used to detect outliers in Raman maps via cosine similarity of L2-normalized spectra.",
+        "metrics": "Anomalous points detected: 2/9; Similarity threshold: 0.80.",
+        "outcome": "Identified two anomalous positions (37.8, 25.4) and (38.0, 25.2) and re-measured them successfully.",
+        "params": {
+          "exposure": 1,
+          "power": 20
+        },
+        "sample": "map T074",
+        "substrate": "unknown",
+        "tags": [
+          "anomaly_detection",
+          "cosine_similarity",
+          "median_spectrum"
+        ],
+        "trajectory": "Analyzed uploaded map T074.csv in run_analysis to find points with cosine similarity < 0.8 to the median spectrum. Found two such points and performed single-shot measurements at those coordinates."
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-07/bench_2026-08-07_CoALA_CoALA_T074_83eb56/203137_896_x37.8_y25.4.csv",
+    "results/2026-08-07/bench_2026-08-07_CoALA_CoALA_T074_83eb56/203211_553_x38.0_y25.2.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 38.0,
+    "y": 25.2,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 20.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T074_83eb56",
+  "elapsed_s": 195.73,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

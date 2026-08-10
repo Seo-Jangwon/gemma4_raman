@@ -1,0 +1,183 @@
+{
+  "task": "T128",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Interpolate T128.csv and reference_library.csv onto the reference axis, apply IPBSA baseline order 5 and L2 normalization, then find the material with the highest cosine similarity. If two scores are equal, choose the one whose spectrum_id comes first in alphabetical order.",
+  "criteria": "EXACT(material, spectrum_id on ties)",
+  "checks": [
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'calcite' (expected 'calcite')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T128.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "To identify the material of sample T128, I processed both the sample spectrum and the reference library using a consistent Raman shift axis from 200 to 2000 cm⁻¹. For each spectrum, I applied an iterative polynomial background subtraction (IPBSA) with a polynomial order of 5 to remove fluorescence and subsequent L2 normalization to ensure that comparisons were based on spectral shape rather than intensity.\n\nI then computed the cosine similarity between the processed T128 spectrum and every entry in the reference library. The highest similarity was found for the material \"calcite\" (spectrum ID CAL_02) with a score of approximately 0.978, indicating a very strong match.\n\n```json\n{\"material\": \"calcite\"}\n```",
+  "answer_json": {
+    "material": "calcite"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T128.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\ndef ipbsa(x, y, order=5, max_iter=100, tol=1e-4):\n    # Fit initial background\n    coeffs = np.polyfit(x, y, order)\n    bg = np.polyval(coeffs, x)\n    for i in range(max_iter):\n        prev_bg = bg.copy()\n        res = y - bg\n        # Replace positive residuals with the background values to 'ignore' peaks\n        y_masked = np.where(res > 0, bg, y)\n        coeffs = np.polyfit(x, y_masked, order)\n        bg = np.polyval(coeffs, x)\n        if np.linalg.norm(bg - prev_bg) < tol:\n            break\n    return bg\n\ndef l2_normalize(y):\n    norm = np.linalg.norm(y)\n    return y / norm if norm > 0 else y\n\n# Load data\nt128_data = files['2026-08-07/T128.csv']['table']\nref_data = files['2026-08-07/reference_library.csv']['table']\n\nx_t128 = t128_data['raman_shift_cm-1']\ny_t128 = t128_data['intensity']\n\n# Reference axis: unique Raman shifts from the library, sorted\nx_ref = np.unique(ref_data['raman_shift_cm-1'])\n\n# 1. Interpolate T128 onto reference axis\nf_t128 = interp1d(x_t128, y_t128, kind='linear', fill_value=\"extrapolate\")\ny_t128_interp = f_t128(x_ref)\n\n# 2. Process T128: IPBSA -> L2 Norm\nbg_t128 = ipbsa(x_ref, y_t128_interp, order=5)\ny_t128_corr = y_t128_interp - bg_t128\ny_t128_final = l2_normalize(y_t128_corr)\n\n# 3. Process Library\nunique_ids = np.unique(ref_data['spectrum_id'])\nresults = []\n\nfor sid in unique_ids:\n    mask = ref_data['spectrum_id'] == sid\n    x_s = ref_data['raman_shift_cm-1'][mask]\n    y_s = ref_data['intensity'][mask]\n    mat = ref_data['material'][mask][0]\n    \n    # Interpolate library spectrum onto reference axis\n    f_s = interp1d(x_s, y_s, kind='linear', fill_value=\"extrapolate\")\n    y_s_interp = f_s(x_ref)\n    \n    # Process: IPBSA -> L2 Norm\n    bg_s = ipbsa(x_ref, y_s_interp, order=5)\n    y_s_corr = y_s_interp - bg_s\n    y_s_final = l2_normalize(y_s_corr)\n    \n    # Cosine similarity (dot product of L2 normalized vectors)\n    similarity = np.dot(y_t128_final, y_s_final)\n    results.append({\n        'spectrum_id': sid,\n        'material': mat,\n        'similarity': similarity\n    })\n\n# Find best match\n# Sort by similarity descending, then spectrum_id ascending\nsorted_results = sorted(results, key=lambda x: (-x['similarity'], x['spectrum_id']))\nbest = sorted_results[0]\n\nprint(f\"Best material: {best['material']}\")\nprint(f\"Spectrum ID: {best['spectrum_id']}\")\nprint(f\"Similarity: {best['similarity']}\")\n",
+        "file_ids": [
+          "2026-08-07/T128.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\ndef ipbsa(x, y, order=5, max_iter=100, tol=1e-4):\n    coeffs = np.polyfit(x, y, order)\n    bg = np.polyval(coeffs, x)\n    for i in range(max_iter):\n        prev_bg = bg.copy()\n        res = y - bg\n        y_masked = np.where(res > 0, bg, y)\n        coeffs = np.polyfit(x, y_masked, order)\n        bg = np.polyval(coeffs, x)\n        if np.linalg.norm(bg - prev_bg) < tol:\n            break\n    return bg\n\ndef l2_normalize(y):\n    norm = np.linalg.norm(y)\n    return y / norm if norm > 0 else y\n\n# files[0] is T128, files[1] is reference library (based on file_ids order)\nt128_data = files[0]['table']\nref_data = files[1]['table']\n\nx_t128 = t128_data['raman_shift_cm-1']\ny_t128 = t128_data['intensity']\n\n# Reference axis from the library\nx_ref = np.unique(ref_data['raman_shift_cm-1'])\n\nf_t128 = interp1d(x_t128, y_t128, kind='linear', fill_value=\"extrapolate\")\ny_t128_interp = f_t128(x_ref)\n\nbg_t128 = ipbsa(x_ref, y_t128_interp, order=5)\ny_t128_corr = y_t128_interp - bg_t128\ny_t128_final = l2_normalize(y_t128_corr)\n\nunique_ids = np.unique(ref_data['spectrum_id'])\nresults = []\n\nfor sid in unique_ids:\n    mask = ref_data['spectrum_id'] == sid\n    x_s = ref_data['raman_shift_cm-1'][mask]\n    y_s = ref_data['intensity'][mask]\n    mat = ref_data['material'][mask][0]\n    \n    f_s = interp1d(x_s, y_s, kind='linear', fill_value=\"extrapolate\")\n    y_s_interp = f_s(x_ref)\n    \n    bg_s = ipbsa(x_ref, y_s_interp, order=5)\n    y_s_corr = y_s_interp - bg_s\n    y_s_final = l2_normalize(y_s_corr)\n    \n    similarity = np.dot(y_t128_final, y_s_final)\n    results.append({\n        'spectrum_id': sid,\n        'material': mat,\n        'similarity': similarity\n    })\n\nsorted_results = sorted(results, key=lambda x: (-x['similarity'], x['spectrum_id']))\nbest = sorted_results[0]\n\nprint(f\"Best material: {best['material']}\")\nprint(f\"Spectrum ID: {best['spectrum_id']}\")\nprint(f\"Similarity: {best['similarity']}\")\n",
+        "file_ids": [
+          "2026-08-07/T128.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Debug check for array lengths\nt128_data = files[0]['table']\nref_data = files[1]['table']\n\nprint(f\"T128 shapes: {len(t128_data['raman_shift_cm-1'])}, {len(t128_data['intensity'])}\")\nprint(f\"Ref shapes: {len(ref_data['spectrum_id'])}, {len(ref_data['raman_shift_cm-1'])}, {len(ref_data['intensity'])}\")\n\nunique_ids = np.unique(ref_data['spectrum_id'])\nfor sid in unique_ids:\n    mask = ref_data['spectrum_id'] == sid\n    x_s = ref_data['raman_shift_cm-1'][mask]\n    y_s = ref_data['intensity'][mask]\n    if len(x_s) != len(y_s):\n        print(f\"ID {sid} has mismatch: x={len(x_s)}, y={len(y_s)}\")\n",
+        "file_ids": [
+          "2026-08-07/T128.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\ndef ipbsa(x, y, order=5, max_iter=100, tol=1e-4):\n    # Ensure x and y are arrays\n    x = np.asarray(x)\n    y = np.asarray(y)\n    coeffs = np.polyfit(x, y, order)\n    bg = np.polyval(coeffs, x)\n    for i in range(max_iter):\n        prev_bg = bg.copy()\n        res = y - bg\n        y_masked = np.where(res > 0, bg, y)\n        coeffs = np.polyfit(x, y_masked, order)\n        bg = np.polyval(coeffs, x)\n        if np.linalg.norm(bg - prev_bg) < tol:\n            break\n    return bg\n\ndef l2_normalize(y):\n    y = np.asarray(y)\n    norm = np.linalg.norm(y)\n    return y / norm if norm > 0 else y\n\n# Load and cast to numpy arrays explicitly\nt128_table = files[0]['table']\nref_table = files[1]['table']\n\nx_t128 = np.asarray(t128_table['raman_shift_cm-1'])\ny_t128 = np.asarray(t128_table['intensity'])\n\n# Use a standard reference axis: 200 to 2000 with step 1\nx_ref = np.arange(200, 2001, 1) # 1801 points\n\n# Process T128\nf_t128 = interp1d(x_t128, y_t128, kind='linear', fill_value=\"extrapolate\")\ny_t128_interp = f_t128(x_ref)\nbg_t128 = ipbsa(x_ref, y_t128_interp, order=5)\ny_t128_final = l2_normalize(y_t128_interp - bg_t128)\n\n# Process Library\nsids = np.asarray(ref_table['spectrum_id'])\nmats = np.asarray(ref_table['material'])\nx_lib_all = np.asarray(ref_table['raman_shift_cm-1'])\ny_lib_all = np.asarray(ref_table['intensity'])\n\nunique_ids = np.unique(sids)\nresults = []\n\nfor sid in unique_ids:\n    mask = (sids == sid)\n    x_s = x_lib_all[mask]\n    y_s = y_lib_all[mask]\n    mat = mats[mask][0]\n    \n    # Interpolate onto reference axis\n    f_s = interp1d(x_s, y_s, kind='linear', fill_value=\"extrapolate\")\n    y_s_interp = f_s(x_ref)\n    \n    # Process: IPBSA -> L2 Norm\n    bg_s = ipbsa(x_ref, y_s_interp, order=5)\n    y_s_final = l2_normalize(y_s_interp - bg_s)\n    \n    # Cosine similarity\n    similarity = np.dot(y_t128_final, y_s_final)\n    results.append({\n        'spectrum_id': sid,\n        'material': mat,\n        'similarity': similarity\n    })\n\n# Sort for best match: sim DESC, id ASC\nsorted_res = sorted(results, key=lambda x: (-x['similarity'], x['spectrum_id']))\nbest = sorted_res[0]\n\nprint(f\"Best material: {best['material']}\")\nprint(f\"Spectrum ID: {best['spectrum_id']}\")\nprint(f\"Similarity: {best['similarity']}\")\n",
+        "file_ids": [
+          "2026-08-07/T128.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "session_id": "bench_2026-08-07_AILA_AILA_T128_b62f2c",
+  "elapsed_s": 125.91,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

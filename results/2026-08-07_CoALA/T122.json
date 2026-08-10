@@ -1,0 +1,173 @@
+{
+  "task": "T122",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Report the identification info (spectrum_id and material) of the reference in reference_library.csv that best matches T122.csv.",
+  "criteria": "EXACT(spectrum_id) - naming the right material but the wrong entry is still a miss",
+  "checks": [
+    {
+      "name": "best-matching reference",
+      "passed": true,
+      "score": 1.0,
+      "detail": "spectrum_id='PMMA_02' (expected 'PMMA_02')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T122.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "The analysis was performed by comparing the Raman spectrum of sample T122.csv against the entries in the reference library (reference_library.csv). \n\nBoth datasets were processed by aligning the Raman shift axes and performing a Pearson correlation on normalized intensities to compare the spectral shapes independently of absolute signal strength. The results showed that T122.csv has an extremely high correlation with one specific reference spectrum:\n\n- **Best Match ID**: PMMA_02\n- **Material**: PMMA\n- **Correlation Coefficient**: 0.9986\n\nOther materials (such as PET, polystyrene, calcite, aragonite, and silicon) showed significantly lower correlations, confirming that the sample is PMMA.\n\n```json\n{\"spectrum_id\": \"PMMA_02\", \"material\": \"PMMA\"}\n```",
+  "answer_json": {
+    "spectrum_id": "PMMA_02",
+    "material": "PMMA"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T122.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Identify files\nt122_id = '2026-08-07/T122.csv'\nref_lib_id = '2026-08-07/reference_library.csv'\n\n# Target spectrum\ntarget_x = files[0]['table']['raman_shift_cm-1'] if files[0]['filename'] == 'T122.csv' else None\ntarget_y = files[0]['table']['intensity'] if files[0]['filename'] == 'T122.csv' else None\n\n# If the order in files list is different, let's be explicit\nfor f in files:\n    if f['filename'] == 'T122.csv':\n        target_x = f['table']['raman_shift_cm-1']\n        target_y = f['table']['intensity']\n    elif f['filename'] == 'reference_library.csv':\n        ref_data = f['table']\n\n# Group reference library by spectrum_id\nids = np.unique(ref_data['spectrum_id'])\nmaterials = {sid: None for sid in ids} # to store material per id\n\n# We need a way to get the intensity array for each ID. \n# Since it's long format, we can use masks.\nresults = []\nfor sid in ids:\n    mask = ref_data['spectrum_id'] == sid\n    # Get material (first occurrence)\n    mat = ref_data['material'][mask][0]\n    materials[sid] = mat\n    \n    # Get the spectrum. We assume X axis is same as target or sorted.\n    ref_x = ref_data['raman_shift_cm-1'][mask]\n    ref_y = ref_data['intensity'][mask]\n    \n    # Since they might be different lengths or shifts, we should align them.\n    # But stats say both are 200-2000. Let's check if length is same.\n    if len(ref_y) == len(target_y):\n        corr = np.corrcoef(target_y, ref_y)[0, 1]\n    else:\n        # Simple interpolation or just skip if not matching? \n        # Let's see the lengths first in print.\n        corr = -1 \n        print(f\"Length mismatch for {sid}: target={len(target_y)}, ref={len(ref_y)}\")\n\n    results.append((sid, mat, corr))\n\n# Find best match\nbest_match = max(results, key=lambda x: x[2])\nprint(f\"Best Match: ID={best_match[0]}, Material={best_match[1]}, Correlation={best_match[2]}\")\n\nfor r in results:\n    print(f\"ID: {r[0]}, Mat: {r[1]}, Corr: {r[2]:.4f}\")\n",
+        "file_ids": [
+          "2026-08-07/T122.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Find files in the 'files' list\ntarget_f = None\nref_f = None\nfor f in files:\n    if f['filename'] == 'T122.csv':\n        target_f = f\n    elif f['filename'] == 'reference_library.csv':\n        ref_f = f\n\n# Target data\ntx = target_f['table']['raman_shift_cm-1']\nty = target_f['table']['intensity']\n\n# Reference library data\nrx_all = ref_f['table']['raman_shift_cm-1']\nry_all = ref_f['table']['intensity']\nrid_all = ref_f['table']['spectrum_id']\nrmat_all = ref_f['table']['material']\n\n# Unique IDs in reference library\nunique_ids = np.unique(rid_all)\n\nbest_corr = -1\nbest_id = None\nbest_mat = None\n\ndef normalize(y):\n    # Simple min-max normalization to [0, 1] for correlation focus on shape\n    return (y - np.min(y)) / (np.max(y) - np.min(y)) if np.max(y) != np.min(y) else y\n\nty_norm = normalize(ty)\n\nfor sid in unique_ids:\n    mask = (rid_all == sid)\n    sx = rx_all[mask]\n    sy = ry_all[mask]\n    smat = rmat_all[mask][0]\n    \n    # Interpolate reference to target's X axis if they differ\n    if not np.array_equal(sx, tx):\n        sy_interp = np.interp(tx, sx, sy)\n    else:\n        sy_interp = sy\n        \n    sy_norm = normalize(sy_interp)\n    \n    # Pearson correlation\n    corr = np.corrcoef(ty_norm, sy_norm)[0, 1]\n    \n    print(f\"ID: {sid}, Mat: {smat}, Corr: {corr:.4f}\")\n    \n    if corr > best_corr:\n        best_corr = corr\n        best_id = sid\n        best_mat = smat\n\nprint(f\"\\nRESULT -> Best Match: ID={best_id}, Material={best_mat}, Correlation={best_corr:.4f}\")\n",
+        "file_ids": [
+          "2026-08-07/T122.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Explicitly identify files\ntarget_f = None\nref_f = None\nfor f in files:\n    if f['filename'] == 'T122.csv':\n        target_f = f\n    elif f['filename'] == 'reference_library.csv':\n        ref_f = f\n\n# Load and force numpy arrays\ntx = np.array(target_f['table']['raman_shift_cm-1'], dtype=float)\nty = np.array(target_f['table']['intensity'], dtype=float)\n\nrx_all = np.array(ref_f['table']['raman_shift_cm-1'], dtype=float)\nry_all = np.array(ref_f['table']['intensity'], dtype=float)\nrid_all = np.array(ref_f['table']['spectrum_id'])\nrmat_all = np.array(ref_f['table']['material'])\n\nunique_ids = np.unique(rid_all)\n\nbest_corr = -1\nbest_id = None\nbest_mat = None\n\ndef normalize(y):\n    ymin, ymax = np.min(y), np.max(y)\n    if ymax == ymin:\n        return y - ymin\n    return (y - ymin) / (ymax - ymin)\n\nty_norm = normalize(ty)\n\nresults_list = []\n\nfor sid in unique_ids:\n    mask = (rid_all == sid)\n    sx = rx_all[mask]\n    sy = ry_all[mask]\n    smat = rmat_all[mask][0]\n    \n    if len(sx) == 0:\n        print(f\"Warning: No data for ID {sid}\")\n        continue\n\n    # Interpolate to target X axis\n    sy_interp = np.interp(tx, sx, sy)\n    sy_norm = normalize(sy_interp)\n    \n    # Correlation\n    corr = np.corrcoef(ty_norm, sy_norm)[0, 1]\n    results_list.append((sid, smat, corr))\n    print(f\"ID: {sid}, Mat: {smat}, Corr: {corr:.4f}\")\n\n# Find best match\nbest_id, best_mat, best_corr = max(results_list, key=lambda x: x[2])\nprint(f\"\\nRESULT -> Best Match: ID={best_id}, Material={best_mat}, Correlation={best_corr:.4f}\")\n",
+        "file_ids": [
+          "2026-08-07/T122.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T122_f16841",
+  "elapsed_s": 112.31,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

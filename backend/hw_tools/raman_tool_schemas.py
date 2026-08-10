@@ -1002,7 +1002,7 @@ RAMAN_TOOLS = [
                 "properties": {
                     "filename": {
                         "type": "string",
-                        "description": "File name or path. e.g. 'polystyrene_01' or 'runs/<session>/spectra/01_corrected.csv'",
+                        "description": "File name or path. Three forms are accepted: a session artifact path relative to data/ (e.g. 'runs/<session>/spectra/01_corrected.csv'), an absolute path, or a file_id from list_uploaded_files (e.g. '2026-08-07/N05.csv') to load an uploaded input file.",
                     }
                 },
                 "required": ["filename"],
@@ -1100,7 +1100,9 @@ RAMAN_TOOLS = [
                         "description": (
                             "Source spectrum to background-subtract. "
                             "'last': use the most recent acquire_spectrum() result (default). "
-                            "Otherwise: a file path (JSON or CSV, a path relative to data/ is allowed). "
+                            "Otherwise: a file (JSON or CSV) given as a path relative to data/, an "
+                            "absolute path, or a file_id from list_uploaded_files (e.g. "
+                            "'2026-08-07/N05.csv') to work directly on an uploaded input file. "
                             "TWO LIMITS ON 'last'. (1) It only works on Single/Accumulate spectra - a "
                             "Kinetic measurement has no single intensity array and is REJECTED. "
                             "(2) run_grid_scan acquires internally at every point, so right after a "
@@ -1387,7 +1389,18 @@ RAMAN_TOOLS = [
                             "e.g. compute each spectrum's peak intensity and draw a peak map as an (x,y) scatter. "
                             "If the task asks you to save a computed spectrum, call "
                             "save_result('name', corrected_intensity, raman_shift=x) at the end of this code "
-                            "rather than printing the array."
+                            "rather than printing the array. "
+                            "KEEP EACH CALL SHORT - aim for 40 lines or fewer. This code travels to the "
+                            "sandbox as a single JSON string, and a long block (many escaped quotes and "
+                            "newlines) is the most common way for a call to be lost in transit: the call "
+                            "silently never arrives and the task ends with no answer. Do not write one "
+                            "large end-to-end script. Split the work and call this tool several times - "
+                            "e.g. (1) load the data and print its shape and column names, (2) do one "
+                            "computation step and print a short summary, (3) produce the final numbers. "
+                            "Nothing carries over between calls: every call runs in a fresh process, so "
+                            "each one must rebuild what it needs from spectra/files, or read back an "
+                            "intermediate you wrote earlier with save_result (load_spectrum accepts the "
+                            "path it returned)."
                         ),
                     },
                     "date": {"type": "string", "description": "Measurement date to analyze 'YYYY-MM-DD'. If omitted, today."},

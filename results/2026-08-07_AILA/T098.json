@@ -1,0 +1,165 @@
+{
+  "task": "T098",
+  "axis": "diagnostics",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "In T098.csv the background rises steeply with wavenumber and buries the Raman peaks. Name the cause, apply IPBSA baseline correction with order 5, and report the peaks recovered (prominence 5% of range).",
+  "criteria": "KEYWORD(fluorescence) + ARRAY(cos>=0.99, NRMSE<=0.02) + SET(peak ±3 cm-1)",
+  "checks": [
+    {
+      "name": "peak positions",
+      "passed": true,
+      "score": 1.0,
+      "detail": "9/9 matched (submitted 9) [620.0, 794.0, 1001.0, 1031.0, 1155.0, 1183.0]... vs [620.0, 794.0, 1001.0, 1031.0, 1155.0, 1183.0]...",
+      "weight": 1.0,
+      "kind": "SET"
+    },
+    {
+      "name": "result array",
+      "passed": true,
+      "score": 1.0,
+      "detail": "cos=0.99876 NRMSE=0.00366",
+      "weight": 2.0,
+      "kind": "ARRAY"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T098.csv"
+  ],
+  "answer_text": "The steeply rising background observed in T098.csv is caused by **fluorescence**, which typically produces a broad, high-intensity signal that increases with wavenumber and can bury the underlying Raman peaks.\n\nTo recover the spectral information, I applied an Iterative Polynomial Baseline Subtraction Algorithm (IPBSA) using a 5th-order polynomial. The algorithm iteratively fit the baseline to the lowest points of the spectrum, masking identified peaks until the baseline converged. Following this correction, peak detection was performed with a prominence threshold set to 5% of the corrected intensity range (approximately $51$ counts).\n\nThe following Raman peaks were successfully recovered:\n- **620 cm$^{-1}$**\n- **794 cm$^{-1}$**\n- **1001 cm$^{-1}$**\n- **1031 cm$^{-1}$**\n- **1155 cm$^{-1}$**\n- **1183 cm$^{-1}$**\n- **1451 cm$^{-1}$**\n- **1583 cm$^{-1}$**\n- **1602 cm$^{-1}$**\n\n```json\n{\"peaks\": [620, 794, 1001, 1031, 1155, 1183, 1451, 1583, 1602]}\n```",
+  "answer_json": {
+    "peaks": [
+      620,
+      794,
+      1001,
+      1031,
+      1155,
+      1183,
+      1451,
+      1583,
+      1602
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {
+        "date": "2026-08-07"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T098.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\nimport matplotlib.pyplot as plt\n\n# Get data from uploaded file\nfile_id = '2026-08-07/T098.csv'\ndata = files[0]['table']\nx = data['raman_shift_cm-1']\ny = data['intensity']\n\ndef ipbsa_baseline(x, y, order=5, max_iter=100):\n    # Initialize mask: all points are candidates for baseline\n    mask = np.ones_like(y, dtype=bool)\n    current_fit = np.zeros_like(y)\n    \n    for i in range(max_iter):\n        # Fit polynomial to the currently accepted baseline points\n        coeffs = np.polyfit(x[mask], y[mask], order)\n        poly = np.poly1d(coeffs)\n        new_fit = poly(x)\n        \n        # Convergence check: change in fit is small\n        if i > 0 and np.max(np.abs(new_fit - current_fit)) < 1e-4 * (np.max(y) - np.min(y)):\n            break\n        current_fit = new_fit\n        \n        # Update mask: points significantly above the fit are considered peaks and removed from baseline estimation\n        # A typical IPBSA approach uses a threshold based on the residual's standard deviation or a fixed value.\n        # Here we use: if y > fit + 0.5 * std(y[mask]), it's likely a peak.\n        resid = y[mask] - current_fit[mask]\n        std_res = np.std(resid)\n        mask = y <= current_fit + (std_res * 1.5) # Standard threshold for separating peaks from baseline\n        \n    return current_fit\n\n# Apply correction\nbaseline = ipbsa_baseline(x, y, order=5)\ny_corr = y - baseline\n\n# Calculate range of corrected spectrum for prominence\n# The prompt says \"prominence 5% of range\". Usually means the intensity range.\ny_range = np.max(y_corr) - np.min(y_corr)\nprom_thresh = 0.05 * y_range\n\npeaks, properties = find_peaks(y_corr, prominence=prom_thresh)\npeak_positions = x[peaks]\n\n# Diagnostics for the report\nprint(f\"Original range: {np.max(y) - np.min(y):.2f}\")\nprint(f\"Corrected range: {y_range:.2f}\")\nprint(f\"Prominence threshold: {prom_thresh:.2f}\")\nprint(f\"Recovered peaks: {peak_positions}\")\n\n# Plotting to verify\nplt.figure(figsize=(10, 6))\nplt.plot(x, y, label='Original', color='gray', alpha=0.5)\nplt.plot(x, baseline, label='IPBSA Baseline (Order 5)', color='red')\nplt.plot(x, y_corr, label='Corrected', color='blue')\nplt.scatter(peak_positions, y_corr[peaks], color='green', marker='x', label='Peaks')\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Intensity')\nplt.legend()\nplt.title('Baseline Correction of T098.csv')\nplt.savefig('T098_correction.png')\n\n# Save the corrected spectrum as per system instructions for processed data\nsave_result('T098_corrected', y_corr, raman_shift=x)\n",
+        "file_ids": [
+          "2026-08-07/T098.csv"
+        ],
+        "title": "Baseline Correction and Peak Detection for T098.csv"
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-07_AILA_AILA_T098_ce9d29/spectra/01_T098_corrected.csv",
+    "/api/results/2026-08-07/bench_2026-08-07_AILA_AILA_T098_ce9d29/fig155114_698_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 25.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -38,
+    "temperature_status": "NOT_STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 25.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 25.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -39,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 25.0
+  },
+  "session_id": "bench_2026-08-07_AILA_AILA_T098_ce9d29",
+  "elapsed_s": 72.11,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

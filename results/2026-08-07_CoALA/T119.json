@@ -1,0 +1,172 @@
+{
+  "task": "T119",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Apply Savitzky-Golay smoothing (window_length=11, polyorder=3) to the low-signal spectrum T119.csv, interpolate onto the reference axis, L2 normalize, and identify the material against reference_library.csv.",
+  "criteria": "EXACT(material)",
+  "checks": [
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'polystyrene' (expected 'polystyrene')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T119.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "To identify the material of the low-signal spectrum **T119.csv**, I performed the following digital signal processing steps using a Python analysis sandbox:\n\n1.  **Smoothing**: Applied a Savitzky-Golay filter to the raw T119 intensity data with a window length of 11 and a polynomial order of 3 to reduce high-frequency noise while preserving peak positions.\n2.  **Axis Alignment**: Extracted the reference Raman shift axis from `reference_library.csv` and used linear interpolation to map the smoothed T119 spectrum onto this identical grid, ensuring that each intensity point corresponds to the same wavenumber across all compared spectra.\n3.  **Normalization**: Performed L2 normalization ($\\vec{v}_{norm} = \\frac{\\vec{v}}{\\|\\vec{v}\\|_2}$) on both the processed target spectrum and every reference spectrum in the library. This ensures that the comparison is based on spectral shape (relative peak intensities) rather than absolute intensity values.\n4.  **Material Identification**: Calculated the cosine similarity (the dot product of the L2-normalized vectors) between T119 and each library entry.\n\nThe results showed a clear match:\n*   **Top Match**: Polystyrene (`PS_01`) with a similarity score of **0.8866**.\n*   **Second Match**: Polystyrene (`PS_02`) with a similarity score of **0.8700**.\n*   Other materials (PET, PMMA) showed significantly lower similarities ($\\le 0.1784$).\n\nBased on this analysis, the material is identified as polystyrene.\n\n```json\n{\"material\": \"polystyrene\"}\n```",
+  "answer_json": {
+    "material": "polystyrene"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T119.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import savgol_filter\nfrom scipy.interpolate import interp1d\n\n# 1. Load T119 data\nt119_x = files[0][\"table\"][\"raman_shift_cm-1\"]\nt119_y = files[0][\"table\"][\"intensity\"]\n\n# 2. Savitzky-Golay smoothing\ny_smoothed = savgol_filter(t119_y, window_length=11, polyorder=3)\n\n# 3. Reference axis and Library data\nlib_df = files[1][\"table\"]\nref_x = np.unique(lib_df[\"raman_shift_cm-1\"])\nmaterials = lib_df[\"material\"]\nspec_ids = lib_df[\"spectrum_id\"]\nlib_y_all = lib_df[\"intensity\"]\n\n# 4. Interpolation onto reference axis\nf_interp = interp1d(t119_x, y_smoothed, kind='linear', fill_value=\"extrapolate\")\ny_interp = f_interp(ref_x)\n\ndef l2_norm(v):\n    norm = np.linalg.norm(v)\n    return v / norm if norm > 0 else v\n\n# Normalize target\ntarget_norm = l2_norm(y_interp)\n\n# 5. Compare against library\nunique_ids = np.unique(spec_ids)\nresults = []\n\nfor sid in unique_ids:\n    mask = (spec_ids == sid)\n    sid_x = ref_x # assuming same axis for all\n    sid_y = lib_y_all[mask]\n    mat = materials[mask][0]\n    \n    # Normalize reference spectrum\n    ref_norm = l2_norm(sid_y)\n    \n    # Cosine similarity (dot product of L2 norms)\n    similarity = np.dot(target_norm, ref_norm)\n    results.append((mat, sid, similarity))\n\n# Sort by similarity descending\nresults.sort(key=lambda x: x[2], reverse=True)\n\nprint(f\"Top match: {results[0][0]} ({results[0][1]}) with similarity {results[0][2]:.4f}\")\nprint(\"Other top matches:\")\nfor i in range(1, min(5, len(results))):\n    print(f\"{i}: {results[i][0]} ({results[i][1]}) - {results[i][2]:.4f}\")\n\n# Save the processed spectrum for record\nsave_result(\"T119_processed\", y_interp, raman_shift=ref_x)\n\n# Final material\nfinal_material = results[0][0]\nprint(f\"FINAL_MATERIAL: {final_material}\")\n",
+        "file_ids": [
+          "2026-08-07/T119.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import savgol_filter\nfrom scipy.interpolate import interp1d\n\n# Check data shapes first\nt119_x = files[0][\"table\"][\"raman_shift_cm-1\"]\nt119_y = files[0][\"table\"][\"intensity\"]\nprint(f\"T119 shape: {len(t119_x)}\")\n\nlib_df = files[1][\"table\"]\nref_x_all = lib_df[\"raman_shift_cm-1\"]\nspec_ids = lib_df[\"spectrum_id\"]\nunique_ids = np.unique(spec_ids)\nprint(f\"Library total rows: {len(ref_x_all)}\")\nprint(f\"Unique spectrum IDs: {len(unique_ids)}\")\n\n# Check a single spectrum length\nfirst_id = unique_ids[0]\nmask = (spec_ids == first_id)\nprint(f\"Length of spectrum {first_id}: {np.sum(mask)}\")\n\n# To be safe, I will iterate through each library spectrum and interpolate T119 to its axis\ny_smoothed = savgol_filter(t119_y, window_length=11, polyorder=3)\n\ndef l2_norm(v):\n    norm = np.linalg.norm(v)\n    return v / norm if norm > 0 else v\n\nresults = []\nfor sid in unique_ids:\n    mask = (spec_ids == sid)\n    sid_x = ref_x_all[mask]\n    sid_y = lib_df[\"intensity\"][mask]\n    mat = lib_df[\"material\"][mask][0]\n    \n    # Interpolate T119 onto THIS specific spectrum's axis\n    f_interp = interp1d(t119_x, y_smoothed, kind='linear', fill_value=\"extrapolate\")\n    target_on_axis = f_interp(sid_x)\n    \n    # Normalize both\n    target_norm = l2_norm(target_on_axis)\n    ref_norm = l2_norm(sid_y)\n    \n    similarity = np.dot(target_norm, ref_norm)\n    results.append((mat, sid, similarity))\n\nresults.sort(key=lambda x: x[2], reverse=True)\nprint(f\"Top match: {results[0][0]} ({results[0][1]}) with similarity {results[0][2]:.4f}\")\nfor i in range(1, min(5, len(results))):\n    print(f\"{i}: {results[i][0]} ({results[i][1]}) - {results[i][2]:.4f}\")\n\n# Save the smoothed T119 for reporting (using its original axis)\nsave_result(\"T119_smoothed\", y_smoothed, raman_shift=t119_x)\n\nprint(f\"FINAL_MATERIAL: {results[0][0]}\")\n",
+        "file_ids": [
+          "2026-08-07/T119.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import savgol_filter\nfrom scipy.interpolate import interp1d\n\n# 1. Load T119 data\nt119_x = files[0][\"table\"][\"raman_shift_cm-1\"]\nt119_y = files[0][\"table\"][\"intensity\"]\n\n# Savitzky-Golay smoothing\ny_smoothed = savgol_filter(t119_y, window_length=11, polyorder=3)\n\n# 2. Load Library data\nlib_data = files[1][\"table\"]\nids = np.array(lib_data[\"spectrum_id\"])\nmats = np.array(lib_data[\"material\"])\nx_vals = np.array(lib_data[\"raman_shift_cm-1\"])\ny_vals = np.array(lib_data[\"intensity\"])\n\nprint(f\"T119 axis length: {len(t119_x)}\")\nprint(f\"Library total points: {len(ids)}\")\nprint(f\"First few IDs: {ids[:5]}\")\n\n# Find unique spectrums\nunique_ids = np.unique(ids)\nprint(f\"Unique spectra found: {unique_ids}\")\n\ndef l2_norm(v):\n    n = np.linalg.norm(v)\n    return v / n if n > 0 else v\n\nresults = []\n\n# We need the 'reference axis'. Usually this means the x-axis used in the library.\n# Since all spectra in the library likely share the same x-axis, we can take one.\nif len(unique_ids) > 0:\n    first_id = unique_ids[0]\n    mask_first = (ids == first_id)\n    ref_x = x_vals[mask_first]\n    \n    # Interpolate T119 smoothed onto the reference axis\n    f_interp = interp1d(t119_x, y_smoothed, kind='linear', fill_value=\"extrapolate\")\n    target_on_ref_axis = f_interp(ref_x)\n    target_norm = l2_norm(target_on_ref_axis)\n\n    for sid in unique_ids:\n        mask = (ids == sid)\n        sid_y = y_vals[mask]\n        sid_mat = mats[mask][0]\n        \n        # If the library spectrum length differs from ref_x, we'd need to interpolate it too.\n        # But if they are aligned, just normalize and dot.\n        if len(sid_y) != len(ref_x):\n            # Handle cases where a spectrum might be shorter/longer\n            # Interpolate sid_y onto ref_x\n            f_sid = interp1d(x_vals[mask], sid_y, kind='linear', fill_value=\"extrapolate\")\n            sid_y_interp = f_sid(ref_x)\n            sid_norm = l2_norm(sid_y_interp)\n        else:\n            sid_norm = l2_norm(sid_y)\n        \n        similarity = np.dot(target_norm, sid_norm)\n        results.append((sid_mat, sid, similarity))\n\n    results.sort(key=lambda x: x[2], reverse=True)\n    print(f\"Top match: {results[0][0]} ({results[0][1]}) Sim: {results[0][2]:.4f}\")\n    for i in range(1, min(5, len(results))):\n        print(f\"{i}: {results[i][0]} ({results[i][1]}) Sim: {results[i][2]:.4f}\")\n\n    final_material = results[0][0]\n    print(f\"FINAL_MATERIAL: {final_material}\")\nelse:\n    print(\"No spectra found in library\")\n",
+        "file_ids": [
+          "2026-08-07/T119.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T119_6f2d1f",
+  "elapsed_s": 135.64,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

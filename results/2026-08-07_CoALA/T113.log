@@ -1,0 +1,997 @@
+══════════════════════════════════════════════════════════════════════════════
+ CoALA · T113 · gemma4:31b @ http://192.168.1.15:11434
+ session : bench_2026-08-07_CoALA_CoALA_T113_1fc24f
+ started : 2026-08-07 21:45:42
+ thinking: ON — gemma4:31b capabilities=['completion', 'vision', 'tools', 'thinking'] → thinking 지원
+══════════════════════════════════════════════════════════════════════════════
+
+[21:45:42.500] [QUESTION]
+    Compare the unknown spectrum T113.csv with the reference spectra in reference_library.csv (interpolate onto the reference axis, L2 normalize, cosine similarity) and report the 3 most similar references with their rank and score. 
+    
+    ---
+    When you are done, end your reply with a JSON block holding the values you were asked to
+    report, like this:
+    
+    ```json
+    {"key": value, ...}
+    ```
+    
+    The JSON block must include these keys, spelled exactly like this, with the shape described for each:
+      "top3": list of 3 objects, most similar first, each {"spectrum_id": string, "material": string, "score": number}
+    
+    Give plain JSON numbers and strings - no units, no LaTeX, no thousands separators. If the
+    task asked you to refuse, explain, or ask a question instead of measuring, say so in plain
+    text and omit the block.
+[21:45:42.501] [CoALA CYCLE] ────── 사이클 1 시작 (propose 예산 150/150, 누적 dose 0.0 mJ) ──────
+[21:45:42.501] [CoALA PLAN] cycle 1 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[21:45:42.517] [Gemma <- PROMPT] step 1 · CoALA propose (cycle 1, plan 1) · 2 msgs
+    system(11386ch) · human(800ch)
+[21:45:52.810] [Gemma THINKING] step 1 · 892ch
+    The objective is to compare an unknown spectrum (`T113.csv`) against a library of reference spectra (`reference_library.csv`).
+    I need to:
+    1.  Interpolate `T113.csv` onto the Raman shift axis used in `reference_library.csv`.
+    2.  L2 normalize both the target and reference spectra.
+    3.  Calculate cosine similarity between the interpolated/normalized unknown spectrum and each reference.
+    4.  Identify and report the top 3 most similar references (rank, score, material).
+    
+    Plan:
+    1.  List uploaded files to get `file_id`s for `T113.csv` and `reference_library.csv`.
+    2.  Inspect both files to understand their structure (column names for Raman shift, intensity, spectrum IDs/materials).
+    3.  Run a Python analysis (`run_analysis`) to perform the interpolation, normalization, similarity calculation, and ranking.
+    4.  Format the result into the required JSON block.
+    
+    Let's start by listing the files.
+[21:45:52.810] [Gemma TOOL_CALLS] step 1 · 1개
+    1) list_uploaded_files({})
+[21:45:52.811] [Gemma STATS] prompt 16981 tok · out 239 tok · wall 10.29s · eval 3.83s (62.5 tok/s) · load 0.25s · done=stop
+[21:45:52.811] [CoALA RETRIEVAL] cycle 1 · 정보수집 1건 실행 (사이클을 닫지 않음)
+    list_uploaded_files()
+[21:45:52.813] [CoALA OBSERVE] list_uploaded_files · ok · 1 ms · retrieval
+    {"ok": true, "count": 2, "files": [{"file_id": "2026-08-07/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829}, {"file_id": "2026-08-07/T113.csv", "filename": "T113.csv", "kind": "text", "bytes": 36465}]}
+[21:45:52.813] [CoALA PLAN] cycle 1 · 계획 라운드 2/6
+    [Planning progress] This is planning (information gathering) round 2 in this cycle (1 consecutive lookups, 4 planning rounds left).
+[21:45:52.815] [Gemma <- PROMPT] step 2 · CoALA propose (cycle 1, plan 2) · 4 msgs
+    system(11373ch) · human(800ch) · ai(0ch)[list_uploaded_files] · tool(246ch)
+[21:46:00.651] [Gemma THINKING] step 2 · 195ch
+    I need to compare the unknown spectrum `T113.csv` with the reference spectra in `reference_library.csv`.
+    First, I will inspect both files to understand their structure (column names, data types).
+[21:46:00.651] [Gemma TOOL_CALLS] step 2 · 2개
+    1) inspect_file({"file_id": "2026-08-07/T113.csv"})
+    2) inspect_file({"file_id": "2026-08-07/reference_library.csv"})
+[21:46:00.651] [Gemma STATS] prompt 17121 tok · out 111 tok · wall 7.84s · eval 1.77s (62.6 tok/s) · load 0.25s · done=stop
+[21:46:00.651] [CoALA RETRIEVAL] cycle 1 · 정보수집 2건 실행 (사이클을 닫지 않음)
+    inspect_file(file_id=2026-08-07/T113.csv) / inspect_file(file_id=2026-08-07/reference_library.csv)
+[21:46:00.670] [CoALA OBSERVE] inspect_file · ok · 18 ms · retrieval
+    {"ok": true, "file_id": "2026-08-07/T113.csv", "filename": "T113.csv", "kind": "text", "bytes": 36465, "n_rows": 1801, "n_cols": 2, "columns": ["raman_shift_cm-1", "intensity"], "dtypes": {"raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 1801}, "intensity": {"min": -20.705438, "max": 1002.949432, "mean": 23.969898, "n_valid": 1801}}, "head": [[200.0, -11.237696], [201.0, -0.552428], [202.0, 12.184795], [203.0, -7.139532], [204.0, -12.118588]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-07/T113.csv']."}
+[21:46:00.706] [CoALA OBSERVE] inspect_file · ok · 36 ms · retrieval
+    {"ok": true, "file_id": "2026-08-07/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829, "n_rows": 21612, "n_cols": 4, "columns": ["spectrum_id", "material", "raman_shift_cm-1", "intensity"], "dtypes": {"spectrum_id": "text", "material": "text", "raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 21612}, "intensity": {"min": 0.017118, "max": 1000.0, "mean": 25.348885, "n_valid": 21612}}, "head": [["PS_01", "polystyrene", 200.0, 0.072777], ["PS_01", "polystyrene", 201.0, 0.072997], ["PS_01", "polystyrene", 202.0, 0.073218], ["PS_01", "polystyrene", 203.0, 0.07344], ["PS_01", "polystyrene", 204.0, 0.073663]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-07/reference_library.csv']."}
+[21:46:00.706] [CoALA PLAN] cycle 1 · 계획 라운드 3/6
+    [Planning progress] This is planning (information gathering) round 3 in this cycle (2 consecutive lookups, 3 planning rounds left).
+[21:46:00.706] [Gemma <- PROMPT] step 3 · CoALA propose (cycle 1, plan 3) · 7 msgs
+    system(12068ch) · human(800ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(872ch) · tool(1090ch)
+[21:46:22.338] [Gemma THINKING] step 3 · 1188ch
+    The user wants to compare an unknown spectrum (`T113.csv`) with a reference library (`reference_library.csv`).
+    
+    `T113.csv`:
+    - `raman_shift_cm-1`: Raman shift axis.
+    - `intensity`: Intensity values.
+    
+    `reference_library.csv`:
+    - `spectrum_id`: Unique ID for each reference spectrum.
+    - `material`: Material name.
+    - `raman_shift_cm-1`: Raman shift axis.
+    - `intensity`: Intensity values.
+    
+    The requirement is:
+    1. Interpolate the unknown spectrum onto the reference axis.
+    2. L2 normalize both spectra.
+    3. Compute cosine similarity.
+    4. Report top 3 most similar references (rank and score).
+    
+    Plan:
+    - Use `run_analysis` to perform these operations.
+    - Load both files.
+    - Extract the reference axis from the library (assuming all reference spectra share the same axis, but I'll check/handle it in code).
+    - For each unique `spectrum_id` in the library:
+        - Interpolate T113 intensity onto the reference x-axis.
+        - L2 normalize both interpolated T113 and the reference spectrum.
+        - Calculate cosine similarity.
+    - Sort by similarity score and pick the top 3.
+    
+    Wait, let's verify if they share the same axis. Looking at `inspect_file`, both have min 200 and max 2000. I'll write code to be robust.
+[21:46:22.339] [Gemma TOOL_CALLS] step 3 · 1개
+    1) run_analysis({"code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Load files\nt113 = files[0] if files[0]['filename'] == 'T113.csv' else files[1] \nlibrary = files[1] if files[0]['filename'] == 'T113.csv' else files[0]\n\nx_unk = t113['table']['raman_shift_cm-1']\ny_unk = t113['table']['intensity']\n\n# Reference library data\nref_ids = np.unique(library['table']['spectrum_id'])\nref_mats = library['table']['material']\nref_x_all = library['table']['raman_shift_cm-1']\nref_y_all = library['table']['intensity']\n\n# We need the axis of the references. \n# Let's assume they all share the same x-axis values for a given ID.\n# Get the x-axis from the first reference spectrum\nfirst_id = ref_ids[0]\nmask_first = (library['table']['spectrum_id'] == first_id)\nx_ref = ref_x_all[mask_first
+    … <897자 생략>)
+[21:46:22.339] [Gemma STATS] prompt 18261 tok · out 935 tok · wall 21.63s · eval 15.03s (62.2 tok/s) · load 0.24s · done=stop
+[21:46:22.340] [CoALA PLAN] cycle 1 · 정보수집 종료 · 실행 후보 1건 확보 → evaluate/select 로
+    run_analysis(code=import numpy as np
+    from scipy.interpolate import interp1d
+    
+    # Load files
+    t113 = files[0] if files[0]['filename'] == 'T113.csv' else files[1] 
+    library = files[1] if files[0]['filename'] == 'T113.csv' else files[0]
+    
+    x_unk = t113['table']['raman_shift_cm-1']
+    y_unk = t113['table']['intensity']
+    
+    # Reference library data
+    ref_ids = np.unique(library['table']['spectrum_id'])
+    ref_mats = library['table']['material']
+    ref_x_all = library['table']['raman_shift_cm-1']
+    ref_y_all = library['table']['intensity']
+    
+    # We need the axis of the references. 
+    # Let's assume they all share the same x-axis values for a given ID.
+    # Get the x-axis from the first reference spectrum
+    first_id = ref_ids[0]
+    mask_first = (library['table']['spectrum_id'] == first_id)
+    x_ref = ref_x_all[mask_first]
+    
+    def l2_norm(v):
+        norm = np.linalg.norm(v)
+        return v / norm if norm > 0 else v
+    
+    # Interpolate unknown onto reference axis
+    f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value="extrapolate")
+    y_unk_interp = f_unk(x_ref)
+    y_unk_norm = l2_norm(y_unk_interp)
+    
+    results = []
+    for sid in ref_ids:
+        mask = (library['table']['spectrum_id'] == sid)
+        # Get material for this ID
+        mat = ref_mats[mask][0]
+        y_ref = ref_y_all[mask]
+        y_ref_norm = l2_norm(y_ref)
+        
+        # Cosine similarity of L2 normalized vectors is just the dot product
+        similarity = np.dot(y_unk_norm, y_ref_norm)
+        results.append({'spectrum_id': sid, 'material': mat, 'score': float(similarity)})
+    
+    # Sort by score descending
+    top3 = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
+    print(top3)
+    , file_ids=['2026-08-07/T113.csv', '2026-08-07/reference_library.csv'])
+[21:46:22.340] [CoALA EVALUATE] 후보 1개 — 평가 생략(논문 4.6: 단순 상황)
+    run_analysis(code=import numpy as np
+    from scipy.interpolate import interp1d
+    
+    # Load files
+    t113 = files[0] if files[0]['filename'] == 'T113.csv' else files[1] 
+    library = files[1] if files[0]['filename'] == 'T113.csv' else files[0]
+    
+    x_unk = t113['table']['raman_shift_cm-1']
+    y_unk = t113['table']['intensity']
+    
+    # Reference library data
+    ref_ids = np.unique(library['table']['spectrum_id'])
+    ref_mats = library['table']['material']
+    ref_x_all = library['table']['raman_shift_cm-1']
+    ref_y_all = library['table']['intensity']
+    
+    # We need the axis of the references. 
+    # Let's assume they all share the same x-axis values for a given ID.
+    # Get the x-axis from the first reference spectrum
+    first_id = ref_ids[0]
+    mask_first = (library['table']['spectrum_id'] == first_id)
+    x_ref = ref_x_all[mask_first]
+    
+    def l2_norm(v):
+        norm = np.linalg.norm(v)
+        return v / norm if norm > 0 else v
+    
+    # Interpolate unknown onto reference axis
+    f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value="extrapolate")
+    y_unk_interp = f_unk(x_ref)
+    y_unk_norm = l2_norm(y_unk_interp)
+    
+    results = []
+    for sid in ref_ids:
+        mask = (library['table']['spectrum_id'] == sid)
+        # Get material for this ID
+        mat = ref_mats[mask][0]
+        y_ref = ref_y_all[mask]
+        y_ref_norm = l2_norm(y_ref)
+        
+        # Cosine similarity of L2 normalized vectors is just the dot product
+        similarity = np.dot(y_unk_norm, y_ref_norm)
+        results.append({'spectrum_id': sid, 'material': mat, 'score': float(similarity)})
+    
+    # Sort by score descending
+    top3 = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
+    print(top3)
+    , file_ids=['2026-08-07/T113.csv', '2026-08-07/reference_library.csv'])
+[21:46:22.340] [CoALA SELECT] cycle 1 · 선택 → run_analysis(code=import numpy as np
+from scipy.interpolate import interp1d
+
+# Load files
+t113 = files[0] if files[0]['filename'] == 'T113.csv' else files[1] 
+library = files[1] if files[0]['filename'] == 'T113.csv' else files[0]
+
+x_unk = t113['table']['raman_shift_cm-1']
+y_unk = t113['table']['intensity']
+
+# Reference library data
+ref_ids = np.unique(library['table']['spectrum_id'])
+ref_mats = library['table']['material']
+ref_x_all = library['table']['raman_shift_cm-1']
+ref_y_all = library['table']['intensity']
+
+# We need the axis of the references. 
+# Let's assume they all share the same x-axis values for a given ID.
+# Get the x-axis from the first reference spectrum
+first_id = ref_ids[0]
+mask_first = (library['table']['spectrum_id'] == first_id)
+x_ref = ref_x_all[mask_first]
+
+def l2_norm(v):
+    norm = np.linalg.norm(v)
+    return v / norm if norm > 0 else v
+
+# Interpolate unknown onto reference axis
+f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value="extrapolate")
+y_unk_interp = f_unk(x_ref)
+y_unk_norm = l2_norm(y_unk_interp)
+
+results = []
+for sid in ref_ids:
+    mask = (library['table']['spectrum_id'] == sid)
+    # Get material for this ID
+    mat = ref_mats[mask][0]
+    y_ref = ref_y_all[mask]
+    y_ref_norm = l2_norm(y_ref)
+    
+    # Cosine similarity of L2 normalized vectors is just the dot product
+    similarity = np.dot(y_unk_norm, y_ref_norm)
+    results.append({'spectrum_id': sid, 'material': mat, 'score': float(similarity)})
+
+# Sort by score descending
+top3 = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
+print(top3)
+, file_ids=['2026-08-07/T113.csv', '2026-08-07/reference_library.csv'])
+    single execution candidate - evaluation skipped
+[21:46:22.341] [CoALA EXECUTE] run_analysis
+    {"code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Load files\nt113 = files[0] if files[0]['filename'] == 'T113.csv' else files[1] \nlibrary = files[1] if files[0]['filename'] == 'T113.csv' else files[0]\n\nx_unk = t113['table']['raman_shift_cm-1']\ny_unk = t113['table']['intensity']\n\n# Reference library data\nref_ids = np.unique(library['table']['spectrum_id'])\nref_mats = library['table']['material']\nref_x_all = library['table']['raman_shift_cm-1']\nref_y_all = library['table']['intensity']\n\n# We need the axis of the references. \n# Let's assume they all share the same x-axis values for a given ID.\n# Get the x-axis from the first reference spectrum\nfirst_id = ref_ids[0]\nmask_first = (library['table']['spectrum_id'] == first_id)\nx_ref = ref_x_all[mask_first]\n\ndef l2_norm(v):\n    norm = np.linalg.norm(v)\n    return v / norm if norm > 0 else v\n\n# Interpolate unknown onto reference axis\nf_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value=\"extrapolate\")\ny_unk_interp = f_unk(x_ref)\ny_unk_norm = l2_norm(y_unk_interp)\n\nresults = []\nfor sid in ref_ids:\n    mask = (library['table']['spectrum_id'] == sid)\n    # Get material for this 
+    … <497자 생략>
+[21:46:23.245] [CoALA OBSERVE] run_analysis · FAIL · 904 ms · grounding
+    {"ok": false, "error": "ValueError: shapes (0,21612) and (0,21612) not aligned: 21612 (dim 1) != 0 (dim 0)", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 379, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 42, in <module>\nValueError: shapes (0,21612) and (0,21612) not aligned: 21612 (dim 1) != 0 (dim 0)\n"}
+[21:46:23.245] [CoALA CYCLE] ────── 사이클 2 시작 (propose 예산 147/150, 누적 dose 0.0 mJ) ──────
+[21:46:23.245] [CoALA PLAN] cycle 2 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[21:46:23.245] [Gemma <- PROMPT] step 4 · CoALA propose (cycle 2, plan 1) · 9 msgs
+    system(12204ch) · human(800ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(872ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(533ch)
+[21:46:49.083] [Gemma THINKING] step 4 · 1236ch
+    The previous `run_analysis` failed with a `ValueError`. Looking at the code, it seems I might be accessing the table columns incorrectly or there's an issue with how the data is being indexed.
+    
+    Wait, I see:
+    `x_unk = t113['table']['raman_shift_cm-1']`
+    `y_unk = t113['table']['intensity']`
+    This looks correct based on `inspect_file`.
+    
+    The error `shapes (0,21612) and (0,21612) not aligned: 21612 (dim 1) != 0 (dim 0)` suggests a numpy array operation failed. Specifically, it might be the dot product or normalization if the arrays are empty or shaped unexpectedly.
+    
+    Let's check the data shapes more carefully and handle the file indexing based on `file_id` instead of guessing from `filename`.
+    
+    Also, I should make sure that `x_ref` is correctly extracted.
+    In the library:
+    n_rows = 21612, n_cols = 4.
+    If there are multiple spectra, each with say 1801 points (like T113), then there would be about 21612/1801 ≈ 12 spectra.
+    
+    Let's refine the code to:
+    1. Correctly identify which file is which using `file_id`.
+    2. Print shapes of arrays for debugging.
+    3. Use a more robust way to split the library into individual spectra.
+    4. Ensure normalization and dot product are done on 1D arrays.
+    
+    I'll try again with better indexing and debug prints.
+[21:46:49.084] [Gemma TOOL_CALLS] step 4 · 1개
+    1) run_analysis({"code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Identify files by their ID to avoid filename confusion\nt113_id = '2026-08-07/T113.csv'\nlib_id = '2026-08-07/reference_library.csv'\n\nt113 = next(f for f in files if f['file_id'] == t113_id)\nlibrary = next(f for f in files if f['file_id'] == lib_id)\n\nx_unk = t113['table']['raman_shift_cm-1']\ny_unk = t113['table']['intensity']\n\n# Reference library data\nref_ids = np.unique(library['table']['spectrum_id'])\nref_mats_all = library['table']['material']\nref_x_all = library['table']['raman_shift_cm-1']\nref_y_all = library['table']['intensity']\n\nprint(f\"Unknown spectrum: {len(x_unk)} points\")\nprint(f\"Library: {len(ref_ids)} unique spectra found\")\n\n# Get a reference axis from the first spectrum in the libr
+    … <1417자 생략>)
+[21:46:49.084] [Gemma STATS] prompt 19152 tok · out 1171 tok · wall 25.84s · eval 18.90s (62.0 tok/s) · load 0.24s · done=stop
+[21:46:49.084] [CoALA PLAN] cycle 2 · 정보수집 종료 · 실행 후보 1건 확보 → evaluate/select 로
+    run_analysis(code=import numpy as np
+    from scipy.interpolate import interp1d
+    
+    # Identify files by their ID to avoid filename confusion
+    t113_id = '2026-08-07/T113.csv'
+    lib_id = '2026-08-07/reference_library.csv'
+    
+    t113 = next(f for f in files if f['file_id'] == t113_id)
+    library = next(f for f in files if f['file_id'] == lib_id)
+    
+    x_unk = t113['table']['raman_shift_cm-1']
+    y_unk = t113['table']['intensity']
+    
+    # Reference library data
+    ref_ids = np.unique(library['table']['spectrum_id'])
+    ref_mats_all = library['table']['material']
+    ref_x_all = library['table']['raman_shift_cm-1']
+    ref_y_all = library['table']['intensity']
+    
+    print(f"Unknown spectrum: {len(x_unk)} points")
+    print(f"Library: {len(ref_ids)} unique spectra found")
+    
+    # Get a reference axis from the first spectrum in the library
+    first_id = ref_ids[0]
+    mask_first = (library['table']['spectrum_id'] == first_id)
+    x_ref = ref_x_all[mask_first]
+    print(f"Reference axis size: {len(x_ref)}")
+    
+    def l2_norm(v):
+        norm = np.linalg.norm(v)
+        return v / norm if norm > 0 else v
+    
+    # Interpolate unknown onto reference axis
+    f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value="extrapolate")
+    y_unk_interp = f_unk(x_ref)
+    y_unk_norm = l2_norm(y_unk_interp)
+    
+    results = []
+    for sid in ref_ids:
+        mask = (library['table']['spectrum_id'] == sid)
+        mat = ref_mats_all[mask][0]
+        y_ref = ref_y_all[mask]
+        
+        # Ensure lengths match x_ref exactly (in case some spectra are shorter/longer)
+        if len(y_ref) != len(x_ref):
+            f_ref = interp1d(ref_x_all[mask], y_ref, bounds_error=False, fill_value="extrapolate")
+            y_ref_fixed = f_ref(x_ref)
+        else:
+            y_ref_fixed = y_ref
+            
+        y_ref_norm = l2_norm(y_ref_fixed)
+        
+        # Cosine similarity of L2 normalized vectors is the dot product
+        similarity = np.dot(y_unk_norm, y_ref_norm)
+        results.append({'spectrum_id': sid, 'material': mat, 'score': float(similarity)})
+    
+    # Sort by score descending
+    top3 = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
+    print("Top 3 Results:")
+    for i, res in enumerate(top3):
+        print(f"{i+1}. {res}")
+    , file_ids=['2026-08-07/T113.csv', '2026-08-07/reference_library.csv'])
+[21:46:49.085] [CoALA EVALUATE] 후보 1개 — 평가 생략(논문 4.6: 단순 상황)
+    run_analysis(code=import numpy as np
+    from scipy.interpolate import interp1d
+    
+    # Identify files by their ID to avoid filename confusion
+    t113_id = '2026-08-07/T113.csv'
+    lib_id = '2026-08-07/reference_library.csv'
+    
+    t113 = next(f for f in files if f['file_id'] == t113_id)
+    library = next(f for f in files if f['file_id'] == lib_id)
+    
+    x_unk = t113['table']['raman_shift_cm-1']
+    y_unk = t113['table']['intensity']
+    
+    # Reference library data
+    ref_ids = np.unique(library['table']['spectrum_id'])
+    ref_mats_all = library['table']['material']
+    ref_x_all = library['table']['raman_shift_cm-1']
+    ref_y_all = library['table']['intensity']
+    
+    print(f"Unknown spectrum: {len(x_unk)} points")
+    print(f"Library: {len(ref_ids)} unique spectra found")
+    
+    # Get a reference axis from the first spectrum in the library
+    first_id = ref_ids[0]
+    mask_first = (library['table']['spectrum_id'] == first_id)
+    x_ref = ref_x_all[mask_first]
+    print(f"Reference axis size: {len(x_ref)}")
+    
+    def l2_norm(v):
+        norm = np.linalg.norm(v)
+        return v / norm if norm > 0 else v
+    
+    # Interpolate unknown onto reference axis
+    f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value="extrapolate")
+    y_unk_interp = f_unk(x_ref)
+    y_unk_norm = l2_norm(y_unk_interp)
+    
+    results = []
+    for sid in ref_ids:
+        mask = (library['table']['spectrum_id'] == sid)
+        mat = ref_mats_all[mask][0]
+        y_ref = ref_y_all[mask]
+        
+        # Ensure lengths match x_ref exactly (in case some spectra are shorter/longer)
+        if len(y_ref) != len(x_ref):
+            f_ref = interp1d(ref_x_all[mask], y_ref, bounds_error=False, fill_value="extrapolate")
+            y_ref_fixed = f_ref(x_ref)
+        else:
+            y_ref_fixed = y_ref
+            
+        y_ref_norm = l2_norm(y_ref_fixed)
+        
+        # Cosine similarity of L2 normalized vectors is the dot product
+        similarity = np.dot(y_unk_norm, y_ref_norm)
+        results.append({'spectrum_id': sid, 'material': mat, 'score': float(similarity)})
+    
+    # Sort by score descending
+    top3 = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
+    print("Top 3 Results:")
+    for i, res in enumerate(top3):
+        print(f"{i+1}. {res}")
+    , file_ids=['2026-08-07/T113.csv', '2026-08-07/reference_library.csv'])
+[21:46:49.085] [CoALA SELECT] cycle 2 · 선택 → run_analysis(code=import numpy as np
+from scipy.interpolate import interp1d
+
+# Identify files by their ID to avoid filename confusion
+t113_id = '2026-08-07/T113.csv'
+lib_id = '2026-08-07/reference_library.csv'
+
+t113 = next(f for f in files if f['file_id'] == t113_id)
+library = next(f for f in files if f['file_id'] == lib_id)
+
+x_unk = t113['table']['raman_shift_cm-1']
+y_unk = t113['table']['intensity']
+
+# Reference library data
+ref_ids = np.unique(library['table']['spectrum_id'])
+ref_mats_all = library['table']['material']
+ref_x_all = library['table']['raman_shift_cm-1']
+ref_y_all = library['table']['intensity']
+
+print(f"Unknown spectrum: {len(x_unk)} points")
+print(f"Library: {len(ref_ids)} unique spectra found")
+
+# Get a reference axis from the first spectrum in the library
+first_id = ref_ids[0]
+mask_first = (library['table']['spectrum_id'] == first_id)
+x_ref = ref_x_all[mask_first]
+print(f"Reference axis size: {len(x_ref)}")
+
+def l2_norm(v):
+    norm = np.linalg.norm(v)
+    return v / norm if norm > 0 else v
+
+# Interpolate unknown onto reference axis
+f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value="extrapolate")
+y_unk_interp = f_unk(x_ref)
+y_unk_norm = l2_norm(y_unk_interp)
+
+results = []
+for sid in ref_ids:
+    mask = (library['table']['spectrum_id'] == sid)
+    mat = ref_mats_all[mask][0]
+    y_ref = ref_y_all[mask]
+    
+    # Ensure lengths match x_ref exactly (in case some spectra are shorter/longer)
+    if len(y_ref) != len(x_ref):
+        f_ref = interp1d(ref_x_all[mask], y_ref, bounds_error=False, fill_value="extrapolate")
+        y_ref_fixed = f_ref(x_ref)
+    else:
+        y_ref_fixed = y_ref
+        
+    y_ref_norm = l2_norm(y_ref_fixed)
+    
+    # Cosine similarity of L2 normalized vectors is the dot product
+    similarity = np.dot(y_unk_norm, y_ref_norm)
+    results.append({'spectrum_id': sid, 'material': mat, 'score': float(similarity)})
+
+# Sort by score descending
+top3 = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
+print("Top 3 Results:")
+for i, res in enumerate(top3):
+    print(f"{i+1}. {res}")
+, file_ids=['2026-08-07/T113.csv', '2026-08-07/reference_library.csv'])
+    single execution candidate - evaluation skipped
+[21:46:49.086] [CoALA EXECUTE] run_analysis
+    {"code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Identify files by their ID to avoid filename confusion\nt113_id = '2026-08-07/T113.csv'\nlib_id = '2026-08-07/reference_library.csv'\n\nt113 = next(f for f in files if f['file_id'] == t113_id)\nlibrary = next(f for f in files if f['file_id'] == lib_id)\n\nx_unk = t113['table']['raman_shift_cm-1']\ny_unk = t113['table']['intensity']\n\n# Reference library data\nref_ids = np.unique(library['table']['spectrum_id'])\nref_mats_all = library['table']['material']\nref_x_all = library['table']['raman_shift_cm-1']\nref_y_all = library['table']['intensity']\n\nprint(f\"Unknown spectrum: {len(x_unk)} points\")\nprint(f\"Library: {len(ref_ids)} unique spectra found\")\n\n# Get a reference axis from the first spectrum in the library\nfirst_id = ref_ids[0]\nmask_first = (library['table']['spectrum_id'] == first_id)\nx_ref = ref_x_all[mask_first]\nprint(f\"Reference axis size: {len(x_ref)}\")\n\ndef l2_norm(v):\n    norm = np.linalg.norm(v)\n    return v / norm if norm > 0 else v\n\n# Interpolate unknown onto reference axis\nf_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value=\"extrapolate\")\ny_unk_interp = f_unk
+    … <1017자 생략>
+[21:46:49.929] [CoALA OBSERVE] run_analysis · FAIL · 842 ms · grounding
+    {"ok": false, "error": "NameError: name 'next' is not defined", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 379, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 8, in <module>\nNameError: name 'next' is not defined\n"}
+[21:46:49.930] [CoALA CYCLE] ────── 사이클 3 시작 (propose 예산 146/150, 누적 dose 0.0 mJ) ──────
+[21:46:49.930] [CoALA PLAN] cycle 3 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[21:46:49.930] [Gemma <- PROMPT] step 5 · CoALA propose (cycle 3, plan 1) · 11 msgs
+    system(12272ch) · human(800ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(872ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(533ch) · ai(0ch)[run_analysis] · tool(442ch)
+[21:47:12.575] [Gemma THINKING] step 5 · 533ch
+    The previous `run_analysis` failed because `next` is not defined. I should use a simple loop or index to find the files in the `files` list.
+    
+    Also, looking at the error from the first attempt (`ValueError: shapes (0,21612) and (0,21612) not aligned`), it seems like I might have had an issue with how I accessed the tables or masks. 
+    
+    Let's rewrite the code to be more robust:
+    1. Find files by checking `f['filename']` in a loop.
+    2. Extract data.
+    3. Perform interpolation and cosine similarity as requested.
+    4. Print results clearly.
+[21:47:12.575] [Gemma TOOL_CALLS] step 5 · 1개
+    1) run_analysis({"code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Find the files safely\nt113 = None\nlibrary = None\nfor f in files:\n    if 'T113.csv' in f['filename']:\n        t113 = f\n    elif 'reference_library.csv' in f['filename']:\n        library = f\n\nif t113 is None or library is None:\n    print(\"Error: Could not find both files in the sandbox.\")\nelse:\n    # Unknown spectrum\n    x_unk = t113['table']['raman_shift_cm-1']\n    y_unk = t113['table']['intensity']\n\n    # Reference library data\n    ids = library['table']['spectrum_id']\n    mats = library['table']['material']\n    x_all = library['table']['raman_shift_cm-1']\n    y_all = library['table']['intensity']\n\n    unique_ids = np.unique(ids)\n    \n    # Get the reference axis (from any spectrum in the li
+    … <1632자 생략>)
+[21:47:12.576] [Gemma STATS] prompt 20135 tok · out 947 tok · wall 22.64s · eval 15.31s (61.8 tok/s) · load 0.25s · done=stop
+[21:47:12.576] [CoALA PLAN] cycle 3 · 정보수집 종료 · 실행 후보 1건 확보 → evaluate/select 로
+    run_analysis(code=import numpy as np
+    from scipy.interpolate import interp1d
+    
+    # Find the files safely
+    t113 = None
+    library = None
+    for f in files:
+        if 'T113.csv' in f['filename']:
+            t113 = f
+        elif 'reference_library.csv' in f['filename']:
+            library = f
+    
+    if t113 is None or library is None:
+        print("Error: Could not find both files in the sandbox.")
+    else:
+        # Unknown spectrum
+        x_unk = t113['table']['raman_shift_cm-1']
+        y_unk = t113['table']['intensity']
+    
+        # Reference library data
+        ids = library['table']['spectrum_id']
+        mats = library['table']['material']
+        x_all = library['table']['raman_shift_cm-1']
+        y_all = library['table']['intensity']
+    
+        unique_ids = np.unique(ids)
+        
+        # Get the reference axis (from any spectrum in the lib, e.g., the first one)
+        first_id = unique_ids[0]
+        mask_ref_axis = (ids == first_id)
+        x_ref = x_all[mask_ref_axis]
+    
+        def l2_norm(v):
+            norm = np.linalg.norm(v)
+            return v / norm if norm > 0 else v
+    
+        # Interpolate unknown onto reference axis
+        f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value="extrapolate")
+        y_unk_interp = f_unk(x_ref)
+        y_unk_norm = l2_norm(y_unk_interp)
+    
+        results = []
+        for sid in unique_ids:
+            mask = (ids == sid)
+            mat = mats[mask][0]
+            
+            # Extract reference spectrum for this ID
+            x_this = x_all[mask]
+            y_this = y_all[mask]
+            
+            # Interpolate reference onto the common axis if it differs
+            if not np.array_equal(x_this, x_ref):
+                f_ref = interp1d(x_this, y_this, bounds_error=False, fill_value="extrapolate")
+                y_ref_interp = f_ref(x_ref)
+            else:
+                y_ref_interp = y_this
+                
+            y_ref_norm = l2_norm(y_ref_interp)
+            
+            # Cosine similarity (dot product of L2 normalized vectors)
+            similarity = np.dot(y_unk_norm, y_ref_norm)
+            results.append({'spectrum_id': sid, 'material': mat, 'score': float(similarity)})
+    
+        # Sort by score descending and take top 3
+        top3 = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
+        print("Top 3 most similar references:")
+        for i, res in enumerate(top3):
+            print(f"Rank {i+1}: ID={res['spectrum_id']}, Mat={res['material']}, Score={res['score']}")
+    , file_ids=['2026-08-07/T113.csv', '2026-08-07/reference_library.csv'])
+[21:47:12.576] [CoALA EVALUATE] 후보 1개 — 평가 생략(논문 4.6: 단순 상황)
+    run_analysis(code=import numpy as np
+    from scipy.interpolate import interp1d
+    
+    # Find the files safely
+    t113 = None
+    library = None
+    for f in files:
+        if 'T113.csv' in f['filename']:
+            t113 = f
+        elif 'reference_library.csv' in f['filename']:
+            library = f
+    
+    if t113 is None or library is None:
+        print("Error: Could not find both files in the sandbox.")
+    else:
+        # Unknown spectrum
+        x_unk = t113['table']['raman_shift_cm-1']
+        y_unk = t113['table']['intensity']
+    
+        # Reference library data
+        ids = library['table']['spectrum_id']
+        mats = library['table']['material']
+        x_all = library['table']['raman_shift_cm-1']
+        y_all = library['table']['intensity']
+    
+        unique_ids = np.unique(ids)
+        
+        # Get the reference axis (from any spectrum in the lib, e.g., the first one)
+        first_id = unique_ids[0]
+        mask_ref_axis = (ids == first_id)
+        x_ref = x_all[mask_ref_axis]
+    
+        def l2_norm(v):
+            norm = np.linalg.norm(v)
+            return v / norm if norm > 0 else v
+    
+        # Interpolate unknown onto reference axis
+        f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value="extrapolate")
+        y_unk_interp = f_unk(x_ref)
+        y_unk_norm = l2_norm(y_unk_interp)
+    
+        results = []
+        for sid in unique_ids:
+            mask = (ids == sid)
+            mat = mats[mask][0]
+            
+            # Extract reference spectrum for this ID
+            x_this = x_all[mask]
+            y_this = y_all[mask]
+            
+            # Interpolate reference onto the common axis if it differs
+            if not np.array_equal(x_this, x_ref):
+                f_ref = interp1d(x_this, y_this, bounds_error=False, fill_value="extrapolate")
+                y_ref_interp = f_ref(x_ref)
+            else:
+                y_ref_interp = y_this
+                
+            y_ref_norm = l2_norm(y_ref_interp)
+            
+            # Cosine similarity (dot product of L2 normalized vectors)
+            similarity = np.dot(y_unk_norm, y_ref_norm)
+            results.append({'spectrum_id': sid, 'material': mat, 'score': float(similarity)})
+    
+        # Sort by score descending and take top 3
+        top3 = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
+        print("Top 3 most similar references:")
+        for i, res in enumerate(top3):
+            print(f"Rank {i+1}: ID={res['spectrum_id']}, Mat={res['material']}, Score={res['score']}")
+    , file_ids=['2026-08-07/T113.csv', '2026-08-07/reference_library.csv'])
+[21:47:12.577] [CoALA SELECT] cycle 3 · 선택 → run_analysis(code=import numpy as np
+from scipy.interpolate import interp1d
+
+# Find the files safely
+t113 = None
+library = None
+for f in files:
+    if 'T113.csv' in f['filename']:
+        t113 = f
+    elif 'reference_library.csv' in f['filename']:
+        library = f
+
+if t113 is None or library is None:
+    print("Error: Could not find both files in the sandbox.")
+else:
+    # Unknown spectrum
+    x_unk = t113['table']['raman_shift_cm-1']
+    y_unk = t113['table']['intensity']
+
+    # Reference library data
+    ids = library['table']['spectrum_id']
+    mats = library['table']['material']
+    x_all = library['table']['raman_shift_cm-1']
+    y_all = library['table']['intensity']
+
+    unique_ids = np.unique(ids)
+    
+    # Get the reference axis (from any spectrum in the lib, e.g., the first one)
+    first_id = unique_ids[0]
+    mask_ref_axis = (ids == first_id)
+    x_ref = x_all[mask_ref_axis]
+
+    def l2_norm(v):
+        norm = np.linalg.norm(v)
+        return v / norm if norm > 0 else v
+
+    # Interpolate unknown onto reference axis
+    f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value="extrapolate")
+    y_unk_interp = f_unk(x_ref)
+    y_unk_norm = l2_norm(y_unk_interp)
+
+    results = []
+    for sid in unique_ids:
+        mask = (ids == sid)
+        mat = mats[mask][0]
+        
+        # Extract reference spectrum for this ID
+        x_this = x_all[mask]
+        y_this = y_all[mask]
+        
+        # Interpolate reference onto the common axis if it differs
+        if not np.array_equal(x_this, x_ref):
+            f_ref = interp1d(x_this, y_this, bounds_error=False, fill_value="extrapolate")
+            y_ref_interp = f_ref(x_ref)
+        else:
+            y_ref_interp = y_this
+            
+        y_ref_norm = l2_norm(y_ref_interp)
+        
+        # Cosine similarity (dot product of L2 normalized vectors)
+        similarity = np.dot(y_unk_norm, y_ref_norm)
+        results.append({'spectrum_id': sid, 'material': mat, 'score': float(similarity)})
+
+    # Sort by score descending and take top 3
+    top3 = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
+    print("Top 3 most similar references:")
+    for i, res in enumerate(top3):
+        print(f"Rank {i+1}: ID={res['spectrum_id']}, Mat={res['material']}, Score={res['score']}")
+, file_ids=['2026-08-07/T113.csv', '2026-08-07/reference_library.csv'])
+    single execution candidate - evaluation skipped
+[21:47:12.577] [CoALA EXECUTE] run_analysis
+    {"code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Find the files safely\nt113 = None\nlibrary = None\nfor f in files:\n    if 'T113.csv' in f['filename']:\n        t113 = f\n    elif 'reference_library.csv' in f['filename']:\n        library = f\n\nif t113 is None or library is None:\n    print(\"Error: Could not find both files in the sandbox.\")\nelse:\n    # Unknown spectrum\n    x_unk = t113['table']['raman_shift_cm-1']\n    y_unk = t113['table']['intensity']\n\n    # Reference library data\n    ids = library['table']['spectrum_id']\n    mats = library['table']['material']\n    x_all = library['table']['raman_shift_cm-1']\n    y_all = library['table']['intensity']\n\n    unique_ids = np.unique(ids)\n    \n    # Get the reference axis (from any spectrum in the lib, e.g., the first one)\n    first_id = unique_ids[0]\n    mask_ref_axis = (ids == first_id)\n    x_ref = x_all[mask_ref_axis]\n\n    def l2_norm(v):\n        norm = np.linalg.norm(v)\n        return v / norm if norm > 0 else v\n\n    # Interpolate unknown onto reference axis\n    f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value=\"extrapolate\")\n    y_unk_interp = f_unk(x_ref)\n    y
+    … <1232자 생략>
+[21:47:13.436] [CoALA OBSERVE] run_analysis · FAIL · 859 ms · grounding
+    {"ok": false, "error": "ValueError: shapes (0,21612) and (0,21612) not aligned: 21612 (dim 1) != 0 (dim 0)", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 379, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 61, in <module>\nValueError: shapes (0,21612) and (0,21612) not aligned: 21612 (dim 1) != 0 (dim 0)\n"}
+[21:47:13.436] [CoALA CYCLE] ────── 사이클 4 시작 (propose 예산 145/150, 누적 dose 0.0 mJ) ──────
+[21:47:13.436] [CoALA PLAN] cycle 4 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[21:47:13.437] [Gemma <- PROMPT] step 6 · CoALA propose (cycle 4, plan 1) · 13 msgs
+    system(12385ch) · human(800ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(872ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(533ch) · ai(0ch)[run_analysis] · tool(442ch) · ai(0ch)[run_analysis] · tool(533ch)
+[21:47:46.012] [Gemma THINKING] step 6 · 2400ch
+    The `run_analysis` error `ValueError: shapes (0,21612) and (0,21612) not aligned` is very strange. It looks like a matrix operation failure (perhaps in `np.dot` or during the interpolation/indexing). 
+    
+    Wait, looking at the files structure:
+    - T113.csv: 1801 rows, 2 cols (`raman_shift_cm-1`, `intensity`)
+    - reference_library.csv: 21612 rows, 4 cols (`spectrum_id`, `material`, `raman_shift_cm-1`, `intensity`)
+    
+    The library has 21612 rows total. If there are multiple spectra in it, each spectrum probably takes a certain number of points. For example, if the range is 200 to 2000 with step 1, that's 1801 points per spectrum. $21612 / 1801 = 12$. So there are likely 12 spectra in the library.
+    
+    The error `shapes (0,21612) and (0,21612)` suggests that something is being interpreted as a matrix with 0 rows and 21612 columns. This often happens when someone tries to use pandas-like indexing on numpy arrays in a way that creates an empty result or a weird shape.
+    
+    In my previous code:
+    `mask = (ids == sid)` where `ids` is `library['table']['spectrum_id']`. 
+    If `library['table']['spectrum_id']` is returned as a dictionary of lists/arrays by the system, it should be fine. But let's check how I accessed them.
+    
+    The prompt says: `files[i]["table"]["<column name>"]`.
+    In my code:
+    ```python
+    ids = library['table']['spectrum_id']
+    mats = library['table']['material']
+    x_all = library['table']['raman_shift_cm-1']
+    y_all = library['table']['intensity']
+    ```
+    These are numpy arrays. 
+    
+    Let's try a simpler version to debug. I will print the shapes of everything and avoid `np.dot` initially by using a loop or `sum`. Also, I'll use basic indexing.
+    
+    One possibility: the data types in the table might be causing issues if they aren't pure numpy arrays but something else. Let me ensure they are cast to float/string.
+    
+    Also, let's consider the `ValueError` again. `shapes (0,21612) and (0,21612)`... 21612 is exactly the number of rows in the library file. This suggests something tried to operate on the entire column as a single vector in a way that caused a shape mismatch.
+    
+    Wait! If `y_unk_norm` is a vector and `y_ref_norm` is a vector, `np.dot` should work perfectly fine for 1D arrays.
+    Could it be that `y_unk_norm` or `y_ref_norm` became a 2D array with shape (0, ...)?
+    
+    Let's rewrite the script to be extremely explicit and print shapes at every step. I will also use `np.sum(a * b)` instead of `np.dot`.
+[21:47:46.013] [Gemma TOOL_CALLS] step 6 · 1개
+    1) run_analysis({"code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Locate files\nt113 = None\nlibrary = None\nfor f in files:\n    if 'T113.csv' in f['filename']: t113 = f\n    elif 'reference_library.csv' in f['filename']: library = f\n\n# Extract data and force numpy arrays\nx_unk = np.asarray(t113['table']['raman_shift_cm-1'], dtype=float)\ny_unk = np.asarray(t113['table']['intensity'], dtype=float)\n\nlib_ids = np.asarray(library['table']['spectrum_id'], dtype=str)\nlib_mats = np.asarray(library['table']['material'], dtype=str)\nlib_x = np.asarray(library['table']['raman_shift_cm-1'], dtype=float)\nlib_y = np.asarray(library['table']['intensity'], dtype=float)\n\nunique_ids = np.unique(lib_ids)\nprint(f\"Unique IDs found: {unique_ids}\")\n\n# Reference axis from the first spectr
+    … <1406자 생략>)
+[21:47:46.013] [Gemma STATS] prompt 21215 tok · out 1532 tok · wall 32.58s · eval 24.89s (61.5 tok/s) · load 0.24s · done=stop
+[21:47:46.014] [CoALA PLAN] cycle 4 · 정보수집 종료 · 실행 후보 1건 확보 → evaluate/select 로
+    run_analysis(code=import numpy as np
+    from scipy.interpolate import interp1d
+    
+    # Locate files
+    t113 = None
+    library = None
+    for f in files:
+        if 'T113.csv' in f['filename']: t113 = f
+        elif 'reference_library.csv' in f['filename']: library = f
+    
+    # Extract data and force numpy arrays
+    x_unk = np.asarray(t113['table']['raman_shift_cm-1'], dtype=float)
+    y_unk = np.asarray(t113['table']['intensity'], dtype=float)
+    
+    lib_ids = np.asarray(library['table']['spectrum_id'], dtype=str)
+    lib_mats = np.asarray(library['table']['material'], dtype=str)
+    lib_x = np.asarray(library['table']['raman_shift_cm-1'], dtype=float)
+    lib_y = np.asarray(library['table']['intensity'], dtype=float)
+    
+    unique_ids = np.unique(lib_ids)
+    print(f"Unique IDs found: {unique_ids}")
+    
+    # Reference axis from the first spectrum
+    first_id = unique_ids[0]
+    mask_axis = (lib_ids == first_id)
+    x_ref = lib_x[mask_axis]
+    print(f"Reference axis shape: {x_ref.shape}")
+    
+    def l2_norm(v):
+        n = np.linalg.norm(v)
+        return v / n if n > 0 else v
+    
+    # Interpolate unknown onto reference axis
+    # x_unk and y_unk are the same length (1801)
+    f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value="extrapolate")
+    y_unk_interp = f_unk(x_ref)
+    y_unk_norm = l2_norm(y_unk_interp)
+    print(f"Normalized unknown shape: {y_unk_norm.shape}")
+    
+    results = []
+    for sid in unique_ids:
+        mask = (lib_ids == sid)
+        mat = lib_mats[mask][0]
+        x_this = lib_x[mask]
+        y_this = lib_y[mask]
+        
+        # Interpolate reference spectrum to x_ref if needed
+        if not np.array_equal(x_this, x_ref):
+            f_ref = interp1d(x_this, y_this, bounds_error=False, fill_value="extrapolate")
+            y_ref_interp = f_ref(x_ref)
+        else:
+            y_ref_interp = y_this
+        
+        y_ref_norm = l2_norm(y_ref_interp)
+        
+        # Use sum of products for cosine similarity
+        score = np.sum(y_unk_norm * y_ref_norm)
+        results.append({'spectrum_id': sid, 'material': mat, 'score': float(score)})
+    
+    top3 = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
+    print("TOP 3 RESULTS:")
+    for i, res in enumerate(top3):
+        print(f"Rank {i+1}: {res}")
+    , file_ids=['2026-08-07/T113.csv', '2026-08-07/reference_library.csv'])
+[21:47:46.014] [CoALA EVALUATE] 후보 1개 — 평가 생략(논문 4.6: 단순 상황)
+    run_analysis(code=import numpy as np
+    from scipy.interpolate import interp1d
+    
+    # Locate files
+    t113 = None
+    library = None
+    for f in files:
+        if 'T113.csv' in f['filename']: t113 = f
+        elif 'reference_library.csv' in f['filename']: library = f
+    
+    # Extract data and force numpy arrays
+    x_unk = np.asarray(t113['table']['raman_shift_cm-1'], dtype=float)
+    y_unk = np.asarray(t113['table']['intensity'], dtype=float)
+    
+    lib_ids = np.asarray(library['table']['spectrum_id'], dtype=str)
+    lib_mats = np.asarray(library['table']['material'], dtype=str)
+    lib_x = np.asarray(library['table']['raman_shift_cm-1'], dtype=float)
+    lib_y = np.asarray(library['table']['intensity'], dtype=float)
+    
+    unique_ids = np.unique(lib_ids)
+    print(f"Unique IDs found: {unique_ids}")
+    
+    # Reference axis from the first spectrum
+    first_id = unique_ids[0]
+    mask_axis = (lib_ids == first_id)
+    x_ref = lib_x[mask_axis]
+    print(f"Reference axis shape: {x_ref.shape}")
+    
+    def l2_norm(v):
+        n = np.linalg.norm(v)
+        return v / n if n > 0 else v
+    
+    # Interpolate unknown onto reference axis
+    # x_unk and y_unk are the same length (1801)
+    f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value="extrapolate")
+    y_unk_interp = f_unk(x_ref)
+    y_unk_norm = l2_norm(y_unk_interp)
+    print(f"Normalized unknown shape: {y_unk_norm.shape}")
+    
+    results = []
+    for sid in unique_ids:
+        mask = (lib_ids == sid)
+        mat = lib_mats[mask][0]
+        x_this = lib_x[mask]
+        y_this = lib_y[mask]
+        
+        # Interpolate reference spectrum to x_ref if needed
+        if not np.array_equal(x_this, x_ref):
+            f_ref = interp1d(x_this, y_this, bounds_error=False, fill_value="extrapolate")
+            y_ref_interp = f_ref(x_ref)
+        else:
+            y_ref_interp = y_this
+        
+        y_ref_norm = l2_norm(y_ref_interp)
+        
+        # Use sum of products for cosine similarity
+        score = np.sum(y_unk_norm * y_ref_norm)
+        results.append({'spectrum_id': sid, 'material': mat, 'score': float(score)})
+    
+    top3 = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
+    print("TOP 3 RESULTS:")
+    for i, res in enumerate(top3):
+        print(f"Rank {i+1}: {res}")
+    , file_ids=['2026-08-07/T113.csv', '2026-08-07/reference_library.csv'])
+[21:47:46.014] [CoALA SELECT] cycle 4 · 선택 → run_analysis(code=import numpy as np
+from scipy.interpolate import interp1d
+
+# Locate files
+t113 = None
+library = None
+for f in files:
+    if 'T113.csv' in f['filename']: t113 = f
+    elif 'reference_library.csv' in f['filename']: library = f
+
+# Extract data and force numpy arrays
+x_unk = np.asarray(t113['table']['raman_shift_cm-1'], dtype=float)
+y_unk = np.asarray(t113['table']['intensity'], dtype=float)
+
+lib_ids = np.asarray(library['table']['spectrum_id'], dtype=str)
+lib_mats = np.asarray(library['table']['material'], dtype=str)
+lib_x = np.asarray(library['table']['raman_shift_cm-1'], dtype=float)
+lib_y = np.asarray(library['table']['intensity'], dtype=float)
+
+unique_ids = np.unique(lib_ids)
+print(f"Unique IDs found: {unique_ids}")
+
+# Reference axis from the first spectrum
+first_id = unique_ids[0]
+mask_axis = (lib_ids == first_id)
+x_ref = lib_x[mask_axis]
+print(f"Reference axis shape: {x_ref.shape}")
+
+def l2_norm(v):
+    n = np.linalg.norm(v)
+    return v / n if n > 0 else v
+
+# Interpolate unknown onto reference axis
+# x_unk and y_unk are the same length (1801)
+f_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value="extrapolate")
+y_unk_interp = f_unk(x_ref)
+y_unk_norm = l2_norm(y_unk_interp)
+print(f"Normalized unknown shape: {y_unk_norm.shape}")
+
+results = []
+for sid in unique_ids:
+    mask = (lib_ids == sid)
+    mat = lib_mats[mask][0]
+    x_this = lib_x[mask]
+    y_this = lib_y[mask]
+    
+    # Interpolate reference spectrum to x_ref if needed
+    if not np.array_equal(x_this, x_ref):
+        f_ref = interp1d(x_this, y_this, bounds_error=False, fill_value="extrapolate")
+        y_ref_interp = f_ref(x_ref)
+    else:
+        y_ref_interp = y_this
+    
+    y_ref_norm = l2_norm(y_ref_interp)
+    
+    # Use sum of products for cosine similarity
+    score = np.sum(y_unk_norm * y_ref_norm)
+    results.append({'spectrum_id': sid, 'material': mat, 'score': float(score)})
+
+top3 = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
+print("TOP 3 RESULTS:")
+for i, res in enumerate(top3):
+    print(f"Rank {i+1}: {res}")
+, file_ids=['2026-08-07/T113.csv', '2026-08-07/reference_library.csv'])
+    single execution candidate - evaluation skipped
+[21:47:46.015] [CoALA EXECUTE] run_analysis
+    {"code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Locate files\nt113 = None\nlibrary = None\nfor f in files:\n    if 'T113.csv' in f['filename']: t113 = f\n    elif 'reference_library.csv' in f['filename']: library = f\n\n# Extract data and force numpy arrays\nx_unk = np.asarray(t113['table']['raman_shift_cm-1'], dtype=float)\ny_unk = np.asarray(t113['table']['intensity'], dtype=float)\n\nlib_ids = np.asarray(library['table']['spectrum_id'], dtype=str)\nlib_mats = np.asarray(library['table']['material'], dtype=str)\nlib_x = np.asarray(library['table']['raman_shift_cm-1'], dtype=float)\nlib_y = np.asarray(library['table']['intensity'], dtype=float)\n\nunique_ids = np.unique(lib_ids)\nprint(f\"Unique IDs found: {unique_ids}\")\n\n# Reference axis from the first spectrum\nfirst_id = unique_ids[0]\nmask_axis = (lib_ids == first_id)\nx_ref = lib_x[mask_axis]\nprint(f\"Reference axis shape: {x_ref.shape}\")\n\ndef l2_norm(v):\n    n = np.linalg.norm(v)\n    return v / n if n > 0 else v\n\n# Interpolate unknown onto reference axis\n# x_unk and y_unk are the same length (1801)\nf_unk = interp1d(x_unk, y_unk, bounds_error=False, fill_value=\"extrapolate\")\ny_unk_int
+    … <1006자 생략>
+[21:47:46.892] [CoALA OBSERVE] run_analysis · ok · 877 ms · grounding
+    {"ok": true, "stdout": "Unique IDs found: ['ARA_01' 'ARA_02' 'CAL_01' 'CAL_02' 'PET_01' 'PET_02' 'PMMA_01' 'PMMA_02'\n 'PS_01' 'PS_02' 'SI_01' 'SI_02']\nReference axis shape: (1801,)\nNormalized unknown shape: (1801,)\nTOP 3 RESULTS:\nRank 1: {'spectrum_id': np.str_('PS_01'), 'material': np.str_('polystyrene'), 'score': 0.994785915313195}\nRank 2: {'spectrum_id': np.str_('PS_02'), 'material': np.str_('polystyrene'), 'score': 0.9781240248641764}\nRank 3: {'spectrum_id': np.str_('PET_02'), 'material': np.str_('PET'), 'score': 0.22746891225734817}\n", "image_count": 0, "images": []}
+[21:47:46.892] [CoALA CYCLE] ────── 사이클 5 시작 (propose 예산 144/150, 누적 dose 0.0 mJ) ──────
+[21:47:46.892] [CoALA PLAN] cycle 5 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[21:47:46.893] [Gemma <- PROMPT] step 7 · CoALA propose (cycle 5, plan 1) · 15 msgs
+    system(12413ch) · human(800ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(872ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(533ch) · ai(0ch)[run_analysis] · tool(442ch) · ai(0ch)[run_analysis] · tool(533ch) · ai(0ch)[run_analysis] · tool(586ch)
+[21:48:01.416] [Gemma THINKING] step 7 · 449ch
+    The analysis is complete. The unknown spectrum T113.csv was compared against the reference library using interpolation onto the common reference axis, L2 normalization, and cosine similarity (calculated as the dot product of normalized vectors).
+    
+    Results:
+    1. PS_01, polystyrene, score: 0.994785915313195
+    2. PS_02, polystyrene, score: 0.9781240248641764
+    3. PET_02, PET, score: 0.22746891225734817
+    
+    I will now format this into the required JSON block.
+[21:48:01.417] [Gemma TEXT] step 7
+    The unknown spectrum `T113.csv` was compared with the spectra in `reference_library.csv`. The analysis followed the requested protocol: all spectra were interpolated onto a common reference axis, L2-normalized to ensure scale independence, and then compared using cosine similarity (calculated as the dot product of the normalized vectors).
+    
+    The results indicate that the unknown sample is highly similar to polystyrene, with the top two matches being different polystyrene reference spectra. The third match, PET, shows significantly lower similarity.
+    
+    ```json
+    {"top3": [{"spectrum_id": "PS_01", "material": "polystyrene", "score": 0.994785915313195}, {"spectrum_id": "PS_02", "material": "polystyrene", "score": 0.9781240248641764}, {"spectrum_id": "PET_02", "material": "PET", "score": 0.22746891225734817}]}
+    ```
+[21:48:01.417] [Gemma STATS] prompt 22329 tok · out 390 tok · wall 14.52s · eval 6.33s (61.6 tok/s) · load 0.25s · done=stop
+[21:48:01.417] [CoALA PLAN] cycle 5 · 도구 후보 없음 → 최종 보고서로 턴 종료
+[21:48:01.417] [FINAL] 138.96s · LLM 7회 · 도구 4회 · dose 0.00 mJ
+    The unknown spectrum `T113.csv` was compared with the spectra in `reference_library.csv`. The analysis followed the requested protocol: all spectra were interpolated onto a common reference axis, L2-normalized to ensure scale independence, and then compared using cosine similarity (calculated as the dot product of the normalized vectors).
+    
+    The results indicate that the unknown sample is highly similar to polystyrene, with the top two matches being different polystyrene reference spectra. The third match, PET, shows significantly lower similarity.
+    
+    ```json
+    {"top3": [{"spectrum_id": "PS_01", "material": "polystyrene", "score": 0.994785915313195}, {"spectrum_id": "PS_02", "material": "polystyrene", "score": 0.9781240248641764}, {"spectrum_id": "PET_02", "material": "PET", "score": 0.22746891225734817}]}
+    ```
+══════════════════════════════════════════════════════════════════════════════
+

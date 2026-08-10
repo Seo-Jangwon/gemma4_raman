@@ -1,0 +1,170 @@
+{
+  "task": "T114",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "Compute the highest cosine similarity between T114.csv and the references in reference_library.csv (interpolate onto the reference axis, L2 normalize) and state whether it is 0.85 or higher.",
+  "criteria": "NUM(±0.01) + EXACT(threshold verdict)",
+  "checks": [
+    {
+      "name": "highest similarity",
+      "passed": true,
+      "score": 1.0,
+      "detail": "0.995852 (expected 0.995852, |Δ|=7.11e-12 ≤ 0.01)  [answer]",
+      "weight": 2.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "threshold verdict",
+      "passed": true,
+      "score": 1.0,
+      "detail": "reported=True (expected True, best=0.9959 vs 0.85)",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T114.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "The highest cosine similarity between the spectrum in T114.csv and the references provided in reference_library.csv was computed by interpolating the target spectrum onto the reference axes, L2 normalizing both vectors, and calculating their dot product.\n\nThe analysis identified the best match as **PET_01** with a cosine similarity score of approximately **0.9959**, which is significantly higher than the threshold of 0.85.\n\n```json\n{\"best_score\": 0.9958523269764362, \"above_threshold\": true}\n```",
+  "answer_json": {
+    "best_score": 0.9958523269764362,
+    "above_threshold": true
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T114.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Load files\nt114 = files[0] if files[0]['filename'] == 'T114.csv' else files[1]\nref_lib = files[1] if files[0]['filename'] == 'T114.csv' else files[0]\n\n# T114 data\nx_target = t114['table']['raman_shift_cm-1']\ny_target = t114['table']['intensity']\n\n# Reference library data\nref_ids = np.unique(ref_lib['table']['spectrum_id'])\nref_x_all = ref_lib['table']['raman_shift_cm-1']\nref_y_all = ref_lib['table']['intensity']\nref_sid_all = ref_lib['table']['spectrum_id']\n\n# Prepare interpolation function for target\nf_target = interp1d(x_target, y_target, kind='linear', fill_value=\"extrapolate\")\n\nbest_score = -1.0\nbest_id = None\n\nfor sid in ref_ids:\n    mask = (ref_sid_all == sid)\n    x_ref = ref_x_all[mask]\n    y_ref = ref_y_all[mask]\n    \n    # Interpolate target onto reference axis\n    y_target_interp = f_target(x_ref)\n    \n    # L2 Normalization function\n    def normalize(v):\n        norm = np.linalg.norm(v)\n        return v / norm if norm > 0 else v\n\n    v_target = normalize(y_target_interp)\n    v_ref = normalize(y_ref)\n    \n    # Cosine similarity (dot product of L2 normalized vectors)\n    score = np.dot(v_target, v_ref)\n    \n    if score > best_score:\n        best_score = score\n        best_id = sid\n\nprint(f\"Best Score: {best_score}\")\nprint(f\"Best ID: {best_id}\")\n",
+        "file_ids": [
+          "2026-08-07/T114.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Identify files by filename\nt114 = None\nref_lib = None\nfor f in files:\n    if f['filename'] == 'T114.csv':\n        t114 = f\n    elif f['filename'] == 'reference_library.csv':\n        ref_lib = f\n\nif t114 is None or ref_lib is None:\n    print(\"Required files not found in the provided list.\")\n    # Print what we actually have to debug\n    for f in files: print(f\"Available file: {f['filename']}\")\nelse:\n    # T114 data - ensure numpy arrays\n    x_target = np.array(t114['table']['raman_shift_cm-1'])\n    y_target = np.array(t114['table']['intensity'])\n\n    # Reference library data - ensure numpy arrays\n    ref_sid_all = np.array(ref_lib['table']['spectrum_id'])\n    ref_x_all = np.array(ref_lib['table']['raman_shift_cm-1'])\n    ref_y_all = np.array(ref_lib['table']['intensity'])\n\n    print(f\"Target shape: {x_target.shape}\")\n    print(f\"Ref ID shape: {ref_sid_all.shape}\")\n\n    # Unique reference IDs\n    ref_ids = np.unique(ref_sid_all)\n    print(f\"Number of unique references: {len(ref_ids)}\")\n\n    # Prepare interpolation function for target\n    f_target = interp1d(x_target, y_target, kind='linear', fill_value=\"extrapolate\")\n\n    best_score = -1.0\n    best_id = None\n\n    for sid in ref_ids:\n        mask = (ref_sid_all == sid)\n        x_ref = ref_x_all[mask]\n        y_ref = ref_y_all[mask]\n        \n        # Interpolate target onto reference axis\n        y_target_interp = f_target(x_ref)\n        \n        # L2 Normalization function\n        def normalize(v):\n            norm = np.linalg.norm(v)\n            return v / norm if norm > 0 else v\n\n        v_target = normalize(y_target_interp)\n        v_ref = normalize(y_ref)\n        \n        # Cosine similarity (dot product of L2 normalized vectors)\n        # v_target and v_ref should be 1D arrays of the same size\n        score = np.dot(v_target, v_ref)\n        \n        if score > best_score:\n            best_score = score\n            best_id = sid\n\n    print(f\"Best Score: {best_score}\")\n    print(f\"Best ID: {best_id}\")\n",
+        "file_ids": [
+          "2026-08-07/T114.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T114_1d1093",
+  "elapsed_s": 84.45,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

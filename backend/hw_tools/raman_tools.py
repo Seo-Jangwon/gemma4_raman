@@ -2339,6 +2339,45 @@ def run_autofocus(
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
 
+def _resolve_data_path(source: str):
+    """파일 지시자를 실제 경로로. (경로, 못 찾았을 때의 설명) 을 돌려준다.
+
+    [이름 체계가 둘인데 한쪽만 풀고 있었다 — 2026-08-10]
+    이 프로젝트에서 파일을 가리키는 방식은 두 가지다.
+        세션 산출물  data/ 기준 상대경로   "results/2026-08-07/<sess>/x.csv"
+        업로드 입력  upload_store 의 file_id  "2026-08-07/N05.csv"
+    예전에는 _DATA_DIR 기준으로만 풀었다. 그래서 list_uploaded_files 가 준 file_id 를
+    그대로 넘긴 호출이 **구조적으로 전부 실패**했다 — data/uploads/<날짜>/ 를 봐야 하는데
+    data/<날짜>/ 를 봤기 때문이다(`uploads/` 한 칸 차이).
+
+        "File not found: ...\\data\\2026-08-07\\N05.csv"   ← 실제 파일은 data/uploads/2026-08-07/
+
+    에이전트 입장에서는 목록 도구가 준 이름을 그대로 쓴 것이라 빠져나갈 방법이 없었고,
+    2026-08-07 실행에서 N05·T039·T064·T070·T112·T115 가 여기서 막혔다. 막힌 뒤에는
+    run_analysis 로 로딩·보정을 손수 구현하게 되는데, 그렇게 길어진 코드가 tool call
+    JSON 유실(2,200자 이상에서 9.1%)을 부르는 경로이기도 했다.
+
+    두 체계를 다 받는다. data/ 쪽을 먼저 보므로 기존 호출의 동작은 바뀌지 않는다.
+    """
+    p = Path(source)
+    if p.is_absolute():
+        return (p, "") if p.exists() else (None, f"File not found: {p}")
+
+    local = _DATA_DIR / source
+    if local.exists():
+        return local, ""
+
+    try:
+        from backend.upload_store import resolve_upload_path
+        return resolve_upload_path(source), ""
+    except (ValueError, FileNotFoundError, ImportError):
+        pass
+
+    return None, (f"File not found: {local} - and no uploaded file matches the "
+                  f"file_id {source!r}. Use list_uploaded_files() to see the "
+                  f"available file_id values.")
+
+
 # ──────────────────────────────────────────
 # 배경 제거 (IPBSA)
 # ──────────────────────────────────────────
@@ -2400,11 +2439,9 @@ def apply_background_subtraction(
         intensity = _last_spectrum["data"]
         raman_shift = _last_spectrum.get("raman_shift_cm-1")
     else:
-        filepath = Path(source)
-        if not filepath.is_absolute():
-            filepath = _DATA_DIR / source
-        if not filepath.exists():
-            return {"ok": False, "error": f"File not found: {filepath}"}
+        filepath, why = _resolve_data_path(source)
+        if filepath is None:
+            return {"ok": False, "error": why}
         try:
             if filepath.suffix.lower() == ".json":
                 with open(filepath, "r", encoding="utf-8") as f:
@@ -2558,8 +2595,9 @@ def get_bg_version(version_label: str) -> dict:
 
 def load_spectrum(filename: str) -> dict:
     """
-    저장된 스펙트럼 CSV 파일을 로드한다.
-    절대 경로 또는 data/ 디렉토리 상대 경로 모두 허용.
+    저장된 스펙트럼 CSV 파일 또는 업로드된 입력 파일을 로드한다.
+    받는 형태는 세 가지다 — 절대 경로, data/ 기준 상대 경로,
+    그리고 list_uploaded_files 가 돌려주는 file_id("<YYYY-MM-DD>/<파일명>").
 
     이 프로젝트가 쓰는 스펙트럼 CSV 는 모두 같은 포맷이다(spectrum_store.write_spectrum_csv):
         pixel_index, [raman_shift_cm-1,] [wavelength_nm,] intensity, [background_intensity]
@@ -2574,11 +2612,9 @@ def load_spectrum(filename: str) -> dict:
     try:
         if not filename.endswith(".csv"):
             filename += ".csv"
-        filepath = Path(filename)
-        if not filepath.is_absolute():
-            filepath = _DATA_DIR / filename
-        if not filepath.exists():
-            return {"ok": False, "error": f"File not found: {filepath}"}
+        filepath, why = _resolve_data_path(filename)
+        if filepath is None:
+            return {"ok": False, "error": why}
 
         comments: dict = {}
         with open(filepath, "r", encoding="utf-8-sig", newline="") as f:

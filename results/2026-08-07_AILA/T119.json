@@ -1,0 +1,174 @@
+{
+  "task": "T119",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Apply Savitzky-Golay smoothing (window_length=11, polyorder=3) to the low-signal spectrum T119.csv, interpolate onto the reference axis, L2 normalize, and identify the material against reference_library.csv.",
+  "criteria": "EXACT(material)",
+  "checks": [
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'polystyrene' (expected 'polystyrene')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T119.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "The low-signal spectrum **T119.csv** was processed according to the requested protocol: it was smoothed using a Savitzky-Golay filter (window length 11, polynomial order 3), interpolated onto the reference axis defined in **reference_library.csv**, and L2 normalized. This processed spectrum was then compared against the materials in the reference library using cosine similarity (dot product of L2-normalized vectors).\n\nThe analysis identified that the spectrum most closely matches **polystyrene**, with a similarity score of approximately 0.887.\n\n```json\n{\"material\": \"polystyrene\"}\n```",
+  "answer_json": {
+    "material": "polystyrene"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T119.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import savgol_filter\n\n# Load T119 data\nt119_file = [f for f in files if 'T119.csv' in f['filename']][0]\nx_t119 = t119_file['table']['raman_shift_cm-1']\ny_t119 = t119_file['table']['intensity']\n\n# 1. Savitzky-Golay smoothing\ny_smoothed = savgol_filter(y_t119, window_length=11, polyorder=3)\n\n# Load Reference Library data\nref_file = [f for f in files if 'reference_library.csv' in f['filename']][0]\nx_ref_all = ref_file['table']['raman_shift_cm-1']\ny_ref_all = ref_file['table']['intensity']\nmaterials_all = ref_file['table']['material']\nids_all = ref_file['table']['spectrum_id']\n\n# The reference axis is the same for all in the library? \n# Let's find the unique set of x values for one reference spectrum.\nunique_ids = np.unique(ids_all)\nfirst_id = unique_ids[0]\nx_ref = x_ref_all[ids_all == first_id]\n\n# 2. Interpolate smoothed T119 onto the reference axis\ny_interp = np.interp(x_ref, x_t119, y_smoothed)\n\n# 3. L2 normalize\ndef l2_norm(v):\n    norm = np.linalg.norm(v)\n    return v / norm if norm > 0 else v\n\ny_processed = l2_norm(y_interp)\n\n# Now compare against each reference spectrum in the library\nbest_corr = -1\nbest_material = None\n\nfor mid in unique_ids:\n    mask = (ids_all == mid)\n    ref_y = y_ref_all[mask]\n    ref_mat = materials_all[mask][0]\n    \n    # Ensure reference is same length as processed T119 (it should be if axis matches)\n    if len(ref_y) != len(y_processed):\n        # If not, we might need to interpolate ref or handle it. \n        # But based on the inspect result and common library format, they are usually aligned.\n        continue\n        \n    # L2 normalize reference spectrum for cosine similarity\n    ref_y_norm = l2_norm(ref_y)\n    \n    # Cosine Similarity (dot product of L2 normalized vectors)\n    similarity = np.dot(y_processed, ref_y_norm)\n    \n    if similarity > best_corr:\n        best_corr = similarity\n        best_material = ref_mat\n\nprint(f\"Best material: {best_material}\")\nprint(f\"Similarity score: {best_corr}\")\n\n# Save processed spectrum for verification (though not strictly asked, good practice)\nsave_result('T119_processed.csv', y_processed, raman_shift=x_ref)\n",
+        "file_ids": [
+          "2026-08-07/T119.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import savgol_filter\n\n# Use file IDs directly for robustness\nt119_id = '2026-08-07/T119.csv'\nref_id = '2026-08-07/reference_library.csv'\n\nt119_data = next(f for f in files if f['file_id'] == t119_id)['table']\nref_data = next(f for f in files if f['file_id'] == ref_id)['table']\n\nx_t119 = np.array(t119_data['raman_shift_cm-1'])\ny_t119 = np.array(t119_data['intensity'])\n\nprint(f\"T119 shape: {x_t119.shape}, {y_t119.shape}\")\n\n# 1. Savitzky-Golay smoothing\ny_smoothed = savgol_filter(y_t119, window_length=11, polyorder=3)\n\nx_ref_all = np.array(ref_data['raman_shift_cm-1'])\ny_ref_all = np.array(ref_data['intensity'])\nmaterials_all = np.array(ref_data['material'])\nids_all = np.array(ref_data['spectrum_id'])\n\nunique_ids = np.unique(ids_all)\nfirst_id = unique_ids[0]\nx_ref = x_ref_all[ids_all == first_id]\n\nprint(f\"Reference axis length: {len(x_ref)}\")\n\n# 2. Interpolate smoothed T119 onto the reference axis\ny_interp = np.interp(x_ref, x_t119, y_smoothed)\n\ndef l2_norm(v):\n    norm = np.linalg.norm(v)\n    return v / norm if norm > 0 else v\n\n# 3. L2 normalize\ny_processed = l2_norm(y_interp)\n\nbest_corr = -1\nbest_material = None\n\nfor mid in unique_ids:\n    mask = (ids_all == mid)\n    ref_y = y_ref_all[mask]\n    ref_mat = materials_all[mask][0]\n    \n    # Normalization of reference spectrum\n    ref_y_norm = l2_norm(ref_y)\n    \n    # Cosine Similarity\n    similarity = np.dot(y_processed, ref_y_norm)\n    \n    if similarity > best_corr:\n        best_corr = similarity\n        best_material = ref_mat\n\nprint(f\"Best material: {best_material}\")\nprint(f\"Similarity score: {best_corr}\")\nsave_result('T119_processed.csv', y_processed, raman_shift=x_ref)\n",
+        "file_ids": [
+          "2026-08-07/T119.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import savgol_filter\n\n# Find files in the provided list\nt119_f = None\nref_f = None\nfor f in files:\n    if 'T119.csv' in f['filename']: t119_f = f\n    if 'reference_library.csv' in f['filename']: ref_f = f\n\nx_t119 = np.array(t119_f['table']['raman_shift_cm-1'])\ny_t119 = np.array(t119_f['table']['intensity'])\n\n# 1. Savitzky-Golay smoothing\ny_smoothed = savgol_filter(y_t119, window_length=11, polyorder=3)\n\nx_ref_all = np.array(ref_f['table']['raman_shift_cm-1'])\ny_ref_all = np.array(ref_f['table']['intensity'])\nmaterials_all = np.array(ref_f['table']['material'])\nids_all = np.array(ref_f['table']['spectrum_id'])\n\nunique_ids = np.unique(ids_all)\nx_ref = x_ref_all[ids_all == unique_ids[0]]\n\n# 2. Interpolate smoothed T119 onto the reference axis\ny_interp = np.interp(x_ref, x_t119, y_smoothed)\n\ndef l2_norm(v):\n    vn = np.array(v)\n    norm = np.linalg.norm(vn)\n    return vn / norm if norm > 0 else vn\n\n# 3. L2 normalize processed T119\ny_processed = l2_norm(y_interp)\n\nbest_corr = -1\nbest_material = None\n\nfor mid in unique_ids:\n    mask = (ids_all == mid)\n    ref_y = y_ref_all[mask]\n    ref_mat = materials_all[mask][0]\n    \n    # Normalize reference spectrum\n    ref_y_norm = l2_norm(ref_y)\n    \n    # Cosine Similarity\n    similarity = np.dot(y_processed, ref_y_norm)\n    \n    if similarity > best_corr:\n        best_corr = similarity\n        best_material = ref_mat\n\nprint(f\"Best material identified: {best_material}\")\nprint(f\"Similarity score: {best_corr}\")\nsave_result('T119_processed.csv', y_processed, raman_shift=x_ref)\n",
+        "file_ids": [
+          "2026-08-07/T119.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-07_AILA_AILA_T119_4d83d5/spectra/01_T119_processed.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "session_id": "bench_2026-08-07_AILA_AILA_T119_4d83d5",
+  "elapsed_s": 83.63,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

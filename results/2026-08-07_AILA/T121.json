@@ -1,0 +1,268 @@
+{
+  "task": "T121",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "Compare T121.csv with all 8 references in reference_library_8.csv and sort every reference by similarity, descending. Use cosine similarity computed on the reference wavenumber axis (linear interpolation) after L2-normalizing both spectra. If two scores are equal, order them by spectrum_id ascending.",
+  "criteria": "EXACT(8 items in order) + NUM(scores ±0.01)",
+  "checks": [
+    {
+      "name": "all 8 references in order",
+      "passed": true,
+      "score": 1.0,
+      "detail": "8/8 matched (submitted 8) ['PS_01', 'PS_03', 'PS_02', 'PET_02', 'PMMA_01', 'PET_01']... vs ['PS_01', 'PS_03', 'PS_02', 'PET_02', 'PMMA_01', 'PET_01']...",
+      "weight": 2.0,
+      "kind": "SET"
+    },
+    {
+      "name": "similarity scores",
+      "passed": true,
+      "score": 1.0,
+      "detail": "8/8 matched (submitted 8) [0.995, 0.994, 0.978, 0.229, 0.179, 0.167]... vs [0.995, 0.994, 0.978, 0.229, 0.179, 0.167]...",
+      "weight": 1.0,
+      "kind": "SET"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T121.csv",
+    "reference_library_8.csv"
+  ],
+  "answer_text": "The target spectrum in `T121.csv` was compared against eight reference spectra from `reference_library_8.csv`. The comparison process involved linear interpolation of the target spectrum onto the wavenumber axis of each reference, followed by L2-normalization of both vectors. Cosine similarity was then calculated as the dot product of these normalized vectors.\n\nThe results show that T121 is highly similar to the polystyrene references (PS_01, PS_03, and PS_02), with scores exceeding 0.97, while other materials such as PET, PMMA, and Silicon show significantly lower similarity.\n\n```json\n{\n  \"ranking\": [\n    {\"spectrum_id\": \"PS_01\", \"score\": 0.9945520603357233},\n    {\"spectrum_id\": \"PS_03\", \"score\": 0.9939536123787809},\n    {\"spectrum_id\": \"PS_02\", \"score\": 0.9782286993020178},\n    {\"spectrum_id\": \"PET_02\", \"score\": 0.2286385137572982},\n    {\"spectrum_id\": \"PMMA_01\", \"score\": 0.17938862644812548},\n    {\"spectrum_id\": \"PET_01\", \"score\": 0.16748671116755182},\n    {\"spectrum_id\": \"CAL_01\", \"score\": 0.031255749562738314},\n    {\"spectrum_id\": \"SI_01\", \"score\": 0.010961384388093723}\n  ]\n}\n```",
+  "answer_json": {
+    "ranking": [
+      {
+        "spectrum_id": "PS_01",
+        "score": 0.9945520603357233
+      },
+      {
+        "spectrum_id": "PS_03",
+        "score": 0.9939536123787809
+      },
+      {
+        "spectrum_id": "PS_02",
+        "score": 0.9782286993020178
+      },
+      {
+        "spectrum_id": "PET_02",
+        "score": 0.2286385137572982
+      },
+      {
+        "spectrum_id": "PMMA_01",
+        "score": 0.17938862644812548
+      },
+      {
+        "spectrum_id": "PET_01",
+        "score": 0.16748671116755182
+      },
+      {
+        "spectrum_id": "CAL_01",
+        "score": 0.031255749562738314
+      },
+      {
+        "spectrum_id": "SI_01",
+        "score": 0.010961384388093723
+      }
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T121.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library_8.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load files\ntarget_file = None\nlibrary_file = None\nfor f in files:\n    if f['filename'] == 'T121.csv':\n        target_file = f\n    elif f['filename'] == 'reference_library_8.csv':\n        library_file = f\n\n# Extract target\nx_target = target_file['table']['raman_shift_cm-1']\ny_target = target_file['table']['intensity']\n\n# Process library\nsids = np.unique(library_file['table']['spectrum_id'])\nresults = []\n\nfor sid in sids:\n    mask = library_file['table']['spectrum_id'] == sid\n    x_ref = library_file['table']['raman_shift_cm-1'][mask]\n    y_ref = library_file['table']['intensity'][mask]\n    \n    # Linear interpolation of target onto reference axis\n    y_target_interp = np.interp(x_ref, x_target, y_target)\n    \n    # L2 Normalization helper\n    def l2_norm(v):\n        norm = np.linalg.norm(v)\n        return v / norm if norm > 0 else v\n    \n    v_target = l2_norm(y_target_interp)\n    v_ref = l2_norm(y_ref)\n    \n    # Cosine similarity (dot product of normalized vectors)\n    score = np.dot(v_target, v_ref)\n    results.append({'spectrum_id': sid, 'score': float(score)})\n\n# Sort: score DESC, then spectrum_id ASC\nsorted_results = sorted(results, key=lambda x: (-x['score'], x['spectrum_id']))\n\nprint(\"Ranking:\")\nfor r in sorted_results:\n    print(f\"{r['spectrum_id']}: {r['score']}\")\n",
+        "file_ids": [
+          "2026-08-07/T121.csv",
+          "2026-08-07/reference_library_8.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load files\ntarget_file = None\nlibrary_file = None\nfor f in files:\n    if f['filename'] == 'T121.csv':\n        target_file = f\n    elif f['filename'] == 'reference_library_8.csv':\n        library_file = f\n\nx_target = target_file['table']['raman_shift_cm-1']\ny_target = target_file['table']['intensity']\n\nsids = np.unique(library_file['table']['spectrum_id'])\nprint(f\"Found spectrum IDs: {sids}\")\n\nresults = []\nfor sid in sids:\n    mask = (library_file['table']['spectrum_id'] == sid)\n    x_ref = library_file['table']['raman_shift_cm-1'][mask]\n    y_ref = library_file['table']['intensity'][mask]\n    \n    # Ensure 1D arrays\n    x_ref = np.asarray(x_ref).flatten()\n    y_ref = np.asarray(y_ref).flatten()\n    \n    # Linear interpolation of target onto reference axis\n    y_target_interp = np.interp(x_ref, x_target, y_target)\n    \n    def l2_norm(v):\n        norm = np.linalg.norm(v)\n        return v / norm if norm > 0 else v\n    \n    v_target = l2_norm(y_target_interp)\n    v_ref = l2_norm(y_ref)\n    \n    score = float(np.dot(v_target, v_ref))\n    results.append({'spectrum_id': sid, 'score': score})\n\nsorted_results = sorted(results, key=lambda x: (-x['score'], x['spectrum_id']))\nprint(\"Ranking:\")\nfor r in sorted_results:\n    print(f\"{r['spectrum_id']}: {r['score']}\")\n",
+        "file_ids": [
+          "2026-08-07/T121.csv",
+          "2026-08-07/reference_library_8.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\ntarget_file = next(f for f in files if f['filename'] == 'T121.csv')\nlibrary_file = next(f for f in files if f['filename'] == 'reference_library_8.csv')\n\nx_target = target_file['table']['raman_shift_cm-1'].astype(float)\ny_target = target_file['table']['intensity'].astype(float)\n\nsids = np.unique(library_file['table']['spectrum_id'])\nresults = []\n\nfor sid in sids:\n    mask = (library_file['table']['spectrum_id'] == sid)\n    x_ref = library_file['table']['raman_shift_cm-1'][mask].astype(float)\n    y_ref = library_file['table']['intensity'][mask].astype(float)\n    \n    # Interpolation\n    y_target_interp = np.interp(x_ref, x_target, y_target)\n    \n    def l2_norm(v):\n        n = np.linalg.norm(v)\n        return v / n if n > 0 else v\n    \n    vt = l2_norm(y_target_interp)\n    vr = l2_norm(y_ref)\n    \n    score = np.dot(vt, vr)\n    results.append({'spectrum_id': sid, 'score': float(score)})\n    print(f\"ID: {sid}, Score: {score:.6f}, VT[0]: {vt[0]:.6f}, VR[0]: {vr[0]:.6f}\")\n\nsorted_results = sorted(results, key=lambda x: (-x['score'], x['spectrum_id']))\nprint(\"Final Ranking:\")\nfor r in sorted_results:\n    print(f\"{r['spectrum_id']}: {r['score']}\")\n",
+        "file_ids": [
+          "2026-08-07/T121.csv",
+          "2026-08-07/reference_library_8.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Find files safely\ntarget_file = None\nlibrary_file = None\nfor f in files:\n    if f['filename'] == 'T121.csv': target_file = f\n    if f['filename'] == 'reference_library_8.csv': library_file = f\n\n# Extract data as floats\nx_target = np.array(target_file['table']['raman_shift_cm-1'], dtype=float)\ny_target = np.array(target_file['table']['intensity'], dtype=float)\n\nsids = np.unique(library_file['table']['spectrum_id'])\nresults = []\n\nfor sid in sids:\n    mask = (library_file['table']['spectrum_id'] == sid)\n    x_ref = np.array(library_file['table']['raman_shift_cm-1'][mask], dtype=float)\n    y_ref = np.array(library_file['table']['intensity'][mask], dtype=float)\n    \n    # Interpolation\n    y_target_interp = np.interp(x_ref, x_target, y_target)\n    \n    def l2_norm(v):\n        n = np.linalg.norm(v)\n        return v / n if n > 0 else v\n    \n    vt = l2_norm(y_target_interp)\n    vr = l2_norm(y_ref)\n    \n    score = float(np.dot(vt, vr))\n    results.append({'spectrum_id': sid, 'score': score})\n    print(f\"ID: {sid}, Score: {score:.6f}\")\n\n# Sorting as requested\nsorted_results = sorted(results, key=lambda x: (-x['score'], x['spectrum_id']))\n\nprint(\"FINAL_RESULT\")\nfor r in sorted_results:\n    print(f\"{r['spectrum_id']}, {r['score']}\")\n",
+        "file_ids": [
+          "2026-08-07/T121.csv",
+          "2026-08-07/reference_library_8.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\ntarget_file = None\nlibrary_file = None\nfor f in files:\n    if f['filename'] == 'T121.csv': target_file = f\n    if f['filename'] == 'reference_library_8.csv': library_file = f\n\nx_t = np.array(target_file['table']['raman_shift_cm-1'], dtype=float)\ny_t = np.array(target_file['table']['intensity'], dtype=float)\n\nsids = np.unique(library_file['table']['spectrum_id'])\nresults = []\n\nfor sid in sids:\n    mask = (library_file['table']['spectrum_id'] == sid)\n    x_r = np.array(library_file['table']['raman_shift_cm-1'][mask], dtype=float)\n    y_r = np.array(library_file['table']['intensity'][mask], dtype=float)\n    \n    y_ti = np.interp(x_r, x_t, y_t)\n    \n    def l2_norm(v):\n        n = np.linalg.norm(v)\n        return v / n if n > 0 else v\n    \n    vt = l2_norm(y_ti)\n    vr = l2_norm(y_r)\n    \n    # Use sum of product instead of dot to avoid potential shape issues\n    score = float(np.sum(vt * vr))\n    results.append({'spectrum_id': sid, 'score': score})\n    print(f\"ID: {sid}, Score: {score:.6f}, vt_shape: {vt.shape}, vr_shape: {vr.shape}\")\n\nsorted_results = sorted(results, key=lambda x: (-x['score'], x['spectrum_id']))\nprint(\"FINAL\")\nfor r in sorted_results:\n    print(f\"{r['spectrum_id']}, {r['score']}\")\n",
+        "file_ids": [
+          "2026-08-07/T121.csv",
+          "2026-08-07/reference_library_8.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\ntarget_file = None\nlibrary_file = None\nfor f in files:\n    if f['filename'] == 'T121.csv': target_file = f\n    if f['filename'] == 'reference_library_8.csv': library_file = f\n\nprint(f\"Target table keys: {target_file['table'].keys()}\")\nfor k, v in target_file['table'].items():\n    print(f\"Key: {k}, Type: {type(v)}, Shape: {getattr(v, 'shape', 'N/A')}\")\n\nprint(f\"\\nLibrary table keys: {library_file['table'].keys()}\")\nfor k, v in library_file['table'].items():\n    print(f\"Key: {k}, Type: {type(v)}, Shape: {getattr(v, 'shape', 'N/A')}\")\n",
+        "file_ids": [
+          "2026-08-07/T121.csv",
+          "2026-08-07/reference_library_8.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\ntarget_file = None\nlibrary_file = None\nfor f in files:\n    if f['filename'] == 'T121.csv': target_file = f\n    if f['filename'] == 'reference_library_8.csv': library_file = f\n\nprint(\"Target Shift shape:\", target_file['table']['raman_shift_cm-1'].shape)\nprint(\"Library ID shape:\", library_file['table']['spectrum_id'].shape)\nprint(\"Library Intensity shape:\", library_file['table']['intensity'].shape)\n\n# Try accessing one element to see what it is\nprint(\"First ID:\", library_file['table']['spectrum_id'][0])\n",
+        "file_ids": [
+          "2026-08-07/T121.csv",
+          "2026-08-07/reference_library_8.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\ntarget_file = None\nlibrary_file = None\nfor f in files:\n    if f['filename'] == 'T121.csv': target_file = f\n    if f['filename'] == 'reference_library_8.csv': library_file = f\n\n# Convert everything to numpy arrays first to ensure boolean masking works correctly\nx_t = np.array(target_file['table']['raman_shift_cm-1'], dtype=float)\ny_t = np.array(target_file['table']['intensity'], dtype=float)\n\nsids_raw = np.array(library_file['table']['spectrum_id'])\nx_r_all = np.array(library_file['table']['raman_shift_cm-1'], dtype=float)\ny_r_all = np.array(library_file['table']['intensity'], dtype=float)\n\nsids = np.unique(sids_raw)\nresults = []\n\nfor sid in sids:\n    mask = (sids_raw == sid)\n    x_ref = x_r_all[mask]\n    y_ref = y_r_all[mask]\n    \n    # Interpolation of target onto reference axis\n    y_target_interp = np.interp(x_ref, x_t, y_t)\n    \n    def l2_norm(v):\n        n = np.linalg.norm(v)\n        return v / n if n > 0 else v\n    \n    vt = l2_norm(y_target_interp)\n    vr = l2_norm(y_ref)\n    \n    score = float(np.dot(vt, vr))\n    results.append({'spectrum_id': sid, 'score': score})\n\n# Sort: score DESC, then spectrum_id ASC\nsorted_results = sorted(results, key=lambda x: (-x['score'], x['spectrum_id']))\n\nprint(\"RANKING\")\nfor r in sorted_results:\n    print(f\"{r['spectrum_id']}, {r['score']}\")\n",
+        "file_ids": [
+          "2026-08-07/T121.csv",
+          "2026-08-07/reference_library_8.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "session_id": "bench_2026-08-07_AILA_AILA_T121_6f1f42",
+  "elapsed_s": 135.41,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

@@ -1,0 +1,164 @@
+{
+  "task": "T098",
+  "axis": "diagnostics",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "In T098.csv the background rises steeply with wavenumber and buries the Raman peaks. Name the cause, apply IPBSA baseline correction with order 5, and report the peaks recovered (prominence 5% of range).",
+  "criteria": "KEYWORD(fluorescence) + ARRAY(cos>=0.99, NRMSE<=0.02) + SET(peak ±3 cm-1)",
+  "checks": [
+    {
+      "name": "peak positions",
+      "passed": true,
+      "score": 1.0,
+      "detail": "9/9 matched (submitted 9) [620.0, 794.0, 1001.0, 1031.0, 1155.0, 1183.0]... vs [620.0, 794.0, 1001.0, 1031.0, 1155.0, 1183.0]...",
+      "weight": 1.0,
+      "kind": "SET"
+    },
+    {
+      "name": "result array",
+      "passed": true,
+      "score": 1.0,
+      "detail": "cos=0.99952 NRMSE=0.00237",
+      "weight": 2.0,
+      "kind": "ARRAY"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T098.csv"
+  ],
+  "answer_text": "The steep rise in background intensity with wavenumber observed in T098.csv is caused by **fluorescence**, which produces a broad emission signal that often overwhelms the weaker Raman scattering peaks.\n\nApplying an IPBSA (Iterative Polynomial Background Subtraction Algorithm) baseline correction of order 5 successfully removed this fluorescence background, revealing several sharp spectral features. Using a prominence threshold of 5% of the corrected intensity range, the following Raman peaks were recovered:\n\n- **620 cm⁻¹**\n- **794 cm⁻¹**\n- **1001 cm⁻¹**\n- **1031 cm⁻¹**\n- **1155 cm⁻¹**\n- **1183 cm⁻¹**\n- **1451 cm⁻¹**\n- **1583 cm⁻¹**\n- **1602 cm⁻¹**\n\n```json\n{\"peaks\": [620, 794, 1001, 1031, 1155, 1183, 1451, 1583, 1602]}\n```",
+  "answer_json": {
+    "peaks": [
+      620,
+      794,
+      1001,
+      1031,
+      1155,
+      1183,
+      1451,
+      1583,
+      1602
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {
+        "date": "2026-08-07"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T098.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\nfrom scipy.signal import find_peaks\n\ndef ipbsa(x, y, order=5, iterations=100, threshold=0.001):\n    # Simple implementation of Iterative Polynomial Background Subtraction\n    y_bg = np.zeros_like(y)\n    current_y = y.copy()\n    \n    for i in range(iterations):\n        coeffs = np.polyfit(x, current_y, order)\n        poly = np.poly1d(coeffs)\n        new_bg = poly(x)\n        \n        # Convergence check (relative L2 change)\n        if i > 0:\n            diff = np.linalg.norm(new_bg - y_bg) / (np.linalg.norm(y_bg) + 1e-9)\n            if diff < threshold:\n                break\n        \n        y_bg = new_bg\n        # Update current_y for next iteration: a point is kept if it's not \"too far\" above the background\n        # Standard IPBSA usually removes points that are clearly peaks\n        # Here we use a simple mask: keep points that are close to or below the fit\n        mask = y <= (y_bg + 0.1 * (np.max(y) - np.min(y))) # Heuristic\n        # More robustly, one might iteratively remove peaks. \n        # Let's try a simpler approach: replace values above background with background value for the next fit\n        current_y = np.minimum(y, y_bg + (y - y_bg) * 0) # This is too aggressive\n        # Correct IPBSA logic: current_y = np.where(y > new_bg, new_bg, y)\n        current_y = np.where(y > new_bg, new_bg, y)\n\n    return y_bg\n\n# Data loading\ndata = files[0][\"table\"]\nx = data[\"raman_shift_cm-1\"]\ny = data[\"intensity\"]\n\n# Apply IPBSA Order 5\nbg = ipbsa(x, y, order=5)\ny_corrected = y - bg\n\n# Peak detection\n# Prominence > 5% of range (max - min of corrected spectrum)\ny_range = np.max(y_corrected) - np.min(y_corrected)\nprom_thresh = 0.05 * y_range\n\npeaks, properties = find_peaks(y_corrected, prominence=prom_thresh)\npeak_positions = x[peaks]\n\nprint(f\"Background Range: {np.min(bg):.2f} to {np.max(bg):.2f}\")\nprint(f\"Corrected Signal Range: {np.min(y_corrected):.2f} to {np.max(y_corrected):.2f}\")\nprint(f\"Prominence Threshold: {prom_thresh:.2f}\")\nprint(f\"Recovered Peaks at: {peak_positions}\")\n\nplt.figure(figsize=(10, 6))\nplt.plot(x, y, label='Original', color='gray')\nplt.plot(x, bg, label='IPBSA Baseline (Order 5)', color='red', linestyle='--')\nplt.plot(x, y_corrected, label='Corrected', color='blue')\nplt.scatter(peak_positions, y_corrected[peaks], color='green', marker='x', label='Peaks')\nplt.xlabel('Raman Shift (cm-1)')\nplt.ylabel('Intensity')\nplt.legend()\nplt.title('T098 Baseline Correction')\nplt.grid(True)\nplt.show()\n\nsave_result('T098_corrected', y_corrected, raman_shift=x)\n",
+        "file_ids": [
+          "2026-08-07/T098.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "runs/bench_2026-08-07_CoALA_CoALA_T098_e0640a/spectra/01_T098_corrected.csv",
+    "/api/results/2026-08-07/bench_2026-08-07_CoALA_CoALA_T098_e0640a/fig211137_187_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 30.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -39,
+    "temperature_status": "NOT_STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 30.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 30.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 30.0
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T098_e0640a",
+  "elapsed_s": 85.2,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

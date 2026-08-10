@@ -102,6 +102,20 @@ def _resolve_path(file_id: str) -> Path:
     return path
 
 
+def resolve_upload_path(file_id: str) -> Path:
+    """file_id → 실제 경로. **다른 모듈이 file_id 를 풀 때 쓰는 공개 창구.**
+
+    업로드 파일이 어디 있는지 아는 곳은 이 모듈 하나여야 한다. 바깥에서 경로를
+    직접 조립하면 UPLOADS_ROOT 가 바뀌는 순간 조용히 어긋난다 — 실제로 raman_tools
+    가 data/<날짜>/ 를 보는 바람에(정답은 data/uploads/<날짜>/) 업로드 파일을 넘긴
+    호출이 전부 "File not found" 로 떨어졌다.
+
+    경로 탈출 방어와 '날짜 없는 이름' 허용은 _resolve_path 가 이미 하므로 그대로 쓴다.
+    못 찾으면 ValueError(형식 오류) 또는 FileNotFoundError 를 올린다.
+    """
+    return _resolve_path(file_id)
+
+
 def _kind(path: Path) -> str:
     return "excel" if path.suffix.lower() in _EXCEL_SUFFIXES else "text"
 

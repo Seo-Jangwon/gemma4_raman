@@ -1,0 +1,198 @@
+{
+  "task": "T113",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "Compare the unknown spectrum T113.csv with the reference spectra in reference_library.csv (interpolate onto the reference axis, L2 normalize, cosine similarity) and report the 3 most similar references with their rank and score.",
+  "criteria": "EXACT(ordered 3 items) + NUM(scores ±0.01)",
+  "checks": [
+    {
+      "name": "top 3 materials in order",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3/3 matched (submitted 3) ['polystyrene', 'polystyrene', 'PET'] vs ['polystyrene', 'polystyrene', 'PET']",
+      "weight": 2.0,
+      "kind": "SET"
+    },
+    {
+      "name": "top 3 scores",
+      "passed": true,
+      "score": 1.0,
+      "detail": "3/3 matched (submitted 3) [0.995, 0.978, 0.228] vs [0.995, 0.978, 0.227]",
+      "weight": 1.0,
+      "kind": "SET"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T113.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "Based on the comparison of the unknown spectrum **T113.csv** with the reference library in **reference_library.csv**, the most similar spectra were identified by interpolating T113 onto the reference axis, applying L2 normalization to both, and calculating the cosine similarity (dot product).\n\nThe results show a very high correlation with polystyrene references, particularly `PS_01`, indicating that the unknown sample is highly likely to be polystyrene.\n\n**Top 3 Most Similar References:**\n1. **Rank 1**: Spectrum ID `PS_01` (**polystyrene**) with a similarity score of **0.9948**.\n2. **Rank 2**: Spectrum ID `PS_02` (**polystyrene**) with a similarity score of **0.9781**.\n3. **Rank 3**: Spectrum ID `PET_02` (**PET**) with a similarity score of **0.2275**.\n\n```json\n{\"top3\": [{\"spectrum_id\": \"PS_01\", \"material\": \"polystyrene\", \"score\": 0.9948}, {\"spectrum_id\": \"PS_02\", \"material\": \"polystyrene\", \"score\": 0.9781}, {\"spectrum_id\": \"PET_02\", \"material\": \"PET\", \"score\": 0.2275}]}\n```",
+  "answer_json": {
+    "top3": [
+      {
+        "spectrum_id": "PS_01",
+        "material": "polystyrene",
+        "score": 0.9948
+      },
+      {
+        "spectrum_id": "PS_02",
+        "material": "polystyrene",
+        "score": 0.9781
+      },
+      {
+        "spectrum_id": "PET_02",
+        "material": "PET",
+        "score": 0.2275
+      }
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {
+        "date": "2026-08-07"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T113.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# File IDs\nunk_id = '2026-08-07/T113.csv'\nref_id = '2026-08-07/reference_library.csv'\n\n# Extract unknown spectrum\nunk_data = files[0] if files[0]['filename'] == 'T113.csv' else files[1] # Check which is which from the list\n# Better way: just iterate and find by filename or use known IDs in run_analysis logic\n# But I passed them via file_ids, so let's be precise.\n# Re-mapping based on actual provided lists if needed, but usually they follow order of file_ids.\n\n# Let's find the files correctly from the 'files' list injected by the system\nunk_f = next(f for f in files if f['filename'] == 'T113.csv')\nref_f = next(f for f in files if f['filename'] == 'reference_library.csv')\n\nx_unk = unk_f['table']['raman_shift_cm-1']\ny_unk = unk_f['table']['intensity']\n\n# Process reference library\nref_table = ref_f['table']\nids = ref_table['spectrum_id']\nmaterials = ref_table['material']\nx_refs = ref_table['raman_shift_cm-1']\ny_refs = ref_table['intensity']\n\nunique_ids = []\n# Maintain order of appearance to associate with material\nseen = set()\nfor sid in ids:\n    if sid not in seen:\n        unique_ids.append(sid)\n        seen.add(sid)\n\nresults = []\n\nfor sid in unique_ids:\n    mask = (ids == sid)\n    x_ref = x_refs[mask]\n    y_ref = y_refs[mask]\n    mat = materials[mask][0]\n    \n    # 1. Interpolate unknown onto reference axis\n    f_interp = interp1d(x_unk, y_unk, kind='linear', fill_value=\"extrapolate\")\n    y_unk_interp = f_interp(x_ref)\n    \n    # 2. L2 Normalize\n    def l2_norm(v):\n        norm = np.linalg.norm(v)\n        return v / norm if norm > 0 else v\n\n    v_unk = l2_norm(y_unk_interp)\n    v_ref = l2_norm(y_ref)\n    \n    # 3. Cosine Similarity (Dot product of L2 normalized vectors)\n    score = np.dot(v_unk, v_ref)\n    \n    results.append({\n        'spectrum_id': sid,\n        'material': mat,\n        'score': float(score)\n    })\n\n# Sort by score descending\nresults.sort(key=lambda x: x['score'], reverse=True)\n\ntop3 = results[:3]\nprint(\"Top 3 Matches:\")\nfor i, res in enumerate(top3):\n    print(f\"Rank {i+1}: {res['spectrum_id']} ({res['material']}) - Score: {res['score']:.4f}\")\n",
+        "file_ids": [
+          "2026-08-07/T113.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Identify files\nunk_f = None\nref_f = None\nfor f in files:\n    if f['filename'] == 'T113.csv':\n        unk_f = f\n    elif f['filename'] == 'reference_library.csv':\n        ref_f = f\n\nx_unk = unk_f['table']['raman_shift_cm-1']\ny_unk = unk_f['table']['intensity']\n\n# Process reference library\nref_table = ref_f['table']\nids = ref_table['spectrum_id']\nmaterials = ref_table['material']\nx_refs = ref_table['raman_shift_cm-1']\ny_refs = ref_table['intensity']\n\nunique_ids = []\nseen = set()\nfor sid in ids:\n    if sid not in seen:\n        unique_ids.append(sid)\n        seen.add(sid)\n\nresults = []\n\nfor sid in unique_ids:\n    mask = (ids == sid)\n    x_ref = x_refs[mask]\n    y_ref = y_refs[mask]\n    mat = materials[mask][0]\n    \n    # 1. Interpolate unknown onto reference axis\n    f_interp = interp1d(x_unk, y_unk, kind='linear', fill_value=\"extrapolate\")\n    y_unk_interp = f_interp(x_ref)\n    \n    # 2. L2 Normalize\n    def l2_norm(v):\n        norm = np.linalg.norm(v)\n        return v / norm if norm > 0 else v\n\n    v_unk = l2_norm(y_unk_interp)\n    v_ref = l2_norm(y_ref)\n    \n    # 3. Cosine Similarity\n    score = np.dot(v_unk, v_ref)\n    \n    results.append({\n        'spectrum_id': sid,\n        'material': mat,\n        'score': float(score)\n    })\n\n# Sort by score descending\nresults.sort(key=lambda x: x['score'], reverse=True)\n\ntop3 = results[:3]\nprint(\"Top 3 Matches:\")\nfor i, res in enumerate(top3):\n    print(f\"Rank {i+1}: {res['spectrum_id']} ({res['material']}) - Score: {res['score']:.4f}\")\n",
+        "file_ids": [
+          "2026-08-07/T113.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Identify files\nunk_f = None\nref_f = None\nfor f in files:\n    if f['filename'] == 'T113.csv':\n        unk_f = f\n    elif f['filename'] == 'reference_library.csv':\n        ref_f = f\n\nx_unk = unk_f['table']['raman_shift_cm-1']\ny_unk = unk_f['table']['intensity']\n\n# Process reference library\nref_table = ref_f['table']\nids = np.array(ref_table['spectrum_id']) # Convert to numpy for masking\nmaterials = np.array(ref_table['material']) # Convert to numpy for indexing\nx_refs = ref_table['raman_shift_cm-1']\ny_refs = ref_table['intensity']\n\nunique_ids = []\nseen = set()\nfor sid in ids:\n    if sid not in seen:\n        unique_ids.append(sid)\n        seen.add(sid)\n\nresults = []\n\nfor sid in unique_ids:\n    mask = (ids == sid)\n    x_ref = x_refs[mask]\n    y_ref = y_refs[mask]\n    mat = materials[mask][0]\n    \n    # 1. Interpolate unknown onto reference axis\n    f_interp = interp1d(x_unk, y_unk, kind='linear', fill_value=\"extrapolate\")\n    y_unk_interp = f_interp(x_ref)\n    \n    # 2. L2 Normalize\n    def l2_norm(v):\n        norm = np.linalg.norm(v)\n        return v / norm if norm > 0 else v\n\n    v_unk = l2_norm(y_unk_interp)\n    v_ref = l2_norm(y_ref)\n    \n    # 3. Cosine Similarity\n    score = np.dot(v_unk, v_ref)\n    \n    results.append({\n        'spectrum_id': sid,\n        'material': mat,\n        'score': float(score)\n    })\n\n# Sort by score descending\nresults.sort(key=lambda x: x['score'], reverse=True)\n\ntop3 = results[:3]\nprint(\"Top 3 Matches:\")\nfor i, res in enumerate(top3):\n    print(f\"Rank {i+1}: {res['spectrum_id']} ({res['material']}) - Score: {res['score']:.4f}\")\n",
+        "file_ids": [
+          "2026-08-07/T113.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "session_id": "bench_2026-08-07_AILA_AILA_T113_c5e6a6",
+  "elapsed_s": 73.0,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

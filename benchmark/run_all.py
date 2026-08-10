@@ -250,6 +250,79 @@ def run_one(b: Bench, mod, task, run_id: str, axis=None, timeout_s=None) -> tupl
     return _finish(b, mod, task, run, fatal, warn), None
 
 
+# ── 인프라 실패 재시도 ────────────────────────────────────────────────────────
+# 재시도해도 되는 사유. 공통점은 하나다 — **답을 아예 못 받았다**.
+# 문자열로 가르는 이유: 이 사유들은 client.Bench.run 과 run_one 이 각자 만들어
+# run.errors 에 넣는 것이라, 따로 코드를 달고 오지 않는다.
+_RETRYABLE = (
+    ("stream failed", "네트워크 끊김"),
+    ("http 5", "서버 5xx"),
+    ("returned an empty reply", "빈 응답"),
+    ("input upload failed", "입력 업로드 실패"),
+    ("could not read the starting state", "시작 상태 읽기 실패"),
+)
+
+
+def _retryable(payload: dict) -> str:
+    """다시 돌릴 만한 인프라 실패면 그 사유, 아니면 "".
+
+    [무엇을 다시 돌리지 않는가]
+    오답(fail)·시간초과는 **에이전트의 결과**다. 마음에 안 든다고 다시 돌리면
+    그건 재시도가 아니라 성적 조작이다. 그래서 result=="error" 만 본다.
+    abandoned(중단을 요청했는데 안 멈춤)도 제외한다 — 에이전트가 장비를 쥔 채
+    돌고 있다는 뜻이라, 그 위에 새 실행을 얹으면 시료에 빔이 겹쳐 들어간다.
+    """
+    if payload.get("result") != R.ERROR or payload.get("abandoned"):
+        return ""
+    low = ((payload.get("reason") or "") + " "
+           + " ".join(str(e) for e in (payload.get("errors") or []))).lower()
+    return next((label for needle, label in _RETRYABLE if needle in low), "")
+
+
+def _wait_healthy(b, timeout_s=120.0, poll_s=5.0) -> bool:
+    """서버가 다시 붙을 때까지 기다린다(붙으면 True).
+
+    끊긴 직후 바로 다시 쏘면 같은 이유로 또 죽고 재시도 횟수만 태운다. 헬스체크가
+    이미 있으니(Bench.health) 그걸로 '살아났는지'를 확인한 뒤에 다시 돌린다.
+    """
+    import time
+    deadline = time.time() + timeout_s
+    while True:
+        if b.health().get("ok"):
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(poll_s)
+
+
+def run_with_retry(b, mod, task, run_id, timeout_s, retries, log=print) -> tuple:
+    """run_one 을 돌리되, '답을 아예 못 받은' 실패는 서버가 살아난 뒤 다시 돌린다.
+
+    [왜 필요한가 — 2026-08-10]
+    143 문항을 한 번에 도는 실행에서 네트워크가 한 번 끊기면 그 문항은 result=error
+    로 남고, 다시 돌리려면 --tasks 로 사람이 따로 챙겨야 했다. 게다가 error 는 해결률
+    분모에서 빠지므로, 인프라가 불안정할수록 분모가 조용히 줄어 성적이 좋아 보인다.
+
+    [레이저를 다시 쏘는 것에 대하여]
+    재시도는 run_one 을 통째로 다시 부르므로 맨 앞의 b.reset() 이 먼저 돈다 —
+    사람이 손으로 --tasks 를 다시 돌릴 때와 같은 절차다. 그래도 비가역인 조사가
+    한 번 더 들어가는 것이므로 기본값은 1 회로 둔다.
+    """
+    attempt = 0
+    while True:
+        payload, fatal = run_one(b, mod, task, run_id, timeout_s=timeout_s)
+        if fatal or attempt >= retries:
+            return payload, fatal, attempt
+        why = _retryable(payload)
+        if not why:
+            return payload, fatal, attempt
+        attempt += 1
+        log(f"\n        [재시도 {attempt}/{retries}] {task.id}: {why} - 서버 확인 후 다시 돌립니다")
+        if not _wait_healthy(b):
+            return payload, (f"{why} 뒤 서버가 살아나지 않았습니다(헬스체크 실패). "
+                             f"남은 문항은 전부 같은 이유로 실패합니다"), attempt
+
+
 def _finish(b, mod, task, run, fatal, warn) -> dict:
     run.errors = list(run.errors) + fatal
     run.warnings = list(getattr(run, "warnings", [])) + warn
@@ -289,6 +362,11 @@ def main() -> int:
     # 0 이면 무제한(= 상한이 없던 예전 실행과 동일).
     ap.add_argument("--task-timeout", type=float, default=900.0, metavar="SEC",
                     help="문항당 상한(초). 0 이면 무제한. 기본 900(15분)")
+    # 네트워크 끊김·빈 응답처럼 '답을 아예 못 받은' 실패만 다시 돌린다(_retryable 참고).
+    # 오답과 시간초과는 에이전트의 결과이므로 재시도 대상이 아니다. 비가역인 조사가
+    # 한 번 더 들어가므로 기본은 1 회.
+    ap.add_argument("--retries", type=int, default=1, metavar="N",
+                    help="인프라 실패 시 문항 재시도 횟수. 0 이면 재시도 없음. 기본 1")
     args = ap.parse_args()
 
     only = {t.strip() for t in args.tasks.split(",") if t.strip()} or None
@@ -346,11 +424,17 @@ def main() -> int:
     for i, (mod, task) in enumerate(pairs, 1):
         tag = "?" if task.mode == "hypothetical" else " "
         print(f"  [{i:3d}/{len(pairs)}]{tag}{task.id} ...", end="", flush=True)
-        payload, fatal = run_one(b, mod, task, run_id, timeout_s=cap or None)
+        payload, fatal, retried = run_with_retry(b, mod, task, run_id, cap or None,
+                                                 max(0, args.retries))
         if fatal:
             print(f"\n[fatal] {task.id}: {fatal}\n        장비가 이상한 상태로 남았을 수 "
                   f"있습니다. 확인 후 다시 시작하세요.", file=sys.stderr)
             break
+        if retried:
+            # 결과 파일만 봐도 '이 문항은 다시 돌린 것'이 보여야 한다. 인프라가
+            # 불안정했던 실행을 나중에 구분할 수 있는 유일한 흔적이다.
+            payload["warnings"] = list(payload.get("warnings") or []) + [
+                f"retried {retried}x after an infrastructure failure"]
         for name in blocked.get(task.id, []):
             payload["checks"].append(
                 chk.blocked(name, "the instrument axis does not cover this window").as_dict())

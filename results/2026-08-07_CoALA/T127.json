@@ -1,0 +1,202 @@
+{
+  "task": "T127",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "T127.csv was supplied to us as PMMA. Judge whether it really is, using reference_library.csv: accept if the cosine similarity to the PMMA reference is 0.85 or higher, otherwise reject.",
+  "criteria": "EXACT(verdict) + NUM(±0.01)",
+  "checks": [
+    {
+      "name": "accept / reject",
+      "passed": true,
+      "score": 1.0,
+      "detail": "reported=False (expected False: similarity to the claimed PMMA is 0.286 < 0.85)",
+      "weight": 2.0,
+      "kind": "EXACT"
+    },
+    {
+      "name": "similarity to the claimed material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "0.286036 (expected 0.286036, |Δ|=2.667e-07 ≤ 0.01)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T127.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "Based on the analysis of the provided spectra, T127.csv was compared against the PMMA references in `reference_library.csv`. Two PMMA reference spectra were found (`PMMA_01` and `PMMA_02`), yielding cosine similarities of approximately 0.253 and 0.286, respectively. Since both values are well below the required threshold of 0.85, the sample is rejected as PMMA.\n\n```json\n{\"matches\": false, \"similarity\": 0.28603573334962257}\n```",
+  "answer_json": {
+    "matches": false,
+    "similarity": 0.28603573334962257
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T127.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# 1. Identify files\nt127_id = '2026-08-07/T127.csv'\nref_id = '2026-08-07/reference_library.csv'\n\n# Load T127 data\nt127_data = files[0] if files[0]['file_id'] == t127_id else files[1] # Just in case order is different, though I passed file_ids\n# Actually a better way:\nt127 = None\nref_lib = None\nfor f in files:\n    if f['file_id'] == t127_id:\n        t127 = f\n    elif f['file_id'] == ref_id:\n        ref_lib = f\n\n# Extract T127 spectrum\nx_t127 = t127['table']['raman_shift_cm-1']\ny_t127 = t127['table']['intensity']\n\n# Filter reference library for PMMA\nmaterial_col = ref_lib['table']['material']\nmask_pmma = (material_col == 'PMMA')\n\nif not np.any(mask_pmma):\n    print(\"Error: PMMA not found in reference library\")\nelse:\n    # Extract PMMA spectrum\n    x_ref = ref_lib['table']['raman_shift_cm-1'][mask_pmma]\n    y_ref = ref_lib['table']['intensity'][mask_pmma]\n\n    # Verify dimensions match\n    if len(x_t127) != len(x_ref):\n        print(f\"Dimension mismatch: T127 has {len(x_t127)} points, Ref PMMA has {len(x_ref)} points\")\n        # If they differ, we should interpolate. Let's check the x-axis range and step first.\n    else:\n        # Compute cosine similarity\n        dot_product = np.dot(y_t127, y_ref)\n        norm_t127 = np.linalg.norm(y_t127)\n        norm_ref = np.linalg.norm(y_ref)\n        similarity = dot_product / (norm_t127 * norm_ref)\n        print(f\"Cosine Similarity: {similarity}\")\n",
+        "file_ids": [
+          "2026-08-07/T127.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Find the reference library file\nref_lib = None\nfor f in files:\n    if 'reference_library.csv' in f['filename']:\n        ref_lib = f\n        break\n\nif ref_lib is not None:\n    materials = ref_lib['table']['material']\n    unique_materials = np.unique(materials)\n    print(\"Unique materials in library:\")\n    print(unique_materials)\nelse:\n    print(\"Reference library file not found.\")\n",
+        "file_ids": [
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load files\nt127 = None\nref_lib = None\nfor f in files:\n    if 'T127.csv' in f['filename']: t127 = f\n    if 'reference_library.csv' in f['filename']: ref_lib = f\n\n# T127 data\nx_t127 = t127['table']['raman_shift_cm-1']\ny_t127 = t127['table']['intensity']\n\n# Reference data filtering for PMMA\nmaterial_col = ref_lib['table']['material']\npmma_mask = (material_col == 'PMMA')\n\nif not np.any(pmma_mask):\n    print(\"Still cannot find PMMA. Checking unique values again...\")\n    print(np.unique(material_col))\nelse:\n    # Extract the first occurrence of PMMA (assuming one per material)\n    # Since the library is likely structured as [spectrum_id, material, shift, intensity]\n    # and each spectrum has 1801 points.\n    ids = ref_lib['table']['spectrum_id']\n    pmma_ids = np.unique(ids[pmma_mask])\n    print(f\"PMMA spectrum IDs found: {pmma_ids}\")\n\n    for pid in pmma_ids:\n        mask = (ids == pid)\n        x_ref = ref_lib['table']['raman_shift_cm-1'][mask]\n        y_ref = ref_lib['table']['intensity'][mask]\n        \n        # Ensure lengths match. If not, interpolate y_ref onto x_t127.\n        if len(x_ref) != len(x_t127):\n            y_ref_interp = np.interp(x_t127, x_ref, y_ref)\n        else:\n            y_ref_interp = y_ref\n\n        # Cosine similarity\n        dot = np.dot(y_t127, y_ref_interp)\n        norm_a = np.linalg.norm(y_t127)\n        norm_b = np.linalg.norm(y_ref_interp)\n        sim = dot / (norm_a * norm_b)\n        print(f\"Similarity with {pid}: {sim}\")\n",
+        "file_ids": [
+          "2026-08-07/T127.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load files\nt127 = None\nref_lib = None\nfor f in files:\n    if 'T127.csv' in f['filename']: t127 = f\n    if 'reference_library.csv' in f['filename']: ref_lib = f\n\n# T127 data\nx_t127 = t127['table']['raman_shift_cm-1']\ny_t127 = t127['table']['intensity']\n\n# Reference data filtering - use stripping to avoid whitespace issues\nmaterial_col = np.array([str(m).strip() for m in ref_lib['table']['material']])\npmma_mask = (material_col == 'PMMA')\n\nif not np.any(pmma_mask):\n    print(\"Still cannot find PMMA after stripping. Printing first few raw values:\")\n    print(ref_lib['table']['material'][:10])\nelse:\n    ids = ref_lib['table']['spectrum_id']\n    pmma_ids = np.unique(ids[pmma_mask])\n    print(f\"PMMA spectrum IDs found: {pmma_ids}\")\n\n    for pid in pmma_ids:\n        mask = (ids == pid)\n        x_ref = ref_lib['table']['raman_shift_cm-1'][mask]\n        y_ref = ref_lib['table']['intensity'][mask]\n        \n        if len(x_ref) != len(x_t127):\n            y_ref_interp = np.interp(x_t127, x_ref, y_ref)\n        else:\n            y_ref_interp = y_ref\n\n        dot = np.dot(y_t127, y_ref_interp)\n        norm_a = np.linalg.norm(y_t127)\n        norm_b = np.linalg.norm(y_ref_interp)\n        sim = dot / (norm_a * norm_b)\n        print(f\"Similarity with {pid}: {sim}\")\n",
+        "file_ids": [
+          "2026-08-07/T127.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load files into local variables\nt127 = None\nref_lib = None\nfor f in files:\n    if 'T127.csv' in f['filename']: t127 = f\n    if 'reference_library.csv' in f['filename']: ref_lib = f\n\n# Convert T127 columns to numpy arrays\nx_t127 = np.array(t127['table']['raman_shift_cm-1'])\ny_t127 = np.array(t127['table']['intensity'])\n\n# Convert Reference Library columns to numpy arrays\nref_ids = np.array(ref_lib['table']['spectrum_id'])\nref_mats = np.array([str(m).strip() for m in ref_lib['table']['material']])\nref_shifts = np.array(ref_lib['table']['raman_shift_cm-1'])\nref_ints = np.array(ref_lib['table']['intensity'])\n\n# Find indices where material is PMMA\npmma_indices = np.where(ref_mats == 'PMMA')[0]\n\nif len(pmma_indices) == 0:\n    print(\"No PMMA found in reference library.\")\nelse:\n    # We expect one or a few PMMA spectra. \n    # Let's find the unique spectrum IDs for PMMA.\n    pmma_spec_ids = np.unique(ref_ids[pmma_indices])\n    print(f\"Found PMMA spectra with IDs: {pmma_spec_ids}\")\n\n    for sid in pmma_spec_ids:\n        # Get all points for this specific spectrum ID\n        sid_mask = (ref_ids == sid)\n        x_ref = ref_shifts[sid_mask]\n        y_ref = ref_ints[sid_mask]\n\n        # Interpolate if necessary to match T127 x-axis\n        if len(x_ref) != len(x_t127):\n            y_ref_interp = np.interp(x_t127, x_ref, y_ref)\n        else:\n            y_ref_interp = y_ref\n\n        # Cosine Similarity calculation\n        dot = np.dot(y_t127, y_ref_interp)\n        norm_a = np.linalg.norm(y_t127)\n        norm_b = np.linalg.norm(y_ref_interp)\n        sim = dot / (norm_a * norm_b)\n        print(f\"Similarity with {sid}: {sim}\")\n",
+        "file_ids": [
+          "2026-08-07/T127.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-07_CoALA_CoALA_T127_03de93",
+  "elapsed_s": 133.39,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

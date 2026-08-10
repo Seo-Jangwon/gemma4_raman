@@ -1,0 +1,208 @@
+{
+  "task": "T110",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "Measure at the current position and then at +0.1 mm in X, -0.1 mm in X, +0.1 mm in Y and -0.1 mm in Y, in that order. Report at which of the five positions the spectrum differs most from the first one, using cosine distance after L2 normalization.",
+  "criteria": "SET(coords 5 items, order EXACT) + EXACT(max-distance index) / post-hoc GT",
+  "checks": [
+    {
+      "name": "acquire_spectrum calls",
+      "passed": true,
+      "score": 1.0,
+      "detail": "5 calls (exactly 5 calls)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "most different position",
+      "passed": true,
+      "score": 1.0,
+      "detail": "chosen=4 expected=4 (distance=[0.0, 0.0002, 0.0004, 0.0001, 0.0122])",
+      "weight": 2.0,
+      "kind": "POSTHOC"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [],
+  "answer_text": "I have completed the measurements at the five requested positions using a laser power of 1% and an exposure time of 0.5 seconds.\n\n**Measurement Summary:**\n- **Position 0 (Current):** (37.876, 25.248) mm\n- **Position 1 (+0.1 mm X):** (37.976, 25.248) mm\n- **Position 2 (-0.1 mm X):** (37.776, 25.248) mm\n- **Position 3 (+0.1 mm Y):** (37.876, 25.348) mm\n- **Position 4 (-0.1 mm Y):** (37.876, 25.148) mm\n\n**Analysis:**\nI performed L2 normalization on the intensity vectors of all five spectra and calculated the cosine distance ($1 - \\text{cosine similarity}$) between the center spectrum (Index 0) and the others. The results were as follows:\n- Index 1: $\\approx 0.00019$\n- Index 2: $\\approx 0.00072$\n- Index 3: $\\approx 0.00013$\n- Index 4: $\\approx 0.01178$\n\nThe spectrum at position index 4 (Y - 0.1 mm) differs most from the first one.\n\n```json\n{\"index\": 4}\n```",
+  "answer_json": {
+    "index": 4
+  },
+  "tool_calls": [
+    {
+      "name": "get_hardware_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "get_stage_position",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "get_laser_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 0.5,
+        "power": 1
+      },
+      "ok": true
+    },
+    {
+      "name": "move_stage_relative",
+      "args": {
+        "dx": 0.1,
+        "dy": 0
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 0.5,
+        "power": 1
+      },
+      "ok": true
+    },
+    {
+      "name": "move_stage_relative",
+      "args": {
+        "dx": -0.2,
+        "dy": 0
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 0.5,
+        "power": 1
+      },
+      "ok": true
+    },
+    {
+      "name": "move_stage_relative",
+      "args": {
+        "dx": 0.1,
+        "dy": 0.1
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 0.5,
+        "power": 1
+      },
+      "ok": true
+    },
+    {
+      "name": "move_stage_relative",
+      "args": {
+        "dx": 0,
+        "dy": -0.2
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 0.5,
+        "power": 1
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\ntarget_bases = [\n    '161202_899_x37.876_y25.248',\n    '161210_057_x37.976_y25.248',\n    '161217_258_x37.776_y25.248',\n    '161224_386_x37.876_y25.348',\n    '161231_377_x37.876_y25.148'\n]\n\n# Extract intensities for the specified bases\nintensities = []\nfor base in target_bases:\n    spec = next((s for s in spectra if s['base'] == base), None)\n    if spec is not None:\n        intensities.append(spec['intensity'])\n    else:\n        print(f\"Warning: spectrum {base} not found\")\n\nif len(intensities) < 5:\n    print(f\"Error: Only found {len(intensities)} spectra.\")\nelse:\n    # L2 Normalization function\n    def l2_norm(v):\n        norm = np.linalg.norm(v)\n        return v / norm if norm > 0 else v\n\n    # Normalize the first spectrum (index 0)\n    s0 = l2_norm(intensities[0])\n    \n    distances = []\n    for i in range(1, 5):\n        si = l2_norm(intensities[i])\n        similarity = np.dot(s0, si)\n        distance = 1 - similarity\n        distances.append(distance)\n        print(f\"Distance index {i}: {distance}\")\n\n    max_dist_idx = np.argmax(distances) + 1\n    print(f\"Most different position index: {max_dist_idx}\")\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\ntarget_bases = [\n    '161202_899_x37.876_y25.248',\n    '161210_057_x37.976_y25.248',\n    '161217_258_x37.776_y25.248',\n    '161224_386_x37.876_y25.348',\n    '161231_377_x37.876_y25.148'\n]\n\nintensities = []\nfor base in target_bases:\n    found = False\n    for s in spectra:\n        if s['base'] == base:\n            intensities.append(s['intensity'])\n            found = True\n            break\n    if not found:\n        print(f\"Warning: spectrum {base} not found\")\n\nif len(intensities) < 5:\n    print(f\"Error: Only found {len(intensities)} spectra.\")\nelse:\n    def l2_norm(v):\n        norm = np.linalg.norm(v)\n        return v / norm if norm > 0 else v\n\n    s0 = l2_norm(intensities[0])\n    distances = []\n    for i in range(1, 5):\n        si = l2_norm(intensities[i])\n        similarity = np.dot(s0, si)\n        distance = 1 - similarity\n        distances.append(distance)\n        print(f\"Distance index {i}: {distance}\")\n\n    max_dist_idx = np.argmax(distances) + 1\n    print(f\"Most different position index: {max_dist_idx}\")\n"
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T110_469fc8/161202_899_x37.876_y25.248.csv",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T110_469fc8/161210_057_x37.976_y25.248.csv",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T110_469fc8/161217_258_x37.776_y25.248.csv",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T110_469fc8/161224_386_x37.876_y25.348.csv",
+    "results/2026-08-07/bench_2026-08-07_AILA_AILA_T110_469fc8/161231_377_x37.876_y25.148.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 50.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 50.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.148,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 1.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-07_AILA_AILA_T110_469fc8",
+  "elapsed_s": 108.0,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

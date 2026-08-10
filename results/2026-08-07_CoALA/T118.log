@@ -1,0 +1,1323 @@
+══════════════════════════════════════════════════════════════════════════════
+ CoALA · T118 · gemma4:31b @ http://192.168.1.15:11434
+ session : bench_2026-08-07_CoALA_CoALA_T118_698e4b
+ started : 2026-08-07 21:59:24
+ thinking: ON — gemma4:31b capabilities=['completion', 'vision', 'tools', 'thinking'] → thinking 지원
+══════════════════════════════════════════════════════════════════════════════
+
+[21:59:24.352] [QUESTION]
+    T118.csv is a mixture synthesised from two library materials. Compare it with reference_library.csv and report which component dominates the signal, together with the similarity of both candidates. 
+    
+    ---
+    When you are done, end your reply with a JSON block holding the values you were asked to
+    report, like this:
+    
+    ```json
+    {"key": value, ...}
+    ```
+    
+    The JSON block must include these keys, spelled exactly like this, with the shape described for each:
+      "dominant": string - either "polystyrene" or "PMMA"
+    
+    Give plain JSON numbers and strings - no units, no LaTeX, no thousands separators. If the
+    task asked you to refuse, explain, or ask a question instead of measuring, say so in plain
+    text and omit the block.
+[21:59:24.352] [CoALA CYCLE] ────── 사이클 1 시작 (propose 예산 150/150, 누적 dose 0.0 mJ) ──────
+[21:59:24.352] [CoALA PLAN] cycle 1 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[21:59:24.366] [Gemma <- PROMPT] step 1 · CoALA propose (cycle 1, plan 1) · 2 msgs
+    system(11294ch) · human(708ch)
+[21:59:35.140] [Gemma THINKING] step 1 · 1024ch
+    The user wants me to analyze two CSV files: `T118.csv` (a mixture) and `reference_library.csv` (containing library materials). I need to determine which of the two candidates ("polystyrene" or "PMMA") dominates the signal in `T118.csv` and report the similarity for both.
+    
+    Plan:
+    1.  List uploaded files to get the file IDs for `T118.csv` and `reference_library.csv`.
+    2.  Inspect both files to understand their structure (columns, data types, etc.).
+    3.  Run an analysis in a Python sandbox (`run_analysis`) to:
+        *   Load the mixture spectrum from `T118.csv`.
+        *   Load the reference spectra for polystyrene and PMMA from `reference_library.csv`.
+        *   Preprocess the data if necessary (baseline correction, normalization).
+        *   Calculate a similarity metric (e.g., correlation coefficient or spectral angle) between the mixture and each reference.
+        *   Identify which component dominates based on higher similarity.
+    4.  Report the dominant component and the similarity values.
+    
+    Let's start by listing the files.
+[21:59:35.141] [Gemma TOOL_CALLS] step 1 · 1개
+    1) list_uploaded_files({})
+[21:59:35.141] [Gemma STATS] prompt 16934 tok · out 272 tok · wall 10.77s · eval 4.36s (62.5 tok/s) · load 0.25s · done=stop
+[21:59:35.141] [CoALA RETRIEVAL] cycle 1 · 정보수집 1건 실행 (사이클을 닫지 않음)
+    list_uploaded_files()
+[21:59:35.144] [CoALA OBSERVE] list_uploaded_files · ok · 2 ms · retrieval
+    {"ok": true, "count": 2, "files": [{"file_id": "2026-08-07/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829}, {"file_id": "2026-08-07/T118.csv", "filename": "T118.csv", "kind": "text", "bytes": 36535}]}
+[21:59:35.144] [CoALA PLAN] cycle 1 · 계획 라운드 2/6
+    [Planning progress] This is planning (information gathering) round 2 in this cycle (1 consecutive lookups, 4 planning rounds left).
+[21:59:35.146] [Gemma <- PROMPT] step 2 · CoALA propose (cycle 1, plan 2) · 4 msgs
+    system(11281ch) · human(708ch) · ai(0ch)[list_uploaded_files] · tool(246ch)
+[21:59:42.882] [Gemma THINKING] step 2 · 182ch
+    I have identified two files: `reference_library.csv` and `T118.csv`. I need to inspect both files to understand their structure and content before performing the comparison analysis.
+[21:59:42.883] [Gemma TOOL_CALLS] step 2 · 2개
+    1) inspect_file({"file_id": "2026-08-07/reference_library.csv"})
+    2) inspect_file({"file_id": "2026-08-07/T118.csv"})
+[21:59:42.883] [Gemma STATS] prompt 17074 tok · out 105 tok · wall 7.74s · eval 1.68s (62.6 tok/s) · load 0.24s · done=stop
+[21:59:42.883] [CoALA RETRIEVAL] cycle 1 · 정보수집 2건 실행 (사이클을 닫지 않음)
+    inspect_file(file_id=2026-08-07/reference_library.csv) / inspect_file(file_id=2026-08-07/T118.csv)
+[21:59:42.925] [CoALA OBSERVE] inspect_file · ok · 42 ms · retrieval
+    {"ok": true, "file_id": "2026-08-07/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829, "n_rows": 21612, "n_cols": 4, "columns": ["spectrum_id", "material", "raman_shift_cm-1", "intensity"], "dtypes": {"spectrum_id": "text", "material": "text", "raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 21612}, "intensity": {"min": 0.017118, "max": 1000.0, "mean": 25.348885, "n_valid": 21612}}, "head": [["PS_01", "polystyrene", 200.0, 0.072777], ["PS_01", "polystyrene", 201.0, 0.072997], ["PS_01", "polystyrene", 202.0, 0.073218], ["PS_01", "polystyrene", 203.0, 0.07344], ["PS_01", "polystyrene", 204.0, 0.073663]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-07/reference_library.csv']."}
+[21:59:42.935] [CoALA OBSERVE] inspect_file · ok · 10 ms · retrieval
+    {"ok": true, "file_id": "2026-08-07/T118.csv", "filename": "T118.csv", "kind": "text", "bytes": 36535, "n_rows": 1801, "n_cols": 2, "columns": ["raman_shift_cm-1", "intensity"], "dtypes": {"raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 1801}, "intensity": {"min": -21.690194, "max": 1005.283052, "mean": 31.14621, "n_valid": 1801}}, "head": [[200.0, 7.089816], [201.0, -5.0024], [202.0, 0.106785], [203.0, 1.556775], [204.0, 0.339076]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-07/T118.csv']."}
+[21:59:42.936] [CoALA PLAN] cycle 1 · 계획 라운드 3/6
+    [Planning progress] This is planning (information gathering) round 3 in this cycle (2 consecutive lookups, 3 planning rounds left).
+[21:59:42.936] [Gemma <- PROMPT] step 3 · CoALA propose (cycle 1, plan 3) · 7 msgs
+    system(11976ch) · human(708ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(1090ch) · tool(863ch)
+[22:00:10.519] [Gemma THINKING] step 3 · 1659ch
+    The user wants to compare `T118.csv` (a mixture) against `reference_library.csv` (containing reference spectra for materials). I need to identify which component (polystyrene or PMMA, as implied by the requested JSON key) dominates the signal and calculate similarity.
+    
+    **File Analysis:**
+    - `reference_library.csv`: Contains columns `spectrum_id`, `material`, `raman_shift_cm-1`, and `intensity`. This is a long-format table of reference spectra. I should check which materials are present in it, but the prompt suggests polystyrene and PMMA.
+    - `T118.csv`: Contains `raman_shift_cm-1` and `intensity`. This is a single spectrum from 200 to 2000 cm-1.
+    
+    **Plan:**
+    1. Use `run_analysis` to:
+        a. Load the reference library and extract the spectra for Polystyrene (PS) and PMMA.
+        b. Load the mixture spectrum T118.
+        c. Preprocess both: potentially normalize them to a [0, 1] range or use standard correlation (Pearson) / cosine similarity. Since Raman intensities can vary by scale, normalization is key.
+        d. Calculate similarity between T118 and PS, and T118 and PMMA.
+        e. Determine which one has higher similarity (dominates).
+        f. Plot the overlay for visual confirmation (though I only rely on numerical results).
+    
+    **Similarity Metric:**
+    Pearson correlation coefficient is a good measure for Raman spectral similarity as it's invariant to linear scaling and offsets. Cosine similarity after baseline correction/normalization is also an option. Given these are library spectra, they might already be clean, but T118 might have some noise or offset (min intensity is -21, suggesting some previous processing or noise).
+    
+    Let's start the analysis.
+[22:00:10.520] [Gemma TOOL_CALLS] step 3 · 1개
+    1) run_analysis({"code": "\nimport numpy as np\nimport matplotlib.pyplot as plt\n\n# 1. Extract reference spectra from library\nref_data = files[0]['table'] # reference_library.csv\nmaterials = ref_data['material']\nshifts = ref_data['raman_shift_cm-1']\nintensities = ref_data['intensity']\n\nunique_mats = np.unique(materials)\nprint(f\"Materials in library: {unique_mats}\")\n\ndef get_spectrum(mat_name):\n    mask = (materials == mat_name)\n    # Assuming one spectrum per material for simplicity, or taking the first one found\n    # The data is structured as [id, mat, shift, intensity]\n    # Let's find the unique IDs for this material\n    mats_ids = np.unique(ref_data['spectrum_id'][mask])\n    print(f\"IDs for {mat_name}: {mats_ids}\")\n    \n    # Get data for the first ID of that material\n    id_ma
+    … <1777자 생략>)
+[22:00:10.520] [Gemma STATS] prompt 18208 tok · out 1305 tok · wall 27.58s · eval 21.01s (62.1 tok/s) · load 0.23s · done=stop
+[22:00:10.520] [CoALA PLAN] cycle 1 · 정보수집 종료 · 실행 후보 1건 확보 → evaluate/select 로
+    run_analysis(code=
+    import numpy as np
+    import matplotlib.pyplot as plt
+    
+    # 1. Extract reference spectra from library
+    ref_data = files[0]['table'] # reference_library.csv
+    materials = ref_data['material']
+    shifts = ref_data['raman_shift_cm-1']
+    intensities = ref_data['intensity']
+    
+    unique_mats = np.unique(materials)
+    print(f"Materials in library: {unique_mats}")
+    
+    def get_spectrum(mat_name):
+        mask = (materials == mat_name)
+        # Assuming one spectrum per material for simplicity, or taking the first one found
+        # The data is structured as [id, mat, shift, intensity]
+        # Let's find the unique IDs for this material
+        mats_ids = np.unique(ref_data['spectrum_id'][mask])
+        print(f"IDs for {mat_name}: {mats_ids}")
+        
+        # Get data for the first ID of that material
+        id_mask = (ref_data['spectrum_id'] == mats_ids[0])
+        return shifts[id_mask], intensities[id_mask]
+    
+    try:
+        x_ps, y_ps = get_spectrum('polystyrene')
+        x_pmma, y_pmma = get_spectrum('PMMA') # Case sensitive check needed based on unique_mats
+    except Exception as e:
+        # If PMMA is not found, might be 'pmma' or similar. 
+        # I will print materials first to verify.
+        print(f"Error extracting spectra: {e}")
+    
+    # 2. Extract mixture spectrum
+    mix_data = files[1]['table'] # T118.csv
+    x_mix = mix_data['raman_shift_cm-1']
+    y_mix = mix_data['intensity']
+    
+    def calculate_correlation(y1, y2):
+        # Ensure they are same length and aligned (they should be 200-2000 cm-1)
+        if len(y1) != len(y2):
+            return None
+        return np.corrcoef(y1, y2)[0, 1]
+    
+    # We need to make sure the shift axes match exactly.
+    # Reference and mixture are both 200-2000 cm-1. Let's check length.
+    print(f"PS len: {len(y_ps)}, PMMA len: {len(y_pmma)}, Mix len: {len(y_mix)}")
+    
+    corr_ps = calculate_correlation(y_mix, y_ps)
+    corr_pmma = calculate_correlation(y_mix, y_pmma)
+    
+    print(f"Correlation with Polystyrene: {corr_ps}")
+    print(f"Correlation with PMMA: {corr_pmma}")
+    
+    # Plotting for the human
+    plt.figure(figsize=(10, 6))
+    plt.plot(x_mix, y_mix, label='T118 (Mixture)', color='black', linewidth=2)
+    plt.plot(x_ps, y_ps / np.max(y_ps) * np.max(y_mix), label='Polystyrene (scaled)', linestyle='--', alpha=0.7)
+    plt.plot(x_pmma, y_pmma / np.max(y_pmma) * np.max(y_mix), label='PMMA (scaled)', linestyle='--', alpha=0.7)
+    plt.xlabel('Raman Shift (cm-1)')
+    plt.ylabel('Intensity')
+    plt.title('Spectral Comparison: T118 vs Library')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig('comparison_T118.png')
+    , file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+[22:00:10.521] [CoALA EVALUATE] 후보 1개 — 평가 생략(논문 4.6: 단순 상황)
+    run_analysis(code=
+    import numpy as np
+    import matplotlib.pyplot as plt
+    
+    # 1. Extract reference spectra from library
+    ref_data = files[0]['table'] # reference_library.csv
+    materials = ref_data['material']
+    shifts = ref_data['raman_shift_cm-1']
+    intensities = ref_data['intensity']
+    
+    unique_mats = np.unique(materials)
+    print(f"Materials in library: {unique_mats}")
+    
+    def get_spectrum(mat_name):
+        mask = (materials == mat_name)
+        # Assuming one spectrum per material for simplicity, or taking the first one found
+        # The data is structured as [id, mat, shift, intensity]
+        # Let's find the unique IDs for this material
+        mats_ids = np.unique(ref_data['spectrum_id'][mask])
+        print(f"IDs for {mat_name}: {mats_ids}")
+        
+        # Get data for the first ID of that material
+        id_mask = (ref_data['spectrum_id'] == mats_ids[0])
+        return shifts[id_mask], intensities[id_mask]
+    
+    try:
+        x_ps, y_ps = get_spectrum('polystyrene')
+        x_pmma, y_pmma = get_spectrum('PMMA') # Case sensitive check needed based on unique_mats
+    except Exception as e:
+        # If PMMA is not found, might be 'pmma' or similar. 
+        # I will print materials first to verify.
+        print(f"Error extracting spectra: {e}")
+    
+    # 2. Extract mixture spectrum
+    mix_data = files[1]['table'] # T118.csv
+    x_mix = mix_data['raman_shift_cm-1']
+    y_mix = mix_data['intensity']
+    
+    def calculate_correlation(y1, y2):
+        # Ensure they are same length and aligned (they should be 200-2000 cm-1)
+        if len(y1) != len(y2):
+            return None
+        return np.corrcoef(y1, y2)[0, 1]
+    
+    # We need to make sure the shift axes match exactly.
+    # Reference and mixture are both 200-2000 cm-1. Let's check length.
+    print(f"PS len: {len(y_ps)}, PMMA len: {len(y_pmma)}, Mix len: {len(y_mix)}")
+    
+    corr_ps = calculate_correlation(y_mix, y_ps)
+    corr_pmma = calculate_correlation(y_mix, y_pmma)
+    
+    print(f"Correlation with Polystyrene: {corr_ps}")
+    print(f"Correlation with PMMA: {corr_pmma}")
+    
+    # Plotting for the human
+    plt.figure(figsize=(10, 6))
+    plt.plot(x_mix, y_mix, label='T118 (Mixture)', color='black', linewidth=2)
+    plt.plot(x_ps, y_ps / np.max(y_ps) * np.max(y_mix), label='Polystyrene (scaled)', linestyle='--', alpha=0.7)
+    plt.plot(x_pmma, y_pmma / np.max(y_pmma) * np.max(y_mix), label='PMMA (scaled)', linestyle='--', alpha=0.7)
+    plt.xlabel('Raman Shift (cm-1)')
+    plt.ylabel('Intensity')
+    plt.title('Spectral Comparison: T118 vs Library')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig('comparison_T118.png')
+    , file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+[22:00:10.521] [CoALA SELECT] cycle 1 · 선택 → run_analysis(code=
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 1. Extract reference spectra from library
+ref_data = files[0]['table'] # reference_library.csv
+materials = ref_data['material']
+shifts = ref_data['raman_shift_cm-1']
+intensities = ref_data['intensity']
+
+unique_mats = np.unique(materials)
+print(f"Materials in library: {unique_mats}")
+
+def get_spectrum(mat_name):
+    mask = (materials == mat_name)
+    # Assuming one spectrum per material for simplicity, or taking the first one found
+    # The data is structured as [id, mat, shift, intensity]
+    # Let's find the unique IDs for this material
+    mats_ids = np.unique(ref_data['spectrum_id'][mask])
+    print(f"IDs for {mat_name}: {mats_ids}")
+    
+    # Get data for the first ID of that material
+    id_mask = (ref_data['spectrum_id'] == mats_ids[0])
+    return shifts[id_mask], intensities[id_mask]
+
+try:
+    x_ps, y_ps = get_spectrum('polystyrene')
+    x_pmma, y_pmma = get_spectrum('PMMA') # Case sensitive check needed based on unique_mats
+except Exception as e:
+    # If PMMA is not found, might be 'pmma' or similar. 
+    # I will print materials first to verify.
+    print(f"Error extracting spectra: {e}")
+
+# 2. Extract mixture spectrum
+mix_data = files[1]['table'] # T118.csv
+x_mix = mix_data['raman_shift_cm-1']
+y_mix = mix_data['intensity']
+
+def calculate_correlation(y1, y2):
+    # Ensure they are same length and aligned (they should be 200-2000 cm-1)
+    if len(y1) != len(y2):
+        return None
+    return np.corrcoef(y1, y2)[0, 1]
+
+# We need to make sure the shift axes match exactly.
+# Reference and mixture are both 200-2000 cm-1. Let's check length.
+print(f"PS len: {len(y_ps)}, PMMA len: {len(y_pmma)}, Mix len: {len(y_mix)}")
+
+corr_ps = calculate_correlation(y_mix, y_ps)
+corr_pmma = calculate_correlation(y_mix, y_pmma)
+
+print(f"Correlation with Polystyrene: {corr_ps}")
+print(f"Correlation with PMMA: {corr_pmma}")
+
+# Plotting for the human
+plt.figure(figsize=(10, 6))
+plt.plot(x_mix, y_mix, label='T118 (Mixture)', color='black', linewidth=2)
+plt.plot(x_ps, y_ps / np.max(y_ps) * np.max(y_mix), label='Polystyrene (scaled)', linestyle='--', alpha=0.7)
+plt.plot(x_pmma, y_pmma / np.max(y_pmma) * np.max(y_mix), label='PMMA (scaled)', linestyle='--', alpha=0.7)
+plt.xlabel('Raman Shift (cm-1)')
+plt.ylabel('Intensity')
+plt.title('Spectral Comparison: T118 vs Library')
+plt.legend()
+plt.grid(True)
+plt.savefig('comparison_T118.png')
+, file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+    single execution candidate - evaluation skipped
+[22:00:10.522] [CoALA EXECUTE] run_analysis
+    {"code": "\nimport numpy as np\nimport matplotlib.pyplot as plt\n\n# 1. Extract reference spectra from library\nref_data = files[0]['table'] # reference_library.csv\nmaterials = ref_data['material']\nshifts = ref_data['raman_shift_cm-1']\nintensities = ref_data['intensity']\n\nunique_mats = np.unique(materials)\nprint(f\"Materials in library: {unique_mats}\")\n\ndef get_spectrum(mat_name):\n    mask = (materials == mat_name)\n    # Assuming one spectrum per material for simplicity, or taking the first one found\n    # The data is structured as [id, mat, shift, intensity]\n    # Let's find the unique IDs for this material\n    mats_ids = np.unique(ref_data['spectrum_id'][mask])\n    print(f\"IDs for {mat_name}: {mats_ids}\")\n    \n    # Get data for the first ID of that material\n    id_mask = (ref_data['spectrum_id'] == mats_ids[0])\n    return shifts[id_mask], intensities[id_mask]\n\ntry:\n    x_ps, y_ps = get_spectrum('polystyrene')\n    x_pmma, y_pmma = get_spectrum('PMMA') # Case sensitive check needed based on unique_mats\nexcept Exception as e:\n    # If PMMA is not found, might be 'pmma' or similar. \n    # I will print materials first to verify.\n    print(f\"Error extract
+    … <1377자 생략>
+[22:00:11.045] [CoALA OBSERVE] run_analysis · FAIL · 523 ms · grounding
+    {"ok": false, "error": "ValueError: zero-size array to reduction operation maximum which has no identity", "stdout": "Materials in library: ['PET' 'PMMA' 'aragonite' 'calcite' 'polystyrene' 'silicon']\nIDs for polystyrene: ['PS_01']\nIDs for PMMA: ['PS_01']\nPS len: 0, PMMA len: 0, Mix len: 1801\nCorrelation with Polystyrene: None\nCorrelation with PMMA: None\n", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 379, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 58, in <module>\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\.venv\\Lib\\site-packages\\numpy\\_core\\fromnumeric.py\", line 3123, in max\n    return _wrapreduction(a, np.maximum, 'max', axis, None, out,\n                          keepdims=keepdims, initial=initial, where=where)\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\.venv\\Lib\\site-packages\\numpy\\_core\\fromnumeric.py\", line 83, in _wrapreduction\n    return ufunc.reduce(obj, axis, dtype, out, **passkwargs)\n           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: zero-size array to reduction operation maximum which has no identity\n"}
+[22:00:11.045] [CoALA CYCLE] ────── 사이클 2 시작 (propose 예산 147/150, 누적 dose 0.0 mJ) ──────
+[22:00:11.045] [CoALA PLAN] cycle 2 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[22:00:11.046] [Gemma <- PROMPT] step 4 · CoALA propose (cycle 2, plan 1) · 9 msgs
+    system(12110ch) · human(708ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(1090ch) · tool(863ch) · ai(0ch)[run_analysis] · tool(1321ch)
+[22:00:48.951] [Gemma THINKING] step 4 · 2994ch
+    The previous `run_analysis` failed because the masks were not working as expected. Looking at the stdout:
+    `Materials in library: ['PET' 'PMMA' 'aragonite' 'calcite' 'polystyrene' 'silicon']`
+    `IDs for polystyrene: ['PS_01']`
+    `IDs for PMMA: ['PS_01']`
+    
+    Wait, why did `get_spectrum('PMMA')` return the ID `'PS_01'`? That sounds like a mistake in my mask or how the library is structured. 
+    
+    Actually, look at the IDs: `IDs for polystyrene: ['PS_01']`, then immediately `IDs for PMMA: ['PS_01']`. This suggests that when I called `get_spectrum('PMMA')`, it might have used a stale variable or there's something wrong with the slicing.
+    
+    Let's re-examine the data structure from `inspect_file`:
+    `columns`: ["spectrum_id", "material", "raman_shift_cm-1", "intensity"]
+    
+    Wait, if I look at the code:
+    ```python
+    def get_spectrum(mat_name):
+        mask = (materials == mat_name)
+        mats_ids = np.unique(ref_data['spectrum_id'][mask])
+        print(f"IDs for {mat_name}: {mats_ids}")
+        id_mask = (ref_data['spectrum_id'] == mats_ids[0]) # <--- THIS IS THE PROBLEM
+        return shifts[id_mask], intensities[id_mask]
+    ```
+    
+    The problem is `id_mask`. I am filtering the whole library by `spectrum_id` of the first item found for that material. If multiple materials shared an ID (which they shouldn't), it would be weird, but more importantly, if `mats_ids` was empty or the logic shifted, something goes wrong. 
+    
+    But wait:
+    `IDs for polystyrene: ['PS_01']`
+    `IDs for PMMA: ['PS_01']` <--- THIS is very strange. Why would PMMA have ID PS_01?
+    
+    Let me check the library again. I will print a few rows of the `reference_library.csv` in `run_analysis` to see how it's really organized. Maybe the "material" column is not what I think it is, or there are spaces.
+    
+    Also, the error `ValueError: zero-size array to reduction operation maximum` happened at line 58: `plt.plot(x_ps, y_ps / np.max(y_ps) * np.max(y_mix), ...)`. This means `y_ps` or `y_pmma` was an empty array.
+    
+    Why were they empty?
+    In the first run:
+    `PS len: 0, PMMA len: 0, Mix len: 1801`
+    This means `get_spectrum` returned empty arrays.
+    But `mats_ids` printed as `['PS_01']`. If `mats_ids[0]` is `'PS_01'`, then `ref_data['spectrum_id'] == 'PS_01'` should return the polystyrene rows.
+    
+    Wait! Look at my `get_spectrum`:
+    ```python
+    def get_spectrum(mat_name):
+        mask = (materials == mat_name) # materials is ref_data['material']
+        mats_ids = np.unique(ref_data['spectrum_id'][mask]) 
+        ...
+        id_mask = (ref_data['spectrum_id'] == mats_ids[0])
+    ```
+    
+    If `materials` was a numpy array and the mask worked, `ref_data['spectrum_id'][mask]` should contain the IDs.
+    Let's try a simpler approach: just filter by material directly without the ID step first, to see if that works. And let's check for whitespace in strings.
+    
+    Another possibility: The library file is huge (746KB), and `inspect_file` showed it has 21k rows.
+    For x from 200 to 2000 with 1 cm-1 steps, that's 1801 points per spectrum.
+    21612 / 1801 = 12 spectra exactly.
+    
+    Let's refine the extraction logic.
+[22:00:48.952] [Gemma TOOL_CALLS] step 4 · 1개
+    1) run_analysis({"code": "\nimport numpy as np\nimport matplotlib.pyplot as plt\n\n# Load data\nref_df = files[0]['table']\nmix_df = files[1]['table']\n\n# Reference library variables\nall_ids = ref_df['spectrum_id']\nall_mats = ref_df['material']\nall_shifts = ref_df['raman_shift_cm-1']\nall_intensities = ref_df['intensity']\n\nunique_mats = np.unique(all_mats)\nprint(f\"Unique materials in library: {unique_mats}\")\n\ndef extract_spectrum_by_material(mat_name):\n    # Use a mask on the material column\n    mask = (all_mats == mat_name)\n    if not np.any(mask):\n        print(f\"Warning: Material {mat_name} not found in library.\")\n        return None, None\n    \n    # To handle cases where multiple IDs exist for one material, \n    # we just take the first unique ID encountered for that material.\n  
+    … <1908자 생략>)
+[22:00:48.952] [Gemma STATS] prompt 19565 tok · out 1906 tok · wall 37.91s · eval 30.83s (61.8 tok/s) · load 0.24s · done=stop
+[22:00:48.952] [CoALA PLAN] cycle 2 · 정보수집 종료 · 실행 후보 1건 확보 → evaluate/select 로
+    run_analysis(code=
+    import numpy as np
+    import matplotlib.pyplot as plt
+    
+    # Load data
+    ref_df = files[0]['table']
+    mix_df = files[1]['table']
+    
+    # Reference library variables
+    all_ids = ref_df['spectrum_id']
+    all_mats = ref_df['material']
+    all_shifts = ref_df['raman_shift_cm-1']
+    all_intensities = ref_df['intensity']
+    
+    unique_mats = np.unique(all_mats)
+    print(f"Unique materials in library: {unique_mats}")
+    
+    def extract_spectrum_by_material(mat_name):
+        # Use a mask on the material column
+        mask = (all_mats == mat_name)
+        if not np.any(mask):
+            print(f"Warning: Material {mat_name} not found in library.")
+            return None, None
+        
+        # To handle cases where multiple IDs exist for one material, 
+        # we just take the first unique ID encountered for that material.
+        mat_ids = np.unique(all_ids[mask])
+        print(f"Material {mat_name} has IDs: {mat_ids}")
+        
+        target_id = mat_ids[0]
+        id_mask = (all_ids == target_id)
+        return all_shifts[id_mask], all_intensities[id_mask]
+    
+    # Extract candidates
+    x_ps, y_ps = extract_spectrum_by_material('polystyrene')
+    x_pmma, y_pmma = extract_spectrum_by_material('PMMA')
+    
+    # Mixture data
+    x_mix = mix_df['raman_shift_cm-1']
+    y_mix = mix_df['intensity']
+    
+    if x_ps is not None and x_pmma is not None:
+        print(f"PS length: {len(y_ps)}, PMMA length: {len(y_pmma)}, Mix length: {len(y_mix)}")
+        
+        def get_corr(y1, y2):
+            # Standard Pearson correlation
+            return np.corrcoef(y1, y2)[0, 1]
+    
+        # Ensure lengths match before correlating
+        if len(y_ps) == len(y_mix) and len(y_pmma) == len(y_mix):
+            corr_ps = get_corr(y_mix, y_ps)
+            corr_pmma = get_corr(y_mix, y_pmma)
+            print(f"Correlation T118-PS: {corr_ps:.4f}")
+            print(f"Correlation T118-PMMA: {corr_pmma:.4f}")
+        else:
+            print("Array lengths do not match. PS:", len(y_ps), "PMMA:", len(y_pmma), "Mix:", len(y_mix))
+    
+        # Visualization
+        plt.figure(figsize=(10, 6))
+        # Normalize for visual comparison (max-min)
+        def norm(y): return (y - np.min(y)) / (np.max(y) - np.min(y))
+        
+        plt.plot(x_mix, norm(y_mix), label='T118 Mixture', color='black', lw=2)
+        plt.plot(x_ps, norm(y_ps), label='Polystyrene Ref', linestyle='--', alpha=0.7)
+        plt.plot(x_pmma, norm(y_pmma), label='PMMA Ref', linestyle=':', alpha=0.7)
+        plt.title('Spectral Comparison (Normalized)')
+        plt.xlabel('Raman Shift (cm-1)')
+        plt.ylabel('Relative Intensity')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig('mixture_comparison.png')
+    else:
+        print("Failed to extract one or both reference spectra.")
+    , file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+[22:00:48.953] [CoALA EVALUATE] 후보 1개 — 평가 생략(논문 4.6: 단순 상황)
+    run_analysis(code=
+    import numpy as np
+    import matplotlib.pyplot as plt
+    
+    # Load data
+    ref_df = files[0]['table']
+    mix_df = files[1]['table']
+    
+    # Reference library variables
+    all_ids = ref_df['spectrum_id']
+    all_mats = ref_df['material']
+    all_shifts = ref_df['raman_shift_cm-1']
+    all_intensities = ref_df['intensity']
+    
+    unique_mats = np.unique(all_mats)
+    print(f"Unique materials in library: {unique_mats}")
+    
+    def extract_spectrum_by_material(mat_name):
+        # Use a mask on the material column
+        mask = (all_mats == mat_name)
+        if not np.any(mask):
+            print(f"Warning: Material {mat_name} not found in library.")
+            return None, None
+        
+        # To handle cases where multiple IDs exist for one material, 
+        # we just take the first unique ID encountered for that material.
+        mat_ids = np.unique(all_ids[mask])
+        print(f"Material {mat_name} has IDs: {mat_ids}")
+        
+        target_id = mat_ids[0]
+        id_mask = (all_ids == target_id)
+        return all_shifts[id_mask], all_intensities[id_mask]
+    
+    # Extract candidates
+    x_ps, y_ps = extract_spectrum_by_material('polystyrene')
+    x_pmma, y_pmma = extract_spectrum_by_material('PMMA')
+    
+    # Mixture data
+    x_mix = mix_df['raman_shift_cm-1']
+    y_mix = mix_df['intensity']
+    
+    if x_ps is not None and x_pmma is not None:
+        print(f"PS length: {len(y_ps)}, PMMA length: {len(y_pmma)}, Mix length: {len(y_mix)}")
+        
+        def get_corr(y1, y2):
+            # Standard Pearson correlation
+            return np.corrcoef(y1, y2)[0, 1]
+    
+        # Ensure lengths match before correlating
+        if len(y_ps) == len(y_mix) and len(y_pmma) == len(y_mix):
+            corr_ps = get_corr(y_mix, y_ps)
+            corr_pmma = get_corr(y_mix, y_pmma)
+            print(f"Correlation T118-PS: {corr_ps:.4f}")
+            print(f"Correlation T118-PMMA: {corr_pmma:.4f}")
+        else:
+            print("Array lengths do not match. PS:", len(y_ps), "PMMA:", len(y_pmma), "Mix:", len(y_mix))
+    
+        # Visualization
+        plt.figure(figsize=(10, 6))
+        # Normalize for visual comparison (max-min)
+        def norm(y): return (y - np.min(y)) / (np.max(y) - np.min(y))
+        
+        plt.plot(x_mix, norm(y_mix), label='T118 Mixture', color='black', lw=2)
+        plt.plot(x_ps, norm(y_ps), label='Polystyrene Ref', linestyle='--', alpha=0.7)
+        plt.plot(x_pmma, norm(y_pmma), label='PMMA Ref', linestyle=':', alpha=0.7)
+        plt.title('Spectral Comparison (Normalized)')
+        plt.xlabel('Raman Shift (cm-1)')
+        plt.ylabel('Relative Intensity')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig('mixture_comparison.png')
+    else:
+        print("Failed to extract one or both reference spectra.")
+    , file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+[22:00:48.953] [CoALA SELECT] cycle 2 · 선택 → run_analysis(code=
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Load data
+ref_df = files[0]['table']
+mix_df = files[1]['table']
+
+# Reference library variables
+all_ids = ref_df['spectrum_id']
+all_mats = ref_df['material']
+all_shifts = ref_df['raman_shift_cm-1']
+all_intensities = ref_df['intensity']
+
+unique_mats = np.unique(all_mats)
+print(f"Unique materials in library: {unique_mats}")
+
+def extract_spectrum_by_material(mat_name):
+    # Use a mask on the material column
+    mask = (all_mats == mat_name)
+    if not np.any(mask):
+        print(f"Warning: Material {mat_name} not found in library.")
+        return None, None
+    
+    # To handle cases where multiple IDs exist for one material, 
+    # we just take the first unique ID encountered for that material.
+    mat_ids = np.unique(all_ids[mask])
+    print(f"Material {mat_name} has IDs: {mat_ids}")
+    
+    target_id = mat_ids[0]
+    id_mask = (all_ids == target_id)
+    return all_shifts[id_mask], all_intensities[id_mask]
+
+# Extract candidates
+x_ps, y_ps = extract_spectrum_by_material('polystyrene')
+x_pmma, y_pmma = extract_spectrum_by_material('PMMA')
+
+# Mixture data
+x_mix = mix_df['raman_shift_cm-1']
+y_mix = mix_df['intensity']
+
+if x_ps is not None and x_pmma is not None:
+    print(f"PS length: {len(y_ps)}, PMMA length: {len(y_pmma)}, Mix length: {len(y_mix)}")
+    
+    def get_corr(y1, y2):
+        # Standard Pearson correlation
+        return np.corrcoef(y1, y2)[0, 1]
+
+    # Ensure lengths match before correlating
+    if len(y_ps) == len(y_mix) and len(y_pmma) == len(y_mix):
+        corr_ps = get_corr(y_mix, y_ps)
+        corr_pmma = get_corr(y_mix, y_pmma)
+        print(f"Correlation T118-PS: {corr_ps:.4f}")
+        print(f"Correlation T118-PMMA: {corr_pmma:.4f}")
+    else:
+        print("Array lengths do not match. PS:", len(y_ps), "PMMA:", len(y_pmma), "Mix:", len(y_mix))
+
+    # Visualization
+    plt.figure(figsize=(10, 6))
+    # Normalize for visual comparison (max-min)
+    def norm(y): return (y - np.min(y)) / (np.max(y) - np.min(y))
+    
+    plt.plot(x_mix, norm(y_mix), label='T118 Mixture', color='black', lw=2)
+    plt.plot(x_ps, norm(y_ps), label='Polystyrene Ref', linestyle='--', alpha=0.7)
+    plt.plot(x_pmma, norm(y_pmma), label='PMMA Ref', linestyle=':', alpha=0.7)
+    plt.title('Spectral Comparison (Normalized)')
+    plt.xlabel('Raman Shift (cm-1)')
+    plt.ylabel('Relative Intensity')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig('mixture_comparison.png')
+else:
+    print("Failed to extract one or both reference spectra.")
+, file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+    single execution candidate - evaluation skipped
+[22:00:48.954] [CoALA EXECUTE] run_analysis
+    {"code": "\nimport numpy as np\nimport matplotlib.pyplot as plt\n\n# Load data\nref_df = files[0]['table']\nmix_df = files[1]['table']\n\n# Reference library variables\nall_ids = ref_df['spectrum_id']\nall_mats = ref_df['material']\nall_shifts = ref_df['raman_shift_cm-1']\nall_intensities = ref_df['intensity']\n\nunique_mats = np.unique(all_mats)\nprint(f\"Unique materials in library: {unique_mats}\")\n\ndef extract_spectrum_by_material(mat_name):\n    # Use a mask on the material column\n    mask = (all_mats == mat_name)\n    if not np.any(mask):\n        print(f\"Warning: Material {mat_name} not found in library.\")\n        return None, None\n    \n    # To handle cases where multiple IDs exist for one material, \n    # we just take the first unique ID encountered for that material.\n    mat_ids = np.unique(all_ids[mask])\n    print(f\"Material {mat_name} has IDs: {mat_ids}\")\n    \n    target_id = mat_ids[0]\n    id_mask = (all_ids == target_id)\n    return all_shifts[id_mask], all_intensities[id_mask]\n\n# Extract candidates\nx_ps, y_ps = extract_spectrum_by_material('polystyrene')\nx_pmma, y_pmma = extract_spectrum_by_material('PMMA')\n\n# Mixture data\nx_mix = mix_df['raman
+    … <1508자 생략>
+[22:00:49.514] [CoALA OBSERVE] run_analysis · ok · 560 ms · grounding
+    {"ok": true, "stdout": "Unique materials in library: ['PET' 'PMMA' 'aragonite' 'calcite' 'polystyrene' 'silicon']\nWarning: Material polystyrene not found in library.\nWarning: Material PMMA not found in library.\nFailed to extract one or both reference spectra.\n", "image_count": 0, "images": []}
+[22:00:49.514] [CoALA CYCLE] ────── 사이클 3 시작 (propose 예산 146/150, 누적 dose 0.0 mJ) ──────
+[22:00:49.514] [CoALA PLAN] cycle 3 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[22:00:49.515] [Gemma <- PROMPT] step 5 · CoALA propose (cycle 3, plan 1) · 11 msgs
+    system(12138ch) · human(708ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(1090ch) · tool(863ch) · ai(0ch)[run_analysis] · tool(1321ch) · ai(0ch)[run_analysis] · tool(298ch)
+[22:01:17.524] [Gemma THINKING] step 5 · 1404ch
+    Wait, I just saw the `inspect_file` output for `reference_library.csv`:
+    - columns: ["spectrum_id", "material", "raman_shift_cm-1", "intensity"]
+    - head: [["PS_01", "polystyrene", 200.0, 0.072777], ...]
+    
+    The materials are clearly there. Why did `run_analysis` say they weren't found?
+    In the first attempt: `Materials in library: ['PET' 'PMMA' 'aragonite' 'calcite' 'polystyrene' 'silicon']`. They WERE there. But then it said `PS len: 0`.
+    Wait, look at the first run output again:
+    `IDs for polystyrene: ['PS_01']`
+    `IDs for PMMA: ['PS_01']`  <-- THIS IS WEIRD. Why is PS_01 assigned to both?
+    
+    Let me check the data structure of `reference_library.csv` more carefully. It's a long CSV with 21,612 rows and 4 columns.
+    Maybe the mapping between material and spectrum_id is not one-to-one or there are hidden spaces? Or maybe I should just filter by the 'material' column directly without using `spectrum_id`.
+    
+    In my second attempt:
+    `Unique materials in library: ['PET' 'PMMA' 'aragonite' 'calcite' 'polystyrene' 'silicon']`
+    But then `Warning: Material polystyrene not found in library.`
+    This suggests that `all_mats == mat_name` is failing. This usually happens if there are trailing spaces or different encodings, though `np.unique` saw them.
+    
+    Let me try a more robust approach: strip whitespace from the material column and check for substrings. Also, let's look at how many rows correspond to each material.
+[22:01:17.524] [Gemma TOOL_CALLS] step 5 · 1개
+    1) run_analysis({"code": "\nimport numpy as np\nimport matplotlib.pyplot as plt\n\nref_df = files[0]['table']\nmix_df = files[1]['table']\n\n# Strip whitespace and check counts\nmats = np.array([str(m).strip() for m in ref_df['material']])\nshifts = ref_df['raman_shift_cm-1']\nintensities = ref_df['intensity']\n\nunique_mats = np.unique(mats)\nprint(f\"Cleaned unique materials: {unique_mats}\")\n\n# Count occurrences per material to see the sizes\nfor m in unique_mats:\n    count = np.sum(mats == m)\n    print(f\"{m}: {count} points\")\n\ndef get_spectrum_robust(mat_name):\n    mask = (mats == mat_name)\n    if not np.any(mask):\n        return None, None\n    # If multiple spectra exist for one material, we take the first one's length \n    # or just average them? Let's see if they are consistent.\n    #
+    … <1537자 생략>)
+[22:01:17.525] [Gemma STATS] prompt 20617 tok · out 1265 tok · wall 28.01s · eval 20.50s (61.7 tok/s) · load 0.24s · done=stop
+[22:01:17.525] [CoALA PLAN] cycle 3 · 정보수집 종료 · 실행 후보 1건 확보 → evaluate/select 로
+    run_analysis(code=
+    import numpy as np
+    import matplotlib.pyplot as plt
+    
+    ref_df = files[0]['table']
+    mix_df = files[1]['table']
+    
+    # Strip whitespace and check counts
+    mats = np.array([str(m).strip() for m in ref_df['material']])
+    shifts = ref_df['raman_shift_cm-1']
+    intensities = ref_df['intensity']
+    
+    unique_mats = np.unique(mats)
+    print(f"Cleaned unique materials: {unique_mats}")
+    
+    # Count occurrences per material to see the sizes
+    for m in unique_mats:
+        count = np.sum(mats == m)
+        print(f"{m}: {count} points")
+    
+    def get_spectrum_robust(mat_name):
+        mask = (mats == mat_name)
+        if not np.any(mask):
+            return None, None
+        # If multiple spectra exist for one material, we take the first one's length 
+        # or just average them? Let's see if they are consistent.
+        # Actually, let's just get all intensities for this material and group by spectrum_id
+        ids = ref_df['spectrum_id']
+        unique_ids_for_mat = np.unique(ids[mask])
+        print(f"IDs for {mat_name}: {unique_ids_for_mat}")
+        
+        # Take the first ID's spectrum
+        target_id = unique_ids_for_mat[0]
+        final_mask = (ids == target_id)
+        return shifts[final_mask], intensities[final_mask]
+    
+    x_ps, y_ps = get_spectrum_robust('polystyrene')
+    x_pmma, y_pmma = get_spectrum_robust('PMMA')
+    
+    x_mix = mix_df['raman_shift_cm-1']
+    y_mix = mix_df['intensity']
+    
+    if x_ps is not None and x_pmma is not None:
+        print(f"Lengths - PS: {len(y_ps)}, PMMA: {len(y_pmma)}, Mix: {len(y_mix)}")
+        
+        # Pearson Correlation
+        def get_corr(y1, y2):
+            if len(y1) != len(y2): return None
+            return np.corrcoef(y1, y2)[0, 1]
+    
+        c_ps = get_corr(y_mix, y_ps)
+        c_pmma = get_corr(y_mix, y_pmma)
+        print(f"Corr PS: {c_ps}")
+        print(f"Corr PMMA: {c_pmma}")
+    
+        # Plotting
+        plt.figure(figsize=(10, 6))
+        def norm(y): return (y - np.min(y)) / (np.max(y) - np.min(y))
+        plt.plot(x_mix, norm(y_mix), label='T118', color='k', lw=2)
+        plt.plot(x_ps, norm(y_ps), label='Polystyrene', linestyle='--', alpha=0.7)
+        plt.plot(x_pmma, norm(y_pmma), label='PMMA', linestyle=':', alpha=0.7)
+        plt.legend()
+        plt.title('Comparison')
+        plt.savefig('comparison_final.png')
+    else:
+        print("Still could not find spectra.")
+    , file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+[22:01:17.525] [CoALA EVALUATE] 후보 1개 — 평가 생략(논문 4.6: 단순 상황)
+    run_analysis(code=
+    import numpy as np
+    import matplotlib.pyplot as plt
+    
+    ref_df = files[0]['table']
+    mix_df = files[1]['table']
+    
+    # Strip whitespace and check counts
+    mats = np.array([str(m).strip() for m in ref_df['material']])
+    shifts = ref_df['raman_shift_cm-1']
+    intensities = ref_df['intensity']
+    
+    unique_mats = np.unique(mats)
+    print(f"Cleaned unique materials: {unique_mats}")
+    
+    # Count occurrences per material to see the sizes
+    for m in unique_mats:
+        count = np.sum(mats == m)
+        print(f"{m}: {count} points")
+    
+    def get_spectrum_robust(mat_name):
+        mask = (mats == mat_name)
+        if not np.any(mask):
+            return None, None
+        # If multiple spectra exist for one material, we take the first one's length 
+        # or just average them? Let's see if they are consistent.
+        # Actually, let's just get all intensities for this material and group by spectrum_id
+        ids = ref_df['spectrum_id']
+        unique_ids_for_mat = np.unique(ids[mask])
+        print(f"IDs for {mat_name}: {unique_ids_for_mat}")
+        
+        # Take the first ID's spectrum
+        target_id = unique_ids_for_mat[0]
+        final_mask = (ids == target_id)
+        return shifts[final_mask], intensities[final_mask]
+    
+    x_ps, y_ps = get_spectrum_robust('polystyrene')
+    x_pmma, y_pmma = get_spectrum_robust('PMMA')
+    
+    x_mix = mix_df['raman_shift_cm-1']
+    y_mix = mix_df['intensity']
+    
+    if x_ps is not None and x_pmma is not None:
+        print(f"Lengths - PS: {len(y_ps)}, PMMA: {len(y_pmma)}, Mix: {len(y_mix)}")
+        
+        # Pearson Correlation
+        def get_corr(y1, y2):
+            if len(y1) != len(y2): return None
+            return np.corrcoef(y1, y2)[0, 1]
+    
+        c_ps = get_corr(y_mix, y_ps)
+        c_pmma = get_corr(y_mix, y_pmma)
+        print(f"Corr PS: {c_ps}")
+        print(f"Corr PMMA: {c_pmma}")
+    
+        # Plotting
+        plt.figure(figsize=(10, 6))
+        def norm(y): return (y - np.min(y)) / (np.max(y) - np.min(y))
+        plt.plot(x_mix, norm(y_mix), label='T118', color='k', lw=2)
+        plt.plot(x_ps, norm(y_ps), label='Polystyrene', linestyle='--', alpha=0.7)
+        plt.plot(x_pmma, norm(y_pmma), label='PMMA', linestyle=':', alpha=0.7)
+        plt.legend()
+        plt.title('Comparison')
+        plt.savefig('comparison_final.png')
+    else:
+        print("Still could not find spectra.")
+    , file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+[22:01:17.525] [CoALA SELECT] cycle 3 · 선택 → run_analysis(code=
+import numpy as np
+import matplotlib.pyplot as plt
+
+ref_df = files[0]['table']
+mix_df = files[1]['table']
+
+# Strip whitespace and check counts
+mats = np.array([str(m).strip() for m in ref_df['material']])
+shifts = ref_df['raman_shift_cm-1']
+intensities = ref_df['intensity']
+
+unique_mats = np.unique(mats)
+print(f"Cleaned unique materials: {unique_mats}")
+
+# Count occurrences per material to see the sizes
+for m in unique_mats:
+    count = np.sum(mats == m)
+    print(f"{m}: {count} points")
+
+def get_spectrum_robust(mat_name):
+    mask = (mats == mat_name)
+    if not np.any(mask):
+        return None, None
+    # If multiple spectra exist for one material, we take the first one's length 
+    # or just average them? Let's see if they are consistent.
+    # Actually, let's just get all intensities for this material and group by spectrum_id
+    ids = ref_df['spectrum_id']
+    unique_ids_for_mat = np.unique(ids[mask])
+    print(f"IDs for {mat_name}: {unique_ids_for_mat}")
+    
+    # Take the first ID's spectrum
+    target_id = unique_ids_for_mat[0]
+    final_mask = (ids == target_id)
+    return shifts[final_mask], intensities[final_mask]
+
+x_ps, y_ps = get_spectrum_robust('polystyrene')
+x_pmma, y_pmma = get_spectrum_robust('PMMA')
+
+x_mix = mix_df['raman_shift_cm-1']
+y_mix = mix_df['intensity']
+
+if x_ps is not None and x_pmma is not None:
+    print(f"Lengths - PS: {len(y_ps)}, PMMA: {len(y_pmma)}, Mix: {len(y_mix)}")
+    
+    # Pearson Correlation
+    def get_corr(y1, y2):
+        if len(y1) != len(y2): return None
+        return np.corrcoef(y1, y2)[0, 1]
+
+    c_ps = get_corr(y_mix, y_ps)
+    c_pmma = get_corr(y_mix, y_pmma)
+    print(f"Corr PS: {c_ps}")
+    print(f"Corr PMMA: {c_pmma}")
+
+    # Plotting
+    plt.figure(figsize=(10, 6))
+    def norm(y): return (y - np.min(y)) / (np.max(y) - np.min(y))
+    plt.plot(x_mix, norm(y_mix), label='T118', color='k', lw=2)
+    plt.plot(x_ps, norm(y_ps), label='Polystyrene', linestyle='--', alpha=0.7)
+    plt.plot(x_pmma, norm(y_pmma), label='PMMA', linestyle=':', alpha=0.7)
+    plt.legend()
+    plt.title('Comparison')
+    plt.savefig('comparison_final.png')
+else:
+    print("Still could not find spectra.")
+, file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+    single execution candidate - evaluation skipped
+[22:01:17.526] [CoALA EXECUTE] run_analysis
+    {"code": "\nimport numpy as np\nimport matplotlib.pyplot as plt\n\nref_df = files[0]['table']\nmix_df = files[1]['table']\n\n# Strip whitespace and check counts\nmats = np.array([str(m).strip() for m in ref_df['material']])\nshifts = ref_df['raman_shift_cm-1']\nintensities = ref_df['intensity']\n\nunique_mats = np.unique(mats)\nprint(f\"Cleaned unique materials: {unique_mats}\")\n\n# Count occurrences per material to see the sizes\nfor m in unique_mats:\n    count = np.sum(mats == m)\n    print(f\"{m}: {count} points\")\n\ndef get_spectrum_robust(mat_name):\n    mask = (mats == mat_name)\n    if not np.any(mask):\n        return None, None\n    # If multiple spectra exist for one material, we take the first one's length \n    # or just average them? Let's see if they are consistent.\n    # Actually, let's just get all intensities for this material and group by spectrum_id\n    ids = ref_df['spectrum_id']\n    unique_ids_for_mat = np.unique(ids[mask])\n    print(f\"IDs for {mat_name}: {unique_ids_for_mat}\")\n    \n    # Take the first ID's spectrum\n    target_id = unique_ids_for_mat[0]\n    final_mask = (ids == target_id)\n    return shifts[final_mask], intensities[final_mask]\n\n
+    … <1137자 생략>
+[22:01:18.051] [CoALA OBSERVE] run_analysis · FAIL · 524 ms · grounding
+    {"ok": false, "error": "TypeError: only integer scalar arrays can be converted to a scalar index", "stdout": "Cleaned unique materials: ['PET' 'PMMA' 'aragonite' 'calcite' 'polystyrene' 'silicon']\nPET: 3602 points\nPMMA: 3602 points\naragonite: 3602 points\ncalcite: 3602 points\npolystyrene: 3602 points\nsilicon: 3602 points\n", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 379, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 37, in <module>\n  File \"<analysis>\", line 29, in get_spectrum_robust\nTypeError: only integer scalar arrays can be converted to a scalar index\n"}
+[22:01:18.051] [CoALA CYCLE] ────── 사이클 4 시작 (propose 예산 145/150, 누적 dose 0.0 mJ) ──────
+[22:01:18.051] [CoALA PLAN] cycle 4 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[22:01:18.051] [Gemma <- PROMPT] step 6 · CoALA propose (cycle 4, plan 1) · 13 msgs
+    system(12241ch) · human(708ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(1090ch) · tool(863ch) · ai(0ch)[run_analysis] · tool(1321ch) · ai(0ch)[run_analysis] · tool(298ch) · ai(0ch)[run_analysis] · tool(788ch)
+[22:01:49.772] [Gemma THINKING] step 6 · 2011ch
+    The user wants me to compare the spectrum in `T118.csv` with two materials from `reference_library.csv`: Polystyrene and PMMA.
+    
+    Looking at previous tool outputs:
+    - `T118.csv` has 1801 points (Raman shift 200 to 2000 cm⁻¹).
+    - `reference_library.csv` has a total of 21612 points. It contains materials like PET, PMMA, aragonite, calcite, polystyrene, and silicon.
+    - There are 6 materials, each with 3602 points (21612 / 6 = 3602). This suggests the reference spectra have a different sampling/resolution than T118.
+    - `T118` resolution: $2000 - 200 = 1800$ interval. For 1801 points, that's exactly $1\text{ cm}^{-1}$ per point.
+    - Library resolution: $3602$ points for a range (presumably 200-2000). That's $\sim 0.5\text{ cm}^{-1}$ per point.
+    
+    Since the x-axes differ in sampling, I cannot use simple Pearson correlation on the intensity arrays directly. I need to either interpolate the library spectra to match T118 or vice versa.
+    
+    The error "TypeError: only integer scalar arrays can be converted to a scalar index" happened because I tried to use a boolean mask as an index for something that didn't support it in the specific way I did, or likely `ref_df['spectrum_id'][mask]` where `ref_df` is a dict of numpy arrays. Wait, if `ref_df` is a dictionary mapping column names to numpy arrays (as per `inspect_file`), then `ref_df['spectrum_id']` is an array and `mask` is a boolean array. This should work. However, the trace says `final_mask = (ids == target_id)`. Then `shifts[final_mask]`. If `shifts` is a numpy array, this is standard.
+    
+    Wait, I see what happened in the previous run's stdout:
+    "PET: 3602 points", "PMMA: 3602 points", etc.
+    The logic failed at line 29 in `get_spectrum_robust`.
+    Let's rewrite a clean script that:
+    1. Loads both files.
+    2. Extracts Polystyrene and PMMA spectra from the library.
+    3. Interpolates them to match the x-axis of T118 (which is linear 200..2000, step 1).
+    4. Computes correlation or similarity using a robust method.
+    
+    I will also plot the results to confirm visually.
+[22:01:49.772] [Gemma TOOL_CALLS] step 6 · 1개
+    1) run_analysis({"code": "\nimport numpy as np\nimport matplotlib.pyplot as plt\nfrom scipy.interpolate import interp1d\n\n# Load data\nref_df = files[0]['table']\nmix_df = files[1]['table']\n\n# Mixture spectrum (The Target)\nx_mix = mix_df['raman_shift_cm-1']\ny_mix = mix_df['intensity']\n\ndef get_mat_spectrum(mat_name):\n    mats = ref_df['material']\n    # Create mask for material\n    mask = (mats == mat_name)\n    if not np.any(mask):\n        print(f\"Material {mat_name} not found.\")\n        return None, None\n    \n    x_ref = ref_df['raman_shift_cm-1'][mask]\n    y_ref = ref_df['intensity'][mask]\n    return x_ref, y_ref\n\n# Extract reference spectra\nx_ps_raw, y_ps_raw = get_mat_spectrum('polystyrene')\nx_pmma_raw, y_pmma_raw = get_mat_spectrum('PMMA')\n\ndef resample_and_correlate(x_target,
+    … <1501자 생략>)
+[22:01:49.773] [Gemma STATS] prompt 21774 tok · out 1465 tok · wall 31.72s · eval 23.83s (61.5 tok/s) · load 0.24s · done=stop
+[22:01:49.773] [CoALA PLAN] cycle 4 · 정보수집 종료 · 실행 후보 1건 확보 → evaluate/select 로
+    run_analysis(code=
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from scipy.interpolate import interp1d
+    
+    # Load data
+    ref_df = files[0]['table']
+    mix_df = files[1]['table']
+    
+    # Mixture spectrum (The Target)
+    x_mix = mix_df['raman_shift_cm-1']
+    y_mix = mix_df['intensity']
+    
+    def get_mat_spectrum(mat_name):
+        mats = ref_df['material']
+        # Create mask for material
+        mask = (mats == mat_name)
+        if not np.any(mask):
+            print(f"Material {mat_name} not found.")
+            return None, None
+        
+        x_ref = ref_df['raman_shift_cm-1'][mask]
+        y_ref = ref_df['intensity'][mask]
+        return x_ref, y_ref
+    
+    # Extract reference spectra
+    x_ps_raw, y_ps_raw = get_mat_spectrum('polystyrene')
+    x_pmma_raw, y_pmma_raw = get_mat_spectrum('PMMA')
+    
+    def resample_and_correlate(x_target, y_target, x_ref, y_ref):
+        # Interpolate reference to target x-axis
+        f = interp1d(x_ref, y_ref, kind='linear', fill_value="extrapolate")
+        y_resampled = f(x_target)
+        
+        # Calculate Pearson correlation
+        corr = np.corrcoef(y_target, y_resampled)[0, 1]
+        return corr, y_resampled
+    
+    if x_ps_raw is not None and x_pmma_raw is not None:
+        corr_ps, y_ps_interp = resample_and_correlate(x_mix, y_mix, x_ps_raw, y_ps_raw)
+        corr_pmma, y_pmma_interp = resample_and_correlate(x_mix, y_mix, x_pmma_raw, y_pmma_raw)
+        
+        print(f"Similarity (Correlation) with Polystyrene: {corr_ps:.4f}")
+        print(f"Similarity (Correlation) with PMMA: {corr_pmma:.4f}")
+    
+        # Visualization
+        plt.figure(figsize=(12, 6))
+        # Normalize for visual comparison
+        def norm(y): return (y - np.min(y)) / (np.max(y) - np.min(y))
+        
+        plt.plot(x_mix, norm(y_mix), label=f'T118 Mixture', color='black', lw=2)
+        plt.plot(x_mix, norm(y_ps_interp), label=f'Polystyrene (corr={corr_ps:.3f})', linestyle='--', alpha=0.7)
+        plt.plot(x_mix, norm(y_pmma_interp), label=f'PMMA (corr={corr_pmma:.3f})', linestyle=':', alpha=0.7)
+        
+        plt.title('T118 Mixture vs Reference Materials')
+        plt.xlabel('Raman Shift (cm-1)')
+        plt.ylabel('Normalized Intensity')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig('similarity_analysis.png')
+    else:
+        print("Could not load reference spectra.")
+    , file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+[22:01:49.773] [CoALA EVALUATE] 후보 1개 — 평가 생략(논문 4.6: 단순 상황)
+    run_analysis(code=
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from scipy.interpolate import interp1d
+    
+    # Load data
+    ref_df = files[0]['table']
+    mix_df = files[1]['table']
+    
+    # Mixture spectrum (The Target)
+    x_mix = mix_df['raman_shift_cm-1']
+    y_mix = mix_df['intensity']
+    
+    def get_mat_spectrum(mat_name):
+        mats = ref_df['material']
+        # Create mask for material
+        mask = (mats == mat_name)
+        if not np.any(mask):
+            print(f"Material {mat_name} not found.")
+            return None, None
+        
+        x_ref = ref_df['raman_shift_cm-1'][mask]
+        y_ref = ref_df['intensity'][mask]
+        return x_ref, y_ref
+    
+    # Extract reference spectra
+    x_ps_raw, y_ps_raw = get_mat_spectrum('polystyrene')
+    x_pmma_raw, y_pmma_raw = get_mat_spectrum('PMMA')
+    
+    def resample_and_correlate(x_target, y_target, x_ref, y_ref):
+        # Interpolate reference to target x-axis
+        f = interp1d(x_ref, y_ref, kind='linear', fill_value="extrapolate")
+        y_resampled = f(x_target)
+        
+        # Calculate Pearson correlation
+        corr = np.corrcoef(y_target, y_resampled)[0, 1]
+        return corr, y_resampled
+    
+    if x_ps_raw is not None and x_pmma_raw is not None:
+        corr_ps, y_ps_interp = resample_and_correlate(x_mix, y_mix, x_ps_raw, y_ps_raw)
+        corr_pmma, y_pmma_interp = resample_and_correlate(x_mix, y_mix, x_pmma_raw, y_pmma_raw)
+        
+        print(f"Similarity (Correlation) with Polystyrene: {corr_ps:.4f}")
+        print(f"Similarity (Correlation) with PMMA: {corr_pmma:.4f}")
+    
+        # Visualization
+        plt.figure(figsize=(12, 6))
+        # Normalize for visual comparison
+        def norm(y): return (y - np.min(y)) / (np.max(y) - np.min(y))
+        
+        plt.plot(x_mix, norm(y_mix), label=f'T118 Mixture', color='black', lw=2)
+        plt.plot(x_mix, norm(y_ps_interp), label=f'Polystyrene (corr={corr_ps:.3f})', linestyle='--', alpha=0.7)
+        plt.plot(x_mix, norm(y_pmma_interp), label=f'PMMA (corr={corr_pmma:.3f})', linestyle=':', alpha=0.7)
+        
+        plt.title('T118 Mixture vs Reference Materials')
+        plt.xlabel('Raman Shift (cm-1)')
+        plt.ylabel('Normalized Intensity')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig('similarity_analysis.png')
+    else:
+        print("Could not load reference spectra.")
+    , file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+[22:01:49.773] [CoALA SELECT] cycle 4 · 선택 → run_analysis(code=
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+
+# Load data
+ref_df = files[0]['table']
+mix_df = files[1]['table']
+
+# Mixture spectrum (The Target)
+x_mix = mix_df['raman_shift_cm-1']
+y_mix = mix_df['intensity']
+
+def get_mat_spectrum(mat_name):
+    mats = ref_df['material']
+    # Create mask for material
+    mask = (mats == mat_name)
+    if not np.any(mask):
+        print(f"Material {mat_name} not found.")
+        return None, None
+    
+    x_ref = ref_df['raman_shift_cm-1'][mask]
+    y_ref = ref_df['intensity'][mask]
+    return x_ref, y_ref
+
+# Extract reference spectra
+x_ps_raw, y_ps_raw = get_mat_spectrum('polystyrene')
+x_pmma_raw, y_pmma_raw = get_mat_spectrum('PMMA')
+
+def resample_and_correlate(x_target, y_target, x_ref, y_ref):
+    # Interpolate reference to target x-axis
+    f = interp1d(x_ref, y_ref, kind='linear', fill_value="extrapolate")
+    y_resampled = f(x_target)
+    
+    # Calculate Pearson correlation
+    corr = np.corrcoef(y_target, y_resampled)[0, 1]
+    return corr, y_resampled
+
+if x_ps_raw is not None and x_pmma_raw is not None:
+    corr_ps, y_ps_interp = resample_and_correlate(x_mix, y_mix, x_ps_raw, y_ps_raw)
+    corr_pmma, y_pmma_interp = resample_and_correlate(x_mix, y_mix, x_pmma_raw, y_pmma_raw)
+    
+    print(f"Similarity (Correlation) with Polystyrene: {corr_ps:.4f}")
+    print(f"Similarity (Correlation) with PMMA: {corr_pmma:.4f}")
+
+    # Visualization
+    plt.figure(figsize=(12, 6))
+    # Normalize for visual comparison
+    def norm(y): return (y - np.min(y)) / (np.max(y) - np.min(y))
+    
+    plt.plot(x_mix, norm(y_mix), label=f'T118 Mixture', color='black', lw=2)
+    plt.plot(x_mix, norm(y_ps_interp), label=f'Polystyrene (corr={corr_ps:.3f})', linestyle='--', alpha=0.7)
+    plt.plot(x_mix, norm(y_pmma_interp), label=f'PMMA (corr={corr_pmma:.3f})', linestyle=':', alpha=0.7)
+    
+    plt.title('T118 Mixture vs Reference Materials')
+    plt.xlabel('Raman Shift (cm-1)')
+    plt.ylabel('Normalized Intensity')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig('similarity_analysis.png')
+else:
+    print("Could not load reference spectra.")
+, file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+    single execution candidate - evaluation skipped
+[22:01:49.774] [CoALA EXECUTE] run_analysis
+    {"code": "\nimport numpy as np\nimport matplotlib.pyplot as plt\nfrom scipy.interpolate import interp1d\n\n# Load data\nref_df = files[0]['table']\nmix_df = files[1]['table']\n\n# Mixture spectrum (The Target)\nx_mix = mix_df['raman_shift_cm-1']\ny_mix = mix_df['intensity']\n\ndef get_mat_spectrum(mat_name):\n    mats = ref_df['material']\n    # Create mask for material\n    mask = (mats == mat_name)\n    if not np.any(mask):\n        print(f\"Material {mat_name} not found.\")\n        return None, None\n    \n    x_ref = ref_df['raman_shift_cm-1'][mask]\n    y_ref = ref_df['intensity'][mask]\n    return x_ref, y_ref\n\n# Extract reference spectra\nx_ps_raw, y_ps_raw = get_mat_spectrum('polystyrene')\nx_pmma_raw, y_pmma_raw = get_mat_spectrum('PMMA')\n\ndef resample_and_correlate(x_target, y_target, x_ref, y_ref):\n    # Interpolate reference to target x-axis\n    f = interp1d(x_ref, y_ref, kind='linear', fill_value=\"extrapolate\")\n    y_resampled = f(x_target)\n    \n    # Calculate Pearson correlation\n    corr = np.corrcoef(y_target, y_resampled)[0, 1]\n    return corr, y_resampled\n\nif x_ps_raw is not None and x_pmma_raw is not None:\n    corr_ps, y_ps_interp = resample_and_
+    … <1101자 생략>
+[22:01:50.644] [CoALA OBSERVE] run_analysis · ok · 869 ms · grounding
+    {"ok": true, "stdout": "Material polystyrene not found.\nMaterial PMMA not found.\nCould not load reference spectra.\n", "image_count": 0, "images": []}
+[22:01:50.644] [CoALA CYCLE] ────── 사이클 5 시작 (propose 예산 144/150, 누적 dose 0.0 mJ) ──────
+[22:01:50.644] [CoALA PLAN] cycle 5 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[22:01:50.645] [Gemma <- PROMPT] step 7 · CoALA propose (cycle 5, plan 1) · 15 msgs
+    system(12269ch) · human(708ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(1090ch) · tool(863ch) · ai(0ch)[run_analysis] · tool(1321ch) · ai(0ch)[run_analysis] · tool(298ch) · ai(0ch)[run_analysis] · tool(788ch) · ai(0ch)[run_analysis] · tool(152ch)
+[22:02:17.140] [Gemma THINKING] step 7 · 1001ch
+    The previous `run_analysis` failed to find 'polystyrene' and 'PMMA'. However, a few turns ago, `inspect_file` showed the `material` column had these values. The problem is likely that the material names in the CSV have leading/trailing whitespace or different casing.
+    
+    Wait, looking back at the `stdout` of the failed run:
+    `Cleaned unique materials: ['PET' 'PMMA' 'aragonite' 'calcite' 'polystyrene' 'silicon']`
+    The materials *are* there. The failure happened because I was using `ref_df['material'] == mat_name`. If the column is a numpy array of strings, it should work unless there are hidden characters or if they are objects and not cleaned.
+    
+    Let's try a more robust way to extract these by:
+    1. Stripping all strings in the material column.
+    2. Comparing them carefully.
+    
+    Actually, let me just print the *exact* values of the `material` column from the first 5 rows to see if there's something weird. Or better yet, I will use a list comprehension to clean the materials and then find the indices.
+[22:02:17.140] [Gemma TOOL_CALLS] step 7 · 1개
+    1) run_analysis({"code": "\nimport numpy as np\nimport matplotlib.pyplot as plt\nfrom scipy.interpolate import interp1d\n\n# Load data\nref_df = files[0]['table']\nmix_df = files[1]['table']\n\n# Target mixture\nx_mix = mix_df['raman_shift_cm-1']\ny_mix = mix_df['intensity']\n\n# Reference materials cleanup\nmats = np.array([str(m).strip() for m in ref_df['material']])\nshifts = ref_df['raman_shift_cm-1']\nintensities = ref_df['intensity']\n\nprint(f\"Unique cleaned materials: {np.unique(mats)}\")\n\ndef get_spectrum(mat_name):\n    mask = (mats == mat_name)\n    if not np.any(mask):\n        return None, None\n    # Return the shifts and intensities for this material\n    return shifts[mask], intensities[mask]\n\nx_ps_raw, y_ps_raw = get_spectrum('polystyrene')\nx_pmma_raw, y_pmma_raw = get_spectrum('PMM
+    … <1482자 생략>)
+[22:02:17.141] [Gemma STATS] prompt 22684 tok · out 1112 tok · wall 26.49s · eval 18.12s (61.4 tok/s) · load 0.25s · done=stop
+[22:02:17.141] [CoALA PLAN] cycle 5 · 정보수집 종료 · 실행 후보 1건 확보 → evaluate/select 로
+    run_analysis(code=
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from scipy.interpolate import interp1d
+    
+    # Load data
+    ref_df = files[0]['table']
+    mix_df = files[1]['table']
+    
+    # Target mixture
+    x_mix = mix_df['raman_shift_cm-1']
+    y_mix = mix_df['intensity']
+    
+    # Reference materials cleanup
+    mats = np.array([str(m).strip() for m in ref_df['material']])
+    shifts = ref_df['raman_shift_cm-1']
+    intensities = ref_df['intensity']
+    
+    print(f"Unique cleaned materials: {np.unique(mats)}")
+    
+    def get_spectrum(mat_name):
+        mask = (mats == mat_name)
+        if not np.any(mask):
+            return None, None
+        # Return the shifts and intensities for this material
+        return shifts[mask], intensities[mask]
+    
+    x_ps_raw, y_ps_raw = get_spectrum('polystyrene')
+    x_pmma_raw, y_pmma_raw = get_spectrum('PMMA')
+    
+    def resample_and_correlate(x_target, y_target, x_ref, y_ref):
+        # Handle potential duplicates in x_ref by taking mean of intensities at same shift
+        unique_x = np.unique(x_ref)
+        unique_y = np.array([y_ref[x_ref == ux].mean() for ux in unique_x])
+        
+        f = interp1d(unique_x, unique_y, kind='linear', fill_value="extrapolate")
+        y_resampled = f(x_target)
+        corr = np.corrcoef(y_target, y_resampled)[0, 1]
+        return corr, y_resampled
+    
+    if x_ps_raw is not None and x_pmma_raw is not None:
+        c_ps, y_ps_int = resample_and_correlate(x_mix, y_mix, x_ps_raw, y_ps_raw)
+        c_pmma, y_pmma_int = resample_and_correlate(x_mix, y_mix, x_pmma_raw, y_pmma_raw)
+        
+        print(f"Similarity PS: {c_ps:.4f}")
+        print(f"Similarity PMMA: {c_pmma:.4f}")
+    
+        plt.figure(figsize=(12, 6))
+        def norm(y): return (y - np.min(y)) / (np.max(y) - np.min(y))
+        plt.plot(x_mix, norm(y_mix), 'k-', lw=2, label='T118 Mixture')
+        plt.plot(x_mix, norm(y_ps_int), 'r--', alpha=0.7, label=f'Polystyrene (corr={c_ps:.3f})')
+        plt.plot(x_mix, norm(y_pmma_int), 'b:', alpha=0.7, label=f'PMMA (corr={c_pmma:.3f})')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig('final_comparison.png')
+    else:
+        print("Error: Could not find reference materials in the library.")
+        if x_ps_raw is None: print("Polystyrene missing")
+        if x_pmma_raw is None: print("PMMA missing")
+    , file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+[22:02:17.141] [CoALA EVALUATE] 후보 1개 — 평가 생략(논문 4.6: 단순 상황)
+    run_analysis(code=
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from scipy.interpolate import interp1d
+    
+    # Load data
+    ref_df = files[0]['table']
+    mix_df = files[1]['table']
+    
+    # Target mixture
+    x_mix = mix_df['raman_shift_cm-1']
+    y_mix = mix_df['intensity']
+    
+    # Reference materials cleanup
+    mats = np.array([str(m).strip() for m in ref_df['material']])
+    shifts = ref_df['raman_shift_cm-1']
+    intensities = ref_df['intensity']
+    
+    print(f"Unique cleaned materials: {np.unique(mats)}")
+    
+    def get_spectrum(mat_name):
+        mask = (mats == mat_name)
+        if not np.any(mask):
+            return None, None
+        # Return the shifts and intensities for this material
+        return shifts[mask], intensities[mask]
+    
+    x_ps_raw, y_ps_raw = get_spectrum('polystyrene')
+    x_pmma_raw, y_pmma_raw = get_spectrum('PMMA')
+    
+    def resample_and_correlate(x_target, y_target, x_ref, y_ref):
+        # Handle potential duplicates in x_ref by taking mean of intensities at same shift
+        unique_x = np.unique(x_ref)
+        unique_y = np.array([y_ref[x_ref == ux].mean() for ux in unique_x])
+        
+        f = interp1d(unique_x, unique_y, kind='linear', fill_value="extrapolate")
+        y_resampled = f(x_target)
+        corr = np.corrcoef(y_target, y_resampled)[0, 1]
+        return corr, y_resampled
+    
+    if x_ps_raw is not None and x_pmma_raw is not None:
+        c_ps, y_ps_int = resample_and_correlate(x_mix, y_mix, x_ps_raw, y_ps_raw)
+        c_pmma, y_pmma_int = resample_and_correlate(x_mix, y_mix, x_pmma_raw, y_pmma_raw)
+        
+        print(f"Similarity PS: {c_ps:.4f}")
+        print(f"Similarity PMMA: {c_pmma:.4f}")
+    
+        plt.figure(figsize=(12, 6))
+        def norm(y): return (y - np.min(y)) / (np.max(y) - np.min(y))
+        plt.plot(x_mix, norm(y_mix), 'k-', lw=2, label='T118 Mixture')
+        plt.plot(x_mix, norm(y_ps_int), 'r--', alpha=0.7, label=f'Polystyrene (corr={c_ps:.3f})')
+        plt.plot(x_mix, norm(y_pmma_int), 'b:', alpha=0.7, label=f'PMMA (corr={c_pmma:.3f})')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig('final_comparison.png')
+    else:
+        print("Error: Could not find reference materials in the library.")
+        if x_ps_raw is None: print("Polystyrene missing")
+        if x_pmma_raw is None: print("PMMA missing")
+    , file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+[22:02:17.141] [CoALA SELECT] cycle 5 · 선택 → run_analysis(code=
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+
+# Load data
+ref_df = files[0]['table']
+mix_df = files[1]['table']
+
+# Target mixture
+x_mix = mix_df['raman_shift_cm-1']
+y_mix = mix_df['intensity']
+
+# Reference materials cleanup
+mats = np.array([str(m).strip() for m in ref_df['material']])
+shifts = ref_df['raman_shift_cm-1']
+intensities = ref_df['intensity']
+
+print(f"Unique cleaned materials: {np.unique(mats)}")
+
+def get_spectrum(mat_name):
+    mask = (mats == mat_name)
+    if not np.any(mask):
+        return None, None
+    # Return the shifts and intensities for this material
+    return shifts[mask], intensities[mask]
+
+x_ps_raw, y_ps_raw = get_spectrum('polystyrene')
+x_pmma_raw, y_pmma_raw = get_spectrum('PMMA')
+
+def resample_and_correlate(x_target, y_target, x_ref, y_ref):
+    # Handle potential duplicates in x_ref by taking mean of intensities at same shift
+    unique_x = np.unique(x_ref)
+    unique_y = np.array([y_ref[x_ref == ux].mean() for ux in unique_x])
+    
+    f = interp1d(unique_x, unique_y, kind='linear', fill_value="extrapolate")
+    y_resampled = f(x_target)
+    corr = np.corrcoef(y_target, y_resampled)[0, 1]
+    return corr, y_resampled
+
+if x_ps_raw is not None and x_pmma_raw is not None:
+    c_ps, y_ps_int = resample_and_correlate(x_mix, y_mix, x_ps_raw, y_ps_raw)
+    c_pmma, y_pmma_int = resample_and_correlate(x_mix, y_mix, x_pmma_raw, y_pmma_raw)
+    
+    print(f"Similarity PS: {c_ps:.4f}")
+    print(f"Similarity PMMA: {c_pmma:.4f}")
+
+    plt.figure(figsize=(12, 6))
+    def norm(y): return (y - np.min(y)) / (np.max(y) - np.min(y))
+    plt.plot(x_mix, norm(y_mix), 'k-', lw=2, label='T118 Mixture')
+    plt.plot(x_mix, norm(y_ps_int), 'r--', alpha=0.7, label=f'Polystyrene (corr={c_ps:.3f})')
+    plt.plot(x_mix, norm(y_pmma_int), 'b:', alpha=0.7, label=f'PMMA (corr={c_pmma:.3f})')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig('final_comparison.png')
+else:
+    print("Error: Could not find reference materials in the library.")
+    if x_ps_raw is None: print("Polystyrene missing")
+    if x_pmma_raw is None: print("PMMA missing")
+, file_ids=['2026-08-07/reference_library.csv', '2026-08-07/T118.csv'])
+    single execution candidate - evaluation skipped
+[22:02:17.141] [CoALA EXECUTE] run_analysis
+    {"code": "\nimport numpy as np\nimport matplotlib.pyplot as plt\nfrom scipy.interpolate import interp1d\n\n# Load data\nref_df = files[0]['table']\nmix_df = files[1]['table']\n\n# Target mixture\nx_mix = mix_df['raman_shift_cm-1']\ny_mix = mix_df['intensity']\n\n# Reference materials cleanup\nmats = np.array([str(m).strip() for m in ref_df['material']])\nshifts = ref_df['raman_shift_cm-1']\nintensities = ref_df['intensity']\n\nprint(f\"Unique cleaned materials: {np.unique(mats)}\")\n\ndef get_spectrum(mat_name):\n    mask = (mats == mat_name)\n    if not np.any(mask):\n        return None, None\n    # Return the shifts and intensities for this material\n    return shifts[mask], intensities[mask]\n\nx_ps_raw, y_ps_raw = get_spectrum('polystyrene')\nx_pmma_raw, y_pmma_raw = get_spectrum('PMMA')\n\ndef resample_and_correlate(x_target, y_target, x_ref, y_ref):\n    # Handle potential duplicates in x_ref by taking mean of intensities at same shift\n    unique_x = np.unique(x_ref)\n    unique_y = np.array([y_ref[x_ref == ux].mean() for ux in unique_x])\n    \n    f = interp1d(unique_x, unique_y, kind='linear', fill_value=\"extrapolate\")\n    y_resampled = f(x_target)\n    corr = np.corr
+    … <1082자 생략>
+[22:02:18.203] [CoALA OBSERVE] run_analysis · ok · 1062 ms · grounding
+    {"ok": true, "stdout": "Unique cleaned materials: ['PET' 'PMMA' 'aragonite' 'calcite' 'polystyrene' 'silicon']\nSimilarity PS: 0.9140\nSimilarity PMMA: 0.4519\n", "image_count": 1, "images": ["/api/results/2026-08-07/bench_2026-08-07_CoALA_CoALA_T118_698e4b/fig220218_080_0.png"], "saved": {"title": "Analysis result", "image_url": "/api/results/2026-08-07/bench_2026-08-07_CoALA_CoALA_T118_698e4b/fig220218_080_0.png"}}
+[22:02:18.203] [CoALA CYCLE] ────── 사이클 6 시작 (propose 예산 143/150, 누적 dose 0.0 mJ) ──────
+[22:02:18.204] [CoALA PLAN] cycle 6 · 계획 라운드 1/6
+    [Planning progress] This is planning (information gathering) round 1 in this cycle (0 consecutive lookups, 5 planning rounds left).
+[22:02:18.212] [Gemma <- PROMPT] step 8 · CoALA propose (cycle 6, plan 1) · 17 msgs
+    system(12465ch) · human(708ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(1090ch) · tool(863ch) · ai(0ch)[run_analysis] · tool(1321ch) · ai(0ch)[run_analysis] · tool(298ch) · ai(0ch)[run_analysis] · tool(788ch) · ai(0ch)[run_analysis] · tool(152ch) · ai(0ch)[run_analysis] · tool(420ch)
+[22:02:32.656] [Gemma THINKING] step 8 · 546ch
+    The analysis was successful. I have compared the spectrum of the mixture (T118.csv) with two reference materials from `reference_library.csv`: Polystyrene and PMMA.
+    
+    - **Similarity (Pearson Correlation)**:
+      - T118 vs Polystyrene: 0.9140
+      - T118 vs PMMA: 0.4519
+    
+    The correlation with polystyrene is significantly higher than the correlation with PMMA, indicating that the signal in the mixture is dominated by polystyrene.
+    
+    Final results to report:
+    - Dominant component: Polystyrene
+    - Similarity (Polystyrene): 0.9140
+    - Similarity (PMMA): 0.4519
+[22:02:32.656] [Gemma TEXT] step 8
+    The spectral analysis of sample **T118.csv** was performed by comparing its Raman signal against the reference spectra of polystyrene and PMMA provided in **reference_library.csv**.
+    
+    To ensure a fair comparison, both reference spectra were resampled to match the x-axis (Raman shift) of the mixture spectrum using linear interpolation. The similarity between the mixture and each candidate was quantified using the Pearson correlation coefficient.
+    
+    **Results:**
+    *   **Similarity with Polystyrene:** 0.9140
+    *   **Similarity with PMMA:** 0.4519
+    
+    The high correlation value for polystyrene (approximately 0.91) compared to the significantly lower value for PMMA (approximately 0.45) indicates that the spectral features of T118 are highly similar to those of polystyrene. Consequently, it is concluded that polystyrene is the dominant component in the mixture.
+    
+    ```json
+    {"dominant": "polystyrene"}
+    ```
+[22:02:32.656] [Gemma STATS] prompt 23869 tok · out 355 tok · wall 14.44s · eval 5.79s (61.3 tok/s) · load 0.24s · done=stop
+[22:02:32.656] [CoALA PLAN] cycle 6 · 도구 후보 없음 → 최종 보고서로 턴 종료
+[22:02:32.657] [FINAL] 188.31s · LLM 8회 · 도구 5회 · dose 0.00 mJ
+    The spectral analysis of sample **T118.csv** was performed by comparing its Raman signal against the reference spectra of polystyrene and PMMA provided in **reference_library.csv**.
+    
+    To ensure a fair comparison, both reference spectra were resampled to match the x-axis (Raman shift) of the mixture spectrum using linear interpolation. The similarity between the mixture and each candidate was quantified using the Pearson correlation coefficient.
+    
+    **Results:**
+    *   **Similarity with Polystyrene:** 0.9140
+    *   **Similarity with PMMA:** 0.4519
+    
+    The high correlation value for polystyrene (approximately 0.91) compared to the significantly lower value for PMMA (approximately 0.45) indicates that the spectral features of T118 are highly similar to those of polystyrene. Consequently, it is concluded that polystyrene is the dominant component in the mixture.
+    
+    ```json
+    {"dominant": "polystyrene"}
+    ```
+══════════════════════════════════════════════════════════════════════════════
+

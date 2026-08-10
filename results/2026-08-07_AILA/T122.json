@@ -1,0 +1,184 @@
+{
+  "task": "T122",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Report the identification info (spectrum_id and material) of the reference in reference_library.csv that best matches T122.csv.",
+  "criteria": "EXACT(spectrum_id) - naming the right material but the wrong entry is still a miss",
+  "checks": [
+    {
+      "name": "best-matching reference",
+      "passed": true,
+      "score": 1.0,
+      "detail": "spectrum_id='PMMA_02' (expected 'PMMA_02')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T122.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "Based on a comparison of the sample spectrum (T122.csv) with the reference spectra provided in `reference_library.csv`, I calculated the Pearson correlation coefficient between the intensities as a measure of similarity. Both the sample and the library entries share an identical Raman shift axis from 200 to 2000 cm⁻¹.\n\nThe resulting correlations for each reference spectrum were:\n- ARA_01/02: ~0\n- CAL_01/02: < 0\n- PET_01/02: ~0.15\n- PMMA_01: 0.9635\n- **PMMA_02: 0.9986**\n- PS_01/02: ~0.09\n- SI_01/02: < 0\n\nThe spectrum `PMMA_02` shows an extremely high correlation with T122, identifying the material as PMMA.\n\n```json\n{\"spectrum_id\": \"PMMA_02\", \"material\": \"PMMA\"}\n```",
+  "answer_json": {
+    "spectrum_id": "PMMA_02",
+    "material": "PMMA"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T122.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# Get data for sample T122\nsample_data = files['2026-08-07/T122.csv']\nsample_x = sample_data['table']['raman_shift_cm-1']\nsample_y = sample_data['table']['intensity']\n\n# Get data for library\nlib_data = files['2026-08-07/reference_library.csv']\nlib_ids = lib_data['table']['spectrum_id']\nlib_materials = lib_data['table']['material']\nlib_x = lib_data['table']['raman_shift_cm-1']\nlib_y = lib_data['table']['intensity']\n\nunique_ids = np.unique(lib_ids)\nresults = []\n\nfor sid in unique_ids:\n    # Extract mask for this spectrum id\n    mask = (lib_ids == sid)\n    \n    # We assume the x-axis is aligned and sorted identically to T122\n    # Just to be safe, we'll align them by raman shift if they aren't already\n    curr_x = lib_x[mask]\n    curr_y = lib_y[mask]\n    \n    if len(curr_x) != len(sample_x):\n        # Handle length mismatch by interpolation or subsetting\n        # But based on the inspect, both are 200-2000. Let's check for consistency first.\n        continue\n\n    # Compute Pearson Correlation Coefficient\n    correlation = np.corrcoef(sample_y, curr_y)[0, 1]\n    \n    # Find material for this id\n    material = lib_materials[mask][0]\n    \n    results.append({'spectrum_id': sid, 'material': material, 'correlation': correlation})\n\n# Sort by correlation descending\nbest_match = max(results, key=lambda x: x['correlation'])\nprint(f\"Best match: {best_match}\")\n",
+        "file_ids": [
+          "2026-08-07/reference_library.csv",
+          "2026-08-07/T122.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\n# Map file_id to index in 'files' list\nfile_map = {f['file_id']: i for i, f in enumerate(files)}\n\nsample_idx = file_map['2026-08-07/T122.csv']\nlib_idx = file_map['2026-08-07/reference_library.csv']\n\nsample_data = files[sample_idx]\nsample_x = sample_data['table']['raman_shift_cm-1']\nsample_y = sample_data['table']['intensity']\n\nlib_data = files[lib_idx]\nlib_ids = lib_data['table']['spectrum_id']\nlib_materials = lib_data['table']['material']\nlib_x = lib_data['table']['raman_shift_cm-1']\nlib_y = lib_data['table']['intensity']\n\nunique_ids = np.unique(lib_ids)\nresults = []\n\nfor sid in unique_ids:\n    mask = (lib_ids == sid)\n    curr_x = lib_x[mask]\n    curr_y = lib_y[mask]\n    \n    if len(curr_x) != len(sample_x):\n        continue\n\n    correlation = np.corrcoef(sample_y, curr_y)[0, 1]\n    material = lib_materials[mask][0]\n    results.append({'spectrum_id': sid, 'material': material, 'correlation': correlation})\n\nbest_match = max(results, key=lambda x: x['correlation'])\nprint(f\"Best match: {best_match}\")\n",
+        "file_ids": [
+          "2026-08-07/reference_library.csv",
+          "2026-08-07/T122.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\nfile_map = {f['file_id']: i for i, f in enumerate(files)}\nlib_idx = file_map['2026-08-07/reference_library.csv']\nsample_idx = file_map['2026-08-07/T122.csv']\n\nlib_data = files[lib_idx]\nlib_ids = lib_data['table']['spectrum_id']\nunique_ids, counts = np.unique(lib_ids, return_counts=True)\n\nsample_len = len(files[sample_idx]['table']['intensity'])\nprint(f\"Sample length: {sample_len}\")\nfor sid, count in zip(unique_ids, counts):\n    print(f\"ID: {sid}, Length: {count}\")\n",
+        "file_ids": [
+          "2026-08-07/reference_library.csv",
+          "2026-08-07/T122.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "\nimport numpy as np\n\nfile_map = {f['file_id']: i for i, f in enumerate(files)}\nsample_idx = file_map['2026-08-07/T122.csv']\nlib_idx = file_map['2026-08-07/reference_library.csv']\n\n# Sample\ns_data = files[sample_idx]['table']\nsx = s_data['raman_shift_cm-1']\nsy = s_data['intensity']\n\n# Library\nl_data = files[lib_idx]['table']\nl_ids = np.array(l_data['spectrum_id'])\nl_mats = np.array(l_data['material'])\nlx = np.array(l_data['raman_shift_cm-1'])\nly = np.array(l_data['intensity'])\n\nunique_ids = np.unique(l_ids)\nbest_corr = -1\nbest_id = None\nbest_mat = None\n\nprint(f\"Matching sample {sx[0]} to {sx[-1]}\")\n\nfor sid in unique_ids:\n    mask = (l_ids == sid)\n    curr_x = lx[mask]\n    curr_y = ly[mask]\n    \n    if len(curr_y) != len(sy):\n        print(f\"Length mismatch for {sid}: {len(curr_y)} vs {len(sy)}\")\n        continue\n\n    # Check if x-axes are identical\n    if not np.allclose(curr_x, sx):\n        print(f\"X-axis mismatch for {sid}\")\n        continue\n\n    corr = np.corrcoef(sy, curr_y)[0, 1]\n    print(f\"ID: {sid}, Corr: {corr:.4f}\")\n    \n    if corr > best_corr:\n        best_corr = corr\n        best_id = sid\n        best_mat = l_mats[mask][0]\n\nprint(f\"\\nWINNER: {best_id} ({best_mat}) with corr {best_corr:.4f}\")\n",
+        "file_ids": [
+          "2026-08-07/reference_library.csv",
+          "2026-08-07/T122.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "session_id": "bench_2026-08-07_AILA_AILA_T122_29cea1",
+  "elapsed_s": 66.81,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

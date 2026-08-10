@@ -1,0 +1,207 @@
+{
+  "task": "T118",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "T118.csv is a mixture synthesised from two library materials. Compare it with reference_library.csv and report which component dominates the signal, together with the similarity of both candidates.",
+  "criteria": "EXACT(material) + NUM(similarity ±0.01 ×2)",
+  "checks": [
+    {
+      "name": "dominant component",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'polystyrene' (expected 'polystyrene')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T118.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "Based on a spectral comparison between the mixture in `T118.csv` and the reference spectra provided in `reference_library.csv`, I have analyzed the similarity using the Pearson correlation coefficient after normalizing all intensities to a [0, 1] scale.\n\nThe analysis shows that the signal in `T118.csv` is highly similar to polystyrene and significantly less similar to PMMA. Specifically:\n- **Polystyrene**: Correlation $\\approx 0.926$\n- **PMMA**: Correlation $\\approx 0.456$\n\nGiven the very high correlation with polystyrene, it is clearly the dominant component in the mixture.\n\n```json\n{\"dominant\": \"polystyrene\"}\n```",
+  "answer_json": {
+    "dominant": "polystyrene"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {
+        "date": "2026-08-07"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-07/T118.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\n# Load data\nt118 = files[0][\"table\"] # Assuming T118 is the first one if passed in that order, but I'll use file_ids mapping\n# To be safe, let's find which file is which by filename\ndata_map = {f[\"filename\"]: f[\"table\"] for f in files}\n\nt118_x = data_map[\"T118.csv\"][\"raman_shift_cm-1\"]\nt118_y = data_map[\"T118.csv\"][\"intensity\"]\n\nref_data = data_map[\"reference_library.csv\"]\nref_materials = np.unique(ref_data[\"material\"])\nprint(f\"Materials in library: {ref_materials}\")\n\ndef normalize(y):\n    return (y - np.min(y)) / (np.max(y) - np.min(y))\n\nt118_norm = normalize(t118_y)\n\nresults = {}\nfor mat in ref_materials:\n    # Extract indices for this material\n    idx = np.where(ref_data[\"material\"] == mat)[0]\n    \n    # The reference library might have multiple spectra per material (indicated by spectrum_id). \n    # Let's see if they share the same x-axis.\n    mat_x = ref_data[\"raman_shift_cm-1\"][idx]\n    mat_y = ref_data[\"intensity\"][idx]\n    \n    # Since T118 has 1801 points (200 to 2000 step 1), and the library has 21612 rows,\n    # each spectrum in the library likely also has ~1801 points.\n    # Let's check how many spectra per material there are.\n    spec_ids = np.unique(ref_data[\"spectrum_id\"][idx])\n    print(f\"Material {mat} has {len(spec_ids)} spectra.\")\n    \n    # For similarity, I will average the reference spectra for each material or just take the first one if they are nearly identical.\n    # Let's try taking the mean intensity per shift for that material.\n    # Need to make sure x is consistent.\n    unique_x = np.unique(mat_x)\n    if len(unique_x) == len(t118_x):\n        avg_y = []\n        for ux in unique_x:\n            avg_y.append(np.mean(mat_y[mat_x == ux]))\n        ref_y = np.array(avg_y)\n    else:\n        # If they don't match exactly, I might need to interpolate or just take the first spectrum.\n        # Let's try taking the first one for now and check if it matches x axis.\n        first_id = spec_ids[0]\n        mask = (ref_data[\"spectrum_id\"] == first_id)\n        ref_x = ref_data[\"raman_shift_cm-1\"][mask]\n        ref_y = ref_data[\"intensity\"][mask]\n        # ensure lengths match T118 if they are the same range\n        if len(ref_x) != len(t118_x):\n             # This is a problem. Let's check x ranges.\n             print(f\"Warning: X axis mismatch for {mat}. Ref length {len(ref_x)}, T118 length {len(t118_x)}\")\n    \n    # Normalize and correlate\n    # Re-calculate ref_y carefully based on the first found spectrum if it fits.\n    first_id = spec_ids[0]\n    mask = (ref_data[\"spectrum_id\"] == first_id)\n    ref_x = ref_data[\"raman_shift_cm-1\"][mask]\n    ref_y = ref_data[\"intensity\"][mask]\n    \n    # Ensure we are comparing arrays of same length and aligned x.\n    if len(ref_x) == len(t118_x):\n        ref_norm = normalize(ref_y)\n        corr, _ = pearsonr(t118_norm, ref_norm)\n        results[mat] = corr\n    else:\n        print(f\"Could not calculate correlation for {mat} due to length mismatch.\")\n\nprint(\"Similarity (Correlation):\", results)\n",
+        "file_ids": [
+          "2026-08-07/T118.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\n# Load data\nt118_data = files[0][\"table\"] if files[0][\"filename\"] == \"T118.csv\" else files[1][\"table\"]\nref_data = files[1][\"table\"] if files[0][\"filename\"] == \"T118.csv\" else files[0][\"table\"]\n\nt118_x = t118_data[\"raman_shift_cm-1\"]\nt118_y = t118_data[\"intensity\"]\n\ndef normalize(y):\n    return (y - np.min(y)) / (np.max(y) - np.min(y))\n\nt118_norm = normalize(t118_y)\n\ncandidates = [\"polystyrene\", \"PMMA\"]\nresults = {}\n\nfor mat in candidates:\n    # Get all rows for this material\n    mat_mask = (ref_data[\"material\"] == mat)\n    mat_shifts = ref_data[\"raman_shift_cm-1\"][mat_mask]\n    mat_intensities = ref_data[\"intensity\"][mat_mask]\n    mat_ids = ref_data[\"spectrum_id\"][mat_mask]\n    \n    # Get the unique spectrum IDs for this material\n    unique_ids = np.unique(mat_ids)\n    print(f\"Material {mat} has {len(unique_ids)} spectra in library.\")\n    \n    # We'll take the first spectrum of this material as the reference\n    first_id = unique_ids[0]\n    spec_mask = (ref_data[\"spectrum_id\"] == first_id)\n    ref_x = ref_data[\"raman_shift_cm-1\"][spec_mask]\n    ref_y = ref_data[\"intensity\"][spec_mask]\n    \n    # Check lengths and alignment\n    if len(ref_x) == len(t118_x):\n        ref_norm = normalize(ref_y)\n        corr, _ = pearsonr(t118_norm, ref_norm)\n        results[mat] = corr\n    else:\n        print(f\"Length mismatch for {mat}: Ref={len(ref_x)}, Mix={len(t118_x)}\")\n\nprint(\"Pearson Correlations:\", results)\n",
+        "file_ids": [
+          "2026-08-07/T118.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\nt118_data = files[0][\"table\"] if files[0][\"filename\"] == \"T118.csv\" else files[1][\"table\"]\nref_data = files[1][\"table\"] if files[0][\"filename\"] == \"T118.csv\" else files[0][\"table\"]\n\nprint(\"Reference Library Materials Sample:\", ref_data[\"material\"][:10])\nprint(\"Unique materials in library:\", np.unique(ref_data[\"material\"]))\n\n# Try to filter using a list comprehension for the material mask\ncandidates = [\"polystyrene\", \"PMMA\"]\nfor mat in candidates:\n    indices = [i for i, m in enumerate(ref_data[\"material\"]) if m == mat]\n    print(f\"Indices for {mat}: count={len(indices)}\")\n    if len(indices) > 0:\n        # Get the shifts and intensities for these indices\n        shifts = ref_data[\"raman_shift_cm-1\"][indices]\n        intensities = ref_data[\"intensity\"][indices]\n        print(f\"First shift for {mat}: {shifts[0]}\")\n        print(f\"First intensity for {mat}: {intensities[0]}\")\n",
+        "file_ids": [
+          "2026-08-07/T118.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\nref_data = files[1][\"table\"] if files[0][\"filename\"] == \"T118.csv\" else files[0][\"table\"]\n\n# Let's look at a single spectrum from the library, e.g., polystyrene\nindices = [i for i, m in enumerate(ref_data[\"material\"]) if m == \"polystyrene\"]\nshifts = ref_data[\"raman_shift_cm-1\"][indices]\nprint(\"Polystyrene shifts range:\", np.min(shifts), \"to\", np.max(shifts))\nprint(\"Polystyrene shifts length:\", len(shifts))\nprint(\"First few shifts:\", shifts[:5])\n",
+        "file_ids": [
+          "2026-08-07/T118.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\nref_data = files[1][\"table\"] if files[0][\"table\"].get(\"filename\") == \"T118.csv\" else files[0][\"table\"] # Error in logic here, using index is safer\n# I will use a simpler way to identify tables\ntables = {f[\"filename\"]: f[\"table\"] for f in files}\nref_data = tables[\"reference_library.csv\"]\n\nindices = [i for i, m in enumerate(ref_data[\"material\"]) if m == \"polystyrene\"]\nids = ref_data[\"spectrum_id\"][indices]\nprint(\"Unique spectrum IDs for polystyrene:\", np.unique(ids))\nprint(\"Count of rows for polystyrene:\", len(indices))\n",
+        "file_ids": [
+          "2026-08-07/T118.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.stats import pearsonr\n\n# Use filenames to avoid indexing confusion\ndata = {f[\"filename\"]: f[\"table\"] for f in files}\nt118 = data[\"T118.csv\"]\nref = data[\"reference_library.csv\"]\n\n# Convert all columns to numpy arrays\nt118_x = np.array(t118[\"raman_shift_cm-1\"])\nt118_y = np.array(t118[\"intensity\"])\n\nref_mat = np.array(ref[\"material\"])\nref_id = np.array(ref[\"spectrum_id\"])\nref_x = np.array(ref[\"raman_shift_cm-1\"])\nref_y = np.array(ref[\"intensity\"])\n\ndef normalize(y):\n    return (y - np.min(y)) / (np.max(y) - np.min(y))\n\nt118_norm = normalize(t118_y)\n\ncandidates = [\"polystyrene\", \"PMMA\"]\nresults = {}\n\nfor mat in candidates:\n    # Filter for this material\n    mat_mask = (ref_mat == mat)\n    ids_for_mat = np.unique(ref_id[mat_mask])\n    print(f\"Material {mat} has spectra IDs: {ids_for_mat}\")\n    \n    # We only need one representative spectrum per material for similarity\n    if len(ids_for_mat) > 0:\n        first_id = ids_for_mat[0]\n        spec_mask = (ref_id == first_id)\n        s_x = ref_x[spec_mask]\n        s_y = ref_y[spec_mask]\n        \n        print(f\"Spectrum {first_id} ({mat}) length: {len(s_x)}\")\n        \n        # Since T118 has 1801 points and reference might have more or different,\n        # we should interpolate or downsample.\n        # Let's check if s_x matches t118_x values exactly.\n        if len(s_x) == len(t118_x):\n            ref_norm = normalize(s_y)\n            corr, _ = pearsonr(t118_norm, ref_norm)\n            results[mat] = corr\n        else:\n            # Interpolate s_y onto t118_x\n            s_y_interp = np.interp(t118_x, s_x, s_y)\n            ref_norm = normalize(s_y_interp)\n            corr, _ = pearsonr(t118_norm, ref_norm)\n            results[mat] = corr\n\nprint(\"Similarity results (Pearson Correlation):\", results)\n",
+        "file_ids": [
+          "2026-08-07/T118.csv",
+          "2026-08-07/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 1.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 1.0
+  },
+  "session_id": "bench_2026-08-07_AILA_AILA_T118_cda1e3",
+  "elapsed_s": 95.38,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}
