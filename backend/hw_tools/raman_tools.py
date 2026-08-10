@@ -2383,24 +2383,16 @@ def _resolve_data_path(source: str):
 # ──────────────────────────────────────────
 
 def _ipbsa(intensity, poly_order=5, max_iterations=100, threshold=0.001):
-    import numpy as np
-    y = np.array(intensity, dtype=np.float64)
-    n = len(y)
-    x = np.linspace(0.0, 1.0, n)
-    working = y.copy()
-    prev_bg = np.zeros(n, dtype=np.float64)
-    converged = False
-    for i in range(max_iterations):
-        coeffs = np.polyfit(x, working, deg=poly_order)
-        bg = np.polyval(coeffs, x)
-        working = np.minimum(y, bg)
-        denom = np.linalg.norm(prev_bg)
-        if denom > 0 and np.linalg.norm(bg - prev_bg) / denom < threshold:
-            converged = True
-            break
-        prev_bg = bg.copy()
-    corrected = np.clip(y - bg, 0.0, None)
-    return corrected.tolist(), bg.tolist(), i + 1, converged
+    """IPBSA — 구현은 backend.spectro_math 한 곳에만 있다.
+
+    run_analysis 샌드박스도 같은 함수를 ipbsa() 라는 이름으로 주입받는다. 예전처럼
+    양쪽이 각자 구현하면, 도구로 푼 실행과 코드로 푼 실행이 미세하게 다른 답을 내고
+    그 차이가 에이전트 성적에 실린다 — 에이전트가 통제할 수 없는 차이다.
+    """
+    from backend.spectro_math import ipbsa_detail
+    corrected, bg, iterations, converged = ipbsa_detail(
+        intensity, order=poly_order, max_iterations=max_iterations, threshold=threshold)
+    return corrected.tolist(), bg.tolist(), iterations, converged
 
 
 def apply_background_subtraction(

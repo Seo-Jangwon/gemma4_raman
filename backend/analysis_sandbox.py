@@ -367,11 +367,28 @@ def _main(payload_path: str) -> None:
             start_index=int(payload.get("spectra_start_index") or 1),
         )
 
+        # 전처리 재료 — 도구(apply_background_subtraction)와 **같은 구현**을 쓴다.
+        #
+        # [왜 주입하는가 — 2026-08-10]
+        # IPBSA 를 손으로 짜면 반복 수렴 루프만 15~25 줄이다. 실측(코드 360 건)에서
+        # 배경 피팅은 긴 코드(2,200자 이상, 유실 위험 구간)의 47% 에 있었고 짧은
+        # 코드에는 5% 뿐이었다 — 코드를 길게 만드는 단일 최대 원인이다. 그리고 그
+        # 길이가 tool call JSON 유실(3,000자 이상에서 33%)로 이어졌다.
+        # 주입해도 평가가 무뎌지지 않는다: 같은 계산이 apply_background_subtraction
+        # 으로 이미 열려 있고(실측 cos=0.9993 으로 GT 와 일치), 문항이 재는 것도
+        # '직접 구현하는 능력'이 아니라 '맞는 전처리를 골라 적용하는 능력'이다.
+        # 반대로 SNR·FWHM·스파이크 제거는 문항이 그 값 자체를 채점하므로 넣지 않는다.
+        #
+        # 이름을 꽂는다고 직접 짜는 길이 막히지는 않는다. poly_baseline 을 함께 두어
+        # 반복 규칙을 자기 방식으로 조립하는 쪽도 그대로 열어 둔다.
+        from backend.spectro_math import ipbsa as _ipbsa_fn, poly_baseline as _poly_bl
+
         ns = {
             "__builtins__": _safe_builtins(),
             "np": np, "plt": plt, "spectra": spectra, "files": files,
             "microscope_image": microscope_image, "image_extent": image_extent,
             "save_result": save_result,
+            "ipbsa": _ipbsa_fn, "poly_baseline": _poly_bl,
         }
         with contextlib.redirect_stdout(buf):
             # 이 줄의 주석은 ASCII 로만 쓴다 — traceback 에 소스 줄이 그대로 실려
