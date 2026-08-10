@@ -1,0 +1,160 @@
+{
+  "task": "T045",
+  "axis": "data processing",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Compute the FWHM of the strongest peak inside 980-1020 cm-1 of T045.csv. Take the half height as (peak intensity - interval minimum)/2 and find the crossings by linear interpolation.",
+  "criteria": "NUM(5%)",
+  "checks": [
+    {
+      "name": "FWHM",
+      "passed": true,
+      "score": 1.0,
+      "detail": "6.07934 (expected 5.83453, rel.err=0.04196 ≤ 0.05)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T045.csv"
+  ],
+  "answer_text": "The calculation was performed on the data from `T045.csv` for the range of $980-1020 \\text{ cm}^{-1}$. The peak intensity in this region was approximately $1000.9$, and the minimum value within the window was $22.06$. The half-height threshold was determined to be $(1000.9 - 22.1) / 2 = 489.42$. Two crossing points were identified via linear interpolation at approximately $997.99 \\text{ cm}^{-1}$ and $1004.07 \\text{ cm}^{-1}$, resulting in a Full Width at Half Maximum (FWHM) of $6.08 \\text{ cm}^{-1}$.\n\n```json\n{\"fwhm_cm1\": 6.079339446045765}\n```",
+  "answer_json": {
+    "fwhm_cm1": 6.079339446045765
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/T045.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load the data\n# The inspection showed columns are [\"raman_shift_cm-1\", \"intensity\"]\ndata = []\nfor i in range(len(spectra[0]['intensity'])):\n    # In run_analysis, for an uploaded file, 'files' is a list of dicts.\n    # Since only one file was provided and it's being analyzed directly:\n    pass\n\n# Wait, the instructions say \"If you pass file_ids, the attached files are parsed \n# and injected as files (list[dict] - each item has file_id, filename, ... \n# table (dict mapping column name -> np.ndarray for numeric columns))\"\n# The variable 'files' is available if I include them in file_ids.\n\n# Let's identify the specific data from T045.csv\ntarget_file = files[0]['table']\nx = target_file['raman_shift_cm-1']\ny = target_file['intensity']\n\n# Target range: 980-1020 cm-1\nmask = (x >= 980) & (x <= 1020)\nx_sub = x[mask]\ny_sub = y[mask]\n\n# Find the strongest peak in this region\nidx = np.argmax(y_sub)\npeak_x = x_sub[idx]\npeak_y = y_sub[idx]\n\nprint(f\"Strongest peak in 980-1020: x={peak_x}, y={peak_y}\")\n\n# Define the interval minimum (in the 980-1020 region)\n# Depending on noise, it might be better to look at local neighbors or a window\n# but let's stick to the global minimum in this specific range as per instruction \n# if that's what \"interval minimum\" implies. Actually, standard interpretation of \n# \"(peak intensity - interval minimum)/2\" usually refers to finding half-max height relative \n# to the floor of the specific peak region or a baseline.\n# Let's check the min value in the range first.\n\nmin_val = np.min(y_sub)\nhalf_height_val = (peak_y - min_val) / 2.0\nprint(f\"Interval minimum: {min_val}\")\nprint(f\"Half height threshold: {half_height_val}\")\n\n# To find the crossings by linear interpolation, we need to identify the \n# points around the peak that bracket the half-height value.\n# Since x is spaced by 1 unit (200..2000 with 1801 rows), \n# let's find the indices where y crosses half_height_val.\n\ncrossings = []\nfor i in range(len(y_sub) - 1):\n    y1, y2 = y_sub[i], y_sub[i+1]\n    x1, x2 = x_sub[i], x_sub[i+1]\n    if (y1 <= half_height_val <= y2) or (y2 <= half_height_val <= y1):\n        # Avoid flat regions where both y1 and y2 are exactly the threshold\n        if y1 != y2:\n            # Linear interpolation formula: x = x1 + (half_height_val - y1) * (x2 - x1) / (y2 - y1)\n            x_cross = x1 + (half_height_val - y1) * (x2 - x1) / (y2 - y1)\n            crossings.append(x_cross)\n        else:\n            # If it's a flat peak top or something, we might just take x1\n            pass\n\n# Usually there will be two crossings near the peak. \n# If more than two are found due to noise/fluctuations, we take the two closest to peak_x.\nif len(crossings) >= 2:\n    # Sort and filter if necessary? Actually just find the ones surrounding the max index.\n    # Since it's a single peak area, there should be exactly two crossings in the interval.\n    # Let's just take all unique values that are sufficiently apart.\n    unique_crossings = []\n    if len(crossings) > 0:\n        unique_crossings.append(crossings[0])\n        for c in crossings[1:]:\n            if abs(c - unique_crossings[-1]) > 1e-3: # Tolerance for tiny diffs\n                unique_crossings.append(c)\n    \n    # If there are multiple, we want the pair that brackets peak_x.\n    if len(unique_crossings) >= 2:\n        # Find the best pair\n        best_fwhm = 0\n        for i in range(len(unique_crossings)-1):\n            for j in range(i+1, len(unique_crossings)):\n                if unique_crossings[i] <= peak_x <= unique_crossings[j]: # or vice-versa\n                    # This logic is slightly flawed if the list isn't sorted. \n                    # Let's just sort them first.\n                    pass\n    \n    # Simpler approach: find all crossings and pick the two closest to the peak (one left, one right)\n    crossings.sort()\n    if len(crossings) >= 2:\n        # Find index of peak_x in sorted crosssings or just use indices around it\n        # Since we expect a peak shape, it...<잘림>"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load the data from T045.csv\ndata = {}\nfor i in range(len(file_ids)):\n    data[file_ids[i]] = files[i]['table']\n\n# Select target table\ntable = data[\"2026-08-10/T045.csv\"]\nx = table['raman_shift_cm-1']\ny = table['intensity']\n\n# Define the range of interest: 980-1020 cm-1\nmask = (x >= 980) & (x <= 1020)\nx_sub = x[mask]\ny_sub = y[mask]\n\n# Find peak info\nidx = np.argmax(y_sub)\npeak_x = x_sub[idx]\npeak_y = y_sub[idx]\nmin_val = np.min(y_sub)\nhalf_height = (peak_y - min_val) / 2.0\n\nprint(f\"Peak: {peak_x} at {peak_y}\")\nprint(f\"Min value in range: {min_val}\")\nprint(f\"Half-height threshold: {half_height}\")\n\n# Find crossings of the half-height line\ncrossings = []\nfor i in range(len(y_sub) - 1):\n    x1, x2 = x_sub[i], x_sub[i+1]\n    y1, y2 = y_sub[i], y_sub[i+1]\n    if (y1 <= half_height <= y2 or y2 <= half_height <= y1) and y1 != y2:\n        # Linear interpolation formula: x = x1 + (half - y1) * (x2 - x1) / (y2 - y1)\n        x_cross = x1 + (half_height - y1) * (x2 - x1) / (y2 - y1)\n        crossings.append(x_cross)\n\n# To find the FWHM, we want the distance between the two cross points that bracket peak_x.\nif len(crossings) >= 2:\n    # Sort them to help identifying neighbors\n    crossings.sort()\n    \n    # Find leftmost and rightmost points surrounding peak_x\n    left = -1e9\n    right = 1e9\n    for c in crossings:\n        if c <= peak_x:\n            left = max(left, c)\n        else:\n            right = min(right, c)\n    \n    fwhm = right - left\n    print(f\"Crossings found: {crossings}\")\n    print(f\"Left cross: {left}, Right cross: {right}\")\n    print(f\"FWHM: {fwhm}\")\nelse:\n    # Fallback if only one crossing or none (due to signal noise etc.)\n    if len(crossings) == 1:\n        pass # Just output what we have\n    else:\n        pass\n\n# Final logic to just ensure the number is correct even if there are multiple peaks nearby.\n# Given the specific range 980-1020, it's likely a single peak.\n",
+        "file_ids": [
+          "2026-08-10/T045.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# The files list contains the data for the provided file_ids.\n# Each element of `files` is a dictionary with a 'table' key.\n# Since only one file was specified in the tool call, we use it directly.\ntarget_data = files[0]['table']\nx = target_data['raman_shift_cm-1']\ny = target_data['intensity']\n\n# Identify range 980-1020 cm-1\nmask = (x >= 980) & (x <= 1020)\nx_sub = x[mask]\ny_sub = y[mask]\n\n# Find peak and midpoint\nidx_peak = np.argmax(y_sub)\npeak_val = y_sub[idx_peak]\nmin_val = np.min(y_sub)\nthreshold = (peak_val - min_val) / 2.0\n\nprint(f\"Peak value: {peak_val}\")\nprint(f\"Minimum in range: {min_val}\")\nprint(f\"Threshold for FWHM: {threshold}\")\n\n# Identify crossing points using linear interpolation\ncrossings = []\nfor i in range(len(y_sub) - 1):\n    x1, x2 = x_sub[i], x_sub[i+1]\n    y1, y2 = y_sub[i], y_sub[i+1]\n    if (y1 <= threshold <= y2 or y2 <= threshold <= y1) and y1 != y2:\n        # Linear interpolation calculation\n        x_cross = x1 + (threshold - y1) * (x2 - x1) / (y2 - y1)\n        crossings.append(x_cross)\n\nprint(f\"Crossings found at: {crossings}\")\n\nif len(crossings) >= 2:\n    # Filter for the two crossings that flank peak_x[idx_peak]\n    peak_x = x_sub[idx_peak]\n    left_crossing = -1e9\n    right_crossing = 1e9\n    for c in crossings:\n        if c <= peak_x:\n            left_crossing = max(left_crossing, c)\n        else:\n            right_crossing = min(right_crossing, c)\n    \n    fwhm = right_crossing - left_crossing\n    print(f\"Calculated FWHM: {fwhm}\")\nelse:\n    # If only one or no crossings are found, the shape might be flat or narrow\n    if len(crossings) == 1:\n        # Fallback if it's perfectly on a boundary or very sharp\n        pass\n    else:\n        # Standard case should have at least two.\n        pass\n",
+        "file_ids": [
+          "2026-08-10/T045.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "session_id": "bench_2026-08-10_CoALA_CoALA_T045_ab1101",
+  "elapsed_s": 51.62,
+  "errors": [],
+  "warnings": [
+    "retried 1x after an infrastructure failure"
+  ],
+  "timed_out": false,
+  "abandoned": false
+}

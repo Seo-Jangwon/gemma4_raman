@@ -1,0 +1,277 @@
+══════════════════════════════════════════════════════════════════════════════
+ AILA · T128 · gemma4:12b @ http://192.168.1.15:11434
+ session : bench_2026-08-10_AILA_AILA_T128_a685e0
+ started : 2026-08-10 19:29:16
+ thinking: ON — gemma4:12b capabilities=['completion', 'vision', 'audio', 'tools', 'thinking'] → thinking 지원
+══════════════════════════════════════════════════════════════════════════════
+
+[19:29:16.729] [QUESTION]
+    Interpolate T128.csv and reference_library.csv onto the reference axis, apply IPBSA baseline order 5 and L2 normalization, then find the material with the highest cosine similarity. If two scores are equal, choose the one whose spectrum_id comes first in alphabetical order. 
+    
+    ---
+    When you are done, end your reply with a JSON block holding the values you were asked to
+    report, like this:
+    
+    ```json
+    {"key": value, ...}
+    ```
+    
+    The JSON block must include these keys, spelled exactly like this, with the shape described for each:
+      "material": string - one of "polystyrene", "PET", "PMMA", "calcite", "aragonite", "silicon"
+    
+    Give plain JSON numbers and strings - no units, no LaTeX, no thousands separators. If the
+    task asked you to refuse, explain, or ask a question instead of measuring, say so in plain
+    text and omit the block.
+[19:29:16.740] [Gemma <- PROMPT] step 1 · ReAct propose · 2 msgs
+    system(9236ch) · human(825ch)
+[19:29:21.809] [Gemma THINKING] step 1 · 1113ch
+    The user wants me to:
+    1. Load two files: `T128.csv` (the target spectrum) and `reference_library.csv` (a library of materials).
+    2. Interpolate both onto a shared "reference axis".
+    3. Apply IPBSA baseline correction with order 5 on the data (or just ensure it's done if applicable, though standard practice is to correct before comparison). Actually, the prompt says "Interpolate... apply IPBSA... then find...". This implies processing happens after loading/interpolation or during the analysis step.
+    4. Normalize both spectra using L2 normalization.
+    5. Calculate the cosine similarity between `T128.csv` and each entry in `reference_library.csv`.
+    6. Identify the material with the highest cosine similarity, resolving ties by alphabetical `spectrum_id`.
+    
+    I need to:
+    - List uploaded files to get IDs for `T128.csv` and `reference_library.csv`.
+    - Inspect both files to understand their structure (columns for Raman shift, intensity, etc.).
+    - Run analysis to perform interpolation, IPBSA, normalization, similarity calculation, and identification of the best match.
+    
+    Let's start by listing and inspecting the files.
+[19:29:21.809] [Gemma TOOL_CALLS] step 1 · 1개
+    1) list_uploaded_files({})
+[19:29:21.809] [Gemma STATS] prompt 15753 tok · out 277 tok · wall 5.07s · eval 2.19s (126.4 tok/s) · load 0.25s · done=stop
+[19:29:21.809] [ReAct REASONING] step 1 · 도구 1개 실행 결정 → list_uploaded_files
+[19:29:21.809] [ReAct ACTING] step 1 · list_uploaded_files
+    {}
+[19:29:21.811] [ReAct OBSERVATION] step 1 · list_uploaded_files · ok · 1 ms
+    {"ok": true, "count": 2, "files": [{"file_id": "2026-08-10/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829}, {"file_id": "2026-08-10/T128.csv", "filename": "T128.csv", "kind": "text", "bytes": 36380}]}
+[19:29:21.814] [Gemma <- PROMPT] step 2 · ReAct propose · 4 msgs
+    system(9236ch) · human(825ch) · ai(0ch)[list_uploaded_files] · tool(246ch)
+[19:29:23.055] [Gemma THINKING] step 2 · 146ch
+    I have the file IDs:
+    `reference_library.csv`: `2026-08-10/reference_library.csv`
+    `T128.csv`: `2026-08-10/T128.csv`
+    
+    Now I will inspect both files.
+[19:29:23.056] [Gemma TOOL_CALLS] step 2 · 1개
+    1) inspect_file({"file_id": "2026-08-10/reference_library.csv"})
+[19:29:23.057] [Gemma STATS] prompt 16159 tok · out 101 tok · wall 1.24s · eval 0.79s (127.7 tok/s) · load 0.24s · done=stop
+[19:29:23.057] [ReAct REASONING] step 2 · 도구 1개 실행 결정 → inspect_file
+[19:29:23.057] [ReAct ACTING] step 2 · inspect_file
+    {"file_id": "2026-08-10/reference_library.csv"}
+[19:29:23.103] [ReAct OBSERVATION] step 2 · inspect_file · ok · 46 ms
+    {"ok": true, "file_id": "2026-08-10/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829, "n_rows": 21612, "n_cols": 4, "columns": ["spectrum_id", "material", "raman_shift_cm-1", "intensity"], "dtypes": {"spectrum_id": "text", "material": "text", "raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 21612}, "intensity": {"min": 0.017118, "max": 1000.0, "mean": 25.348885, "n_valid": 21612}}, "head": [["PS_01", "polystyrene", 200.0, 0.072777], ["PS_01", "polystyrene", 201.0, 0.072997], ["PS_01", "polystyrene", 202.0, 0.073218], ["PS_01", "polystyrene", 203.0, 0.07344], ["PS_01", "polystyrene", 204.0, 0.073663]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/reference_library.csv']."}
+[19:29:23.103] [Gemma <- PROMPT] step 3 · ReAct propose · 6 msgs
+    system(9236ch) · human(825ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch)
+[19:29:24.499] [Gemma THINKING] step 3 · 226ch
+    `reference_library.csv` structure:
+    - `spectrum_id`: text
+    - `material`: text (polystyrene, PET, PMMA, calcite, aragonite, silicon)
+    - `raman_shift_cm-1`: numeric (200 to 2000)
+    - `intensity`: numeric
+    
+    Now I'll inspect `T128.csv`.
+[19:29:24.499] [Gemma TOOL_CALLS] step 3 · 1개
+    1) inspect_file({"file_id": "2026-08-10/T128.csv"})
+[19:29:24.499] [Gemma STATS] prompt 16742 tok · out 117 tok · wall 1.40s · eval 0.92s (127.8 tok/s) · load 0.24s · done=stop
+[19:29:24.500] [ReAct REASONING] step 3 · 도구 1개 실행 결정 → inspect_file
+[19:29:24.500] [ReAct ACTING] step 3 · inspect_file
+    {"file_id": "2026-08-10/T128.csv"}
+[19:29:24.522] [ReAct OBSERVATION] step 3 · inspect_file · ok · 22 ms
+    {"ok": true, "file_id": "2026-08-10/T128.csv", "filename": "T128.csv", "kind": "text", "bytes": 36380, "n_rows": 1801, "n_cols": 2, "columns": ["raman_shift_cm-1", "intensity"], "dtypes": {"raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 1801}, "intensity": {"min": -22.026951, "max": 996.875675, "mean": 14.414439, "n_valid": 1801}}, "head": [[200.0, -6.29239], [201.0, -5.68124], [202.0, 3.907427], [203.0, 5.276485], [204.0, -1.158305]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/T128.csv']."}
+[19:29:24.523] [Gemma <- PROMPT] step 4 · ReAct propose · 8 msgs
+    system(9236ch) · human(825ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[inspect_file] · tool(865ch)
+[19:29:50.666] [Gemma THINKING] step 4 · 4740ch
+    `T128.csv` structure:
+    - `raman_shift_cm-1`: numeric (200 to 2000)
+    - `intensity`: numeric
+    
+    Wait, the intensities in `T128.csv` range from -22 to 996. This implies a significant baseline/offset that needs correction or at least attention. The prompt explicitly asks for IPBSA baseline order 5 before matching.
+    
+    Plan:
+    1. Run analysis to load both files.
+    2. Find the unique set of `raman_shift_cm_1` from the library or any common ground (actually, since they share a range of 200-2000, I can just use a standard linear grid if needed, but interpolation is specifically requested).
+    3. The user wants "Interpolate T128.csv and reference_library.csv onto the reference axis". A good reference axis would be unique `raman_shift_cm-1` values from the library or even simpler, just ensure they are on a common grid (e.g., 200 to 2000 by 1).
+    4. Since I have multiple items in `reference_library.csv`, but some share the same `material`, I should group them if needed? No, the prompt says "find the material with the highest cosine similarity". There are several entries for each material (e.g., PS_01, PS_02...). Actually, it might be that one item belongs to a specific material.
+    5. Let's re-read: "Find the material... If two scores are equal, choose the one whose spectrum_id comes first in alphabetical order." This implies I should compare `T128` against all entries in the library.
+    
+    Wait, if there are multiple entries for "polystyrene" (e.g., PS_01, PS_02), and they both have high similarity, then what?
+    Actually, usually "material" is the unique key for the final output. If a material has two very similar spectra, or one is higher than another... The instructions say: "If two scores are equal, choose the one whose spectrum_id comes first in alphabetical order." This handles the case where two *different* items (perhaps different samples of the same material) have identical scores.
+    
+    Wait, if two entries for the same material both beat everything else?
+    "find the material with the highest cosine similarity". If a material wins, I return that string. The tie-breaking rule is on `spectrum_id`. This implies I'm comparing against individual records in the library and then reporting the material of the winning record.
+    
+    Steps:
+    1. Identify common axis.
+    2. Interpolate both to this axis. (Or interpolate T128 onto the library's unique x-values if they are many). Since there are 21,612 rows in the library and only 1,801 in T128, I'll probably just make sure they share a consistent grid or use `np.interp`.
+    3. Apply IPBSA (order 5) to both? Or just to T128? The prompt says "Interpolate [both]... apply IPBSA... then find...". This suggests applying it to the data that needs it before comparison.
+    4. L2 Normalize: `y_norm = y / sqrt(sum(y**2))`. Note: if there are negative values (T128 has some), I should be careful with standard normalization, but usually, IPBSA removes the baseline and then we normalize.
+    5. Calculate Cosine Similarity: $cos(\theta) = \frac{A \cdot B}{\|A\| \|B\|}$. Since they will be L2 normalized first, this is just their dot product.
+    
+    Let's refine "Interpolate onto reference axis".
+    The library has 21612 rows. A typical Raman range is 200-2000 with 1 cm$^{-1}$ steps (total 1801 points). T128 has exactly 1801 points from 200 to 2000 in increments of 1.
+    So, the "reference axis" is likely the set of values $x \in \{200, 201, \dots, 2000\}$.
+    
+    Calculation:
+    - Load `T128.csv` and `reference_library.csv`.
+    - T128 processing:
+        - Interpolate onto [200, 201, ..., 2000] (though it's already there).
+        - IPBSA order 5.
+        - L2 normalize.
+    - Library processing:
+        - For each unique `spectrum_id`:
+            - Interpolate onto [200, 201, ..., 2000].
+            - IPBSA order 5.
+            - L2 normalize.
+        - Compare T128 to every entry in the library.
+    
+    Actually, since many items have the same material, I only care about the best matching *spectrum* and then its material.
+    
+    Let's start analysis.
+    The code will:
+    1. Load `T128.csv` (which is just x=raman_shift, y=intensity).
+    2. Load `reference_library.csv`.
+    3. Find unique items in library? Or just process each row? There are many rows, so I should do it efficiently.
+    
+    Note on IPBSA: The tool `apply_background_subtraction` is for the "last" spectrum or a file. If I'm using `run_analysis`, I can use the internal `ipbsa(y, order=5)` function.
+    
+    Wait, if I have many spectra in `reference_library.csv`, they are likely unique per `spectrum_id`.
+    I will process T128 once and all library items in a loop or vectorised if possible? No, 20k is small enough for a simple comprehension or loop in Python.
+    
+    Wait, I need to make sure the "reference axis" is consistent. Since both start at 200 and end at 2000, I'll just use `np.linspace(200, 2000, 1801)` as the reference.
+[19:29:50.667] [Gemma TEXT] step 4 · (빈 응답 — 컨텍스트 초과 의심)
+[19:29:50.667] [Gemma STATS] prompt 17271 tok · out 3246 tok · wall 26.14s · eval 25.68s (126.4 tok/s) · load 0.24s · done=stop
+[19:29:50.667] [ERROR] 33.94s · LLM 4회 · 도구 3회
+    The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check _NUM_CTX and the Ollama host.
+══════════════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════════════
+ AILA · T128 · gemma4:12b @ http://192.168.1.15:11434
+ session : bench_2026-08-10_AILA_AILA_T128_c803d7
+ started : 2026-08-10 19:30:05
+ thinking: ON — gemma4:12b capabilities=['completion', 'vision', 'audio', 'tools', 'thinking'] → thinking 지원
+══════════════════════════════════════════════════════════════════════════════
+
+[19:30:05.868] [QUESTION]
+    Interpolate T128.csv and reference_library.csv onto the reference axis, apply IPBSA baseline order 5 and L2 normalization, then find the material with the highest cosine similarity. If two scores are equal, choose the one whose spectrum_id comes first in alphabetical order. 
+    
+    ---
+    When you are done, end your reply with a JSON block holding the values you were asked to
+    report, like this:
+    
+    ```json
+    {"key": value, ...}
+    ```
+    
+    The JSON block must include these keys, spelled exactly like this, with the shape described for each:
+      "material": string - one of "polystyrene", "PET", "PMMA", "calcite", "aragonite", "silicon"
+    
+    Give plain JSON numbers and strings - no units, no LaTeX, no thousands separators. If the
+    task asked you to refuse, explain, or ask a question instead of measuring, say so in plain
+    text and omit the block.
+[19:30:05.878] [Gemma <- PROMPT] step 1 · ReAct propose · 2 msgs
+    system(9236ch) · human(825ch)
+[19:30:11.340] [Gemma THINKING] step 1 · 1286ch
+    The user wants me to perform several data processing steps on two files: `T128.csv` and `reference_library.csv`.
+    
+    Here's the plan:
+    1.  **Identify Files**: Call `list_uploaded_files` to find the IDs for `T128.csv` and `reference_library.csv`.
+    2.  **Inspect Files**: Use `inspect_file` on both files to understand their structure (columns, types, etc.). I need to identify which column is the Raman shift/wavelength axis and which is intensity.
+    3.  **Data Processing & Analysis**: Use `run_analysis` to:
+        *   Load both datasets.
+        *   Determine a common "reference axis" from the reference library (or use the one provided in the prompt, though it just says "the reference axis"). Looking at the filenames, I'll likely have to choose a consistent x-axis.
+        *   Interpolate `T128.csv` onto this axis.
+        *   Apply IPBSA baseline correction (order 5) and L2 normalization on both datasets.
+        *   Calculate cosine similarity between the processed `T128.csv` spectrum and each spectrum in `reference_library.csv`.
+        *   Identify the material with the highest similarity, breaking ties alphabetically by `spectrum_id`.
+    4.  **Report**: Determine which material (polystyrene, PET, PMMA, calcite, aragonite, silicon) matches the best.
+    
+    Let's start by listing and inspecting the files.
+[19:30:11.340] [Gemma TOOL_CALLS] step 1 · 1개
+    1) list_uploaded_files({})
+[19:30:11.340] [Gemma STATS] prompt 15753 tok · out 347 tok · wall 5.46s · eval 2.74s (126.7 tok/s) · load 0.27s · done=stop
+[19:30:11.340] [ReAct REASONING] step 1 · 도구 1개 실행 결정 → list_uploaded_files
+[19:30:11.340] [ReAct ACTING] step 1 · list_uploaded_files
+    {}
+[19:30:11.340] [ReAct OBSERVATION] step 1 · list_uploaded_files · ok · 0 ms
+    {"ok": true, "count": 2, "files": [{"file_id": "2026-08-10/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829}, {"file_id": "2026-08-10/T128.csv", "filename": "T128.csv", "kind": "text", "bytes": 36380}]}
+[19:30:11.341] [Gemma <- PROMPT] step 2 · ReAct propose · 4 msgs
+    system(9236ch) · human(825ch) · ai(0ch)[list_uploaded_files] · tool(246ch)
+[19:30:12.431] [Gemma THINKING] step 2 · 104ch
+    I have two files: `2026-08-10/reference_library.csv` and `2026-08-10/T128.csv`. Now I will inspect them.
+[19:30:12.432] [Gemma TOOL_CALLS] step 2 · 1개
+    1) inspect_file({"file_id": "2026-08-10/reference_library.csv"})
+[19:30:12.432] [Gemma STATS] prompt 16229 tok · out 82 tok · wall 1.09s · eval 0.64s (127.7 tok/s) · load 0.25s · done=stop
+[19:30:12.433] [ReAct REASONING] step 2 · 도구 1개 실행 결정 → inspect_file
+[19:30:12.433] [ReAct ACTING] step 2 · inspect_file
+    {"file_id": "2026-08-10/reference_library.csv"}
+[19:30:12.538] [ReAct OBSERVATION] step 2 · inspect_file · ok · 105 ms
+    {"ok": true, "file_id": "2026-08-10/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829, "n_rows": 21612, "n_cols": 4, "columns": ["spectrum_id", "material", "raman_shift_cm-1", "intensity"], "dtypes": {"spectrum_id": "text", "material": "text", "raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 21612}, "intensity": {"min": 0.017118, "max": 1000.0, "mean": 25.348885, "n_valid": 21612}}, "head": [["PS_01", "polystyrene", 200.0, 0.072777], ["PS_01", "polystyrene", 201.0, 0.072997], ["PS_01", "polystyrene", 202.0, 0.073218], ["PS_01", "polystyrene", 203.0, 0.07344], ["PS_01", "polystyrene", 204.0, 0.073663]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/reference_library.csv']."}
+[19:30:12.539] [Gemma <- PROMPT] step 3 · ReAct propose · 6 msgs
+    system(9236ch) · human(825ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch)
+[19:30:13.919] [Gemma THINKING] step 3 · 202ch
+    `reference_library.csv`:
+    - `spectrum_id`: text
+    - `material`: text (e.g., "polystyrene")
+    - `raman_shift_cm-1`: numeric (200 to 2000) -> This is the x-axis.
+    - `intensity`: numeric
+    
+    Now inspect `T128.csv`.
+[19:30:13.920] [Gemma TOOL_CALLS] step 3 · 1개
+    1) inspect_file({"file_id": "2026-08-10/T128.csv"})
+[19:30:13.920] [Gemma STATS] prompt 16793 tok · out 113 tok · wall 1.38s · eval 0.90s (126.1 tok/s) · load 0.24s · done=stop
+[19:30:13.920] [ReAct REASONING] step 3 · 도구 1개 실행 결정 → inspect_file
+[19:30:13.920] [ReAct ACTING] step 3 · inspect_file
+    {"file_id": "2026-08-10/T128.csv"}
+[19:30:13.940] [ReAct OBSERVATION] step 3 · inspect_file · ok · 20 ms
+    {"ok": true, "file_id": "2026-08-10/T128.csv", "filename": "T128.csv", "kind": "text", "bytes": 36380, "n_rows": 1801, "n_cols": 2, "columns": ["raman_shift_cm-1", "intensity"], "dtypes": {"raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 1801}, "intensity": {"min": -22.026951, "max": 996.875675, "mean": 14.414439, "n_valid": 1801}}, "head": [[200.0, -6.29239], [201.0, -5.68124], [202.0, 3.907427], [203.0, 5.276485], [204.0, -1.158305]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/T128.csv']."}
+[19:30:13.941] [Gemma <- PROMPT] step 4 · ReAct propose · 8 msgs
+    system(9236ch) · human(825ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[inspect_file] · tool(865ch)
+[19:30:27.800] [Gemma THINKING] step 4 · 4576ch
+    `T128.csv`:
+    - `raman_shift_cm-1`: numeric (200 to 2000)
+    - `intensity`: numeric
+    
+    The columns are the same: "raman_shift_cm-1" and "intensity". Both files have a range of 200 to 2000. Wait, `T128` only has 1801 rows while `reference_library` has 21612. This means the reference library might contain multiple spectra or just more data points over the same range. Actually, there are 4 columns in the reference library: `spectrum_id`, `material`, `raman_shift_cm-1`, and `intensity`.
+    
+    I need to:
+    1. Load both files using `run_analysis`.
+    2. Preprocess them:
+       a. Use IPBSA (order 5) on the T118 spectrum (since it has negative values, it clearly needs baseline correction).
+       b. Actually, both should probably be corrected or at least compared after normalization. The instructions say "apply IPBSA baseline order 5 and L2 normalization" to *both*? Let's re-read: "Interpolate T128.csv and reference_library.csv onto the reference axis, apply IPBSA baseline order 5 and L2 normalization". This likely means both should be processed this way before comparison.
+       c. Interpolate `T128` to match the coordinates of a common grid or just use the 200-2000 range if they are aligned. Wait, since I have to find the best material, and there are multiple entries in `reference_library`, it's better to process both into consistent arrays before comparison.
+    
+    Plan:
+    1. Load files using `run_analysis`.
+    2. Inside `run_analysis`:
+        - Get unique reference axes (likely just 200...2000, but I should check if they are exactly the same). Actually, looking at the stats, both are 200 to 2000. However, `T128` has only 1801 rows while `reference_library` has many more.
+        - Interpolate `T128` values to match a target grid. A good target is the unique values of `raman_shift_cm-1` in `reference_library` or a standard linspace if I can't distinguish them easily. Actually, let's just interpolate `T128` onto the unique x-values of the reference library to ensure they are compared point-to-point.
+        - Apply IPBSA(order=5) on both. (Wait, I should do this *before* interpolation or after? Since the instruction says "Interpolate... and ... apply", it's probably safer to interpolate first onto a common grid then baseline correct/normalize). But if I don't know the target length, it's better to have them on a shared domain.
+        - L2 normalization: `y = y / sqrt(sum(y**2))`. Or is it `y / max(y)`? "L2 normalization" usually means dividing by the Frobenius norm (or just $\sqrt{\sum y^2}$).
+    
+    Wait, if I use `run_analysis` for the whole process:
+    - `spectra`: a list of dicts. `T128` is one spectrum. `reference_library` contains many entries. But wait, `reference_library` has 4 columns. I can treat each unique `spectrum_id` or just calculate similarity per material? The goal is "find the material with the highest cosine similarity".
+    - If multiple spectra share a material (e.g., several 'polystyrene' samples), what then? The prompt says "the material" and lists standard types. I should probably average them if there are multiples, or just pick one? No, wait. There are 6 possible answers in the schema: `polystyrene`, `PET`, `PMMA`, `calcite`, `aragonite`, `silicon`. Each of these is a category.
+    - The similarity calculation: cosine_sim(A, B) = $(A \cdot B) / (||A|| \cdot ||B||)$. If I've already done L2 normalization ($y_{norm} = y / \|y\|$), then the cosine similarity between two normalized vectors is just their dot product.
+    
+    Let's refine:
+    1. Load `T128` and `reference_library`.
+    2. Find unique x-values in `reference_library`.
+    3. Interpolate T128 to these values.
+    4. Perform IPBSA(order=5) on the interpolated T128 and all segments of reference library.
+    5. L2 normalize both. (Actually, if they are L2 normalized, cosine similarity is just the dot product).
+    6. Group `reference_library` by material. For each material, calculate the mean (or take first?) similarity? Wait, "find the material". If there's only one "polystyrene" entry but multiple of others, I still need to find which label wins.
+    7. Logic: The query says "find the material with the highest cosine similarity". There might be multiple measurements for "polystyrene", "PET", etc. in `reference_library`. But usually, these are fixed references.
+    
+    Wait, what if there are duplicate materials? Let's see how many unique values are in the 'material' column.
+    Actually, looking at `refernce_library.csv`, it has 21612 rows and only a few material types are mentioned in the prompt. This suggests multiple measurements/points for several items or a lot of data points (e.g. many segments).
+    
+    Let's start by loading.
+[19:30:27.802] [Gemma TEXT] step 4 · (빈 응답 — 컨텍스트 초과 의심)
+[19:30:27.802] [Gemma STATS] prompt 17317 tok · out 1678 tok · wall 13.86s · eval 13.39s (125.3 tok/s) · load 0.23s · done=stop
+[19:30:27.802] [ERROR] 21.94s · LLM 4회 · 도구 3회
+    The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check _NUM_CTX and the Ollama host.
+══════════════════════════════════════════════════════════════════════════════
+

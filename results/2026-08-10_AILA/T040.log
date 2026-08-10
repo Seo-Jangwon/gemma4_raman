@@ -1,0 +1,343 @@
+══════════════════════════════════════════════════════════════════════════════
+ AILA · T040 · gemma4:12b @ http://192.168.1.15:11434
+ session : bench_2026-08-10_AILA_AILA_T040_83258c
+ started : 2026-08-10 15:54:00
+ thinking: ON — gemma4:12b capabilities=['completion', 'vision', 'audio', 'tools', 'thinking'] → thinking 지원
+══════════════════════════════════════════════════════════════════════════════
+
+[15:54:00.407] [QUESTION]
+    Remove the narrow spikes from T040.csv and save the corrected spectrum. Treat a point as a spike when it deviates from the 5-point moving median by more than 100x the MAD(Median Absolute Deviation), and replace it by linear interpolation from its neighbours. Report the positions of the spikes you removed. 
+    
+    ---
+    When you are done, end your reply with a JSON block holding the values you were asked to
+    report, like this:
+    
+    ```json
+    {"key": value, ...}
+    ```
+    
+    The JSON block must include these keys, spelled exactly like this, with the shape described for each:
+      "spikes": list of numbers - the Raman shift in cm-1 of every point you treated as a spike, ascending. Numbers only, not objects
+    
+    Give plain JSON numbers and strings - no units, no LaTeX, no thousands separators. If the
+    task asked you to refuse, explain, or ask a question instead of measuring, say so in plain
+    text and omit the block.
+[15:54:00.422] [Gemma <- PROMPT] step 1 · ReAct propose · 2 msgs
+    system(9236ch) · human(893ch)
+[15:54:05.518] [Gemma THINKING] step 1 · 958ch
+    The user wants me to process a specific file "T040.csv", identify narrow spikes based on a specific criteria (deviating from 5-point moving median by more than 100x MAD), replace them with linear interpolation, save the result, and report the positions of the removed spikes in a JSON block.
+    
+    Plan:
+    1. List uploaded files to find "T040.csv".
+    2. Inspect "T040.csv" to identify the Raman shift column (cm-1) and intensity.
+    3. Use `run_analysis` to:
+        a. Load the data from "T040.csv".
+        b. Calculate the 5-point moving median.
+        c. Calculate the Median Absolute Deviation (MAD).
+        d. Identify indices where $|intensity - median| > 100 \times MAD$.
+        e. Replace these values with linear interpolation from neighbors.
+        f. Save the corrected spectrum using `save_result`.
+        g. Print the Raman shifts of the removed spikes to the console for reporting.
+    4. Report the results and provide the JSON block as requested.
+    
+    First step: List uploaded files.
+[15:54:05.518] [Gemma TOOL_CALLS] step 1 · 1개
+    1) list_uploaded_files({})
+[15:54:05.518] [Gemma STATS] prompt 15761 tok · out 268 tok · wall 5.10s · eval 2.12s (126.5 tok/s) · load 0.25s · done=stop
+[15:54:05.519] [ReAct REASONING] step 1 · 도구 1개 실행 결정 → list_uploaded_files
+[15:54:05.519] [ReAct ACTING] step 1 · list_uploaded_files
+    {}
+[15:54:05.519] [ReAct OBSERVATION] step 1 · list_uploaded_files · ok · 0 ms
+    {"ok": true, "count": 1, "files": [{"file_id": "2026-08-10/T040.csv", "filename": "T040.csv", "kind": "text", "bytes": 36472}]}
+[15:54:05.519] [Gemma <- PROMPT] step 2 · ReAct propose · 4 msgs
+    system(9236ch) · human(893ch) · ai(0ch)[list_uploaded_files] · tool(127ch)
+[15:54:06.560] [Gemma THINKING] step 2 · 124ch
+    I found the file: `2026-08-10/T040.csv`. Now I need to inspect it to find the correct columns for Raman shift and intensity.
+[15:54:06.560] [Gemma TOOL_CALLS] step 2 · 1개
+    1) inspect_file({"file_id": "2026-08-10/T040.csv"})
+[15:54:06.560] [Gemma STATS] prompt 16108 tok · out 75 tok · wall 1.04s · eval 0.59s (126.8 tok/s) · load 0.23s · done=stop
+[15:54:06.560] [ReAct REASONING] step 2 · 도구 1개 실행 결정 → inspect_file
+[15:54:06.561] [ReAct ACTING] step 2 · inspect_file
+    {"file_id": "2026-08-10/T040.csv"}
+[15:54:06.580] [ReAct OBSERVATION] step 2 · inspect_file · ok · 19 ms
+    {"ok": true, "file_id": "2026-08-10/T040.csv", "filename": "T040.csv", "kind": "text", "bytes": 36472, "n_rows": 1801, "n_cols": 2, "columns": ["raman_shift_cm-1", "intensity"], "dtypes": {"raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 1801}, "intensity": {"min": -19.536069, "max": 1373.736242, "mean": 24.940255, "n_valid": 1801}}, "head": [[200.0, -5.172294], [201.0, -12.193538], [202.0, 10.157415], [203.0, 0.892665], [204.0, -7.376657]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/T040.csv']."}
+[15:54:06.607] [Gemma <- PROMPT] step 3 · ReAct propose · 6 msgs
+    system(9236ch) · human(893ch) · ai(0ch)[list_uploaded_files] · tool(127ch) · ai(0ch)[inspect_file] · tool(870ch)
+[15:54:29.076] [Gemma THINKING] step 3 · 6320ch
+    The columns are "raman_shift_cm-1" and "intensity".
+    
+    Now I will perform the spike removal in `run_analysis`.
+    Algorithm:
+    1. Load data from file 2026-08-10/T040.csv.
+    2. Calculate moving median (window size 5).
+    3. Calculate MAD of the signal. Note: Since "MAD" is usually calculated over a window or the whole signal? Usually, for spikes, we look at local variations, but "the MAD" often implies the global MAD unless specified as local. However, if I check standard practice for spike detection in Raman, it's usually a rolling MAD. But the prompt says "the MAD(Median Absolute Deviation)", which often implies one value or the median of absolute differences from the median.
+    Let's re-read: "...deviates from the 5-point moving median by more than 100x the MAD(...)". This suggests the MAD is a constant for the whole spectrum to determine threshold, OR it refers to the rolling MAD? Standard "MAD" in signal processing without the word "moving" or "rolling" usually means the global one. However, some definitions of spike removal use a local window. Let's look at the phrasing: "the 5-point moving median" (local) vs "the MAD(Median Absolute Deviation)" (usually global). I will calculate the standard MAD on the whole spectrum to define the threshold unless it seems extremely small/large, but logically it defines a global "spikeiness".
+    Wait, if I use the *global* MAD, then 100x is a very large multiplier. If the median of absolute deviations from the median is $M$, a spike is $|y_i - \text{med\_local}| > 100 \times M$.
+    
+    Let's check my calculation for MAD:
+    Median = median(intensities)
+    MAD = median(|intensity - Median|)
+    
+    Step-by-step implementation in `run_analysis`:
+    1. Get data from `files['2026-08-10/T040.csv']['table']`.
+    2. Compute 5-point moving average? No, the prompt says "moving median". I'll use a window of 5 (centered).
+    3. Calculate global MAD: $MAD = \text{median}(|y - \text{median}(y)|)$. Or since the mean might be shifted by baseline, usually $\text{med}(|y - \text{median}(y)|)$. Actually, standard MAD is often used on residuals or just the raw signal if it's flat-ish.
+    4. Identify indices where $|y_i - \text{moving\_median}_i| > 100 \times MAD$.
+    5. Replace these with linear interpolation.
+    6. Print results.
+    
+    Wait, I should consider if $MAD=0$ or very small. If the denominator is 0, no spikes are found.
+    
+    Let's write the code.
+    ```python
+    import numpy as np
+    from scipy.ndimage import uniform_filter1d # not really for median
+    
+    # Moving median calculation:
+    def moving_median(data, window=5):
+        return np.convolve(data, np.ones(window)/window, mode='same') # No, that's mean.
+    ```
+    Actually, I can use `scipy.signal` or just a simple sliding window in pure numpy to get the median. Since it's only 5 points, it's fast.
+    
+    Wait, if $100 \times MAD$ is used as a threshold for "spikes", and common Raman intensities are hundreds/thousands, MAD could be around 1-10. So $100 \times MAD$ would be ~100-1000.
+    The instruction says: "deviates from the 5-point moving median by more than 100x the MAD(Median Absolute Deviation)".
+    
+    Let's refine:
+    `m = np.median(y)`
+    `mad_val = np.median(np.abs(y - m))`
+    Then check `abs(y[i] - med5[i]) > 100 * mad_val`.
+    
+    I will use a helper function for moving median or just do it manually with slicing/rolling.
+    
+    ```python
+    import numpy as np
+    
+    # Get data
+    file_data = files['2026-08-10/T040.csv']['table']
+    x = file_data['raman_shift_cm-1']
+    y = file_data['intensity']
+    
+    # Calculate global MAD
+    med_val = np.median(y)
+    mad_val = np.median(np.abs(y - med_val))
+    
+    # Moving median (5 points)
+    def get_moving_median(data, window=5):
+        res = np.zeros_like(data)
+        pad = window // 2
+        padded = np.pad(data, pad, mode='reflect')
+        for i in range(len(data)):
+            res[i] = np.median(padded[i:i+window])
+        return res
+    
+    m_med5 = get_moving_median(y, 5)
+    
+    # Find spikes
+    spike_indices = []
+    for i in range(len(y)):
+        if abs(y[i] - m_med5[i]) > 100 * mad_val:
+            spike_indices.append(i)
+    
+    # Linear Interpolation for these indices
+    y_new = y.copy().astype(float)
+    for idx in spike_indices:
+        # To interpolate, we need neighbors. If first or last, just use nearest.
+        if idx == 0:
+            y_new[idx] = y_new[idx+1] if len(y_new)>1 else y_new[idx]
+        elif idx == len(y)-1:
+            y_new[idx] = y_new[idx-1]
+        else:
+            # Linear interpolation from nearest non-spike neighbors or just immediate neighbors?
+            # "interpolate from its neighbours" usually means the closest points in the original sequence.
+            # Since spikes are 'narrow', we can assume i-1 and i+1 are valid or find them.
+            # To be safe, use a small window to find nearest non-spike.
+            prev_idx = idx - 1
+            while prev_idx >= 0 and y_new[prev_idx] == y[prev_idx] and (abs(y_new[prev_idx] - m_med5[prev_idx]) <= 100 * mad_val): # wait, that's logic for "not a spike"
+                # Let's simplify: just use linear interpolation of indices.
+                pass
+            # Actually, let's just do standard linear interp between i-1 and i+1 if they are not spikes. 
+            # If they are, go further.
+            pass
+    
+    # Simplest way for "interpolate from neighbors":
+    # y_new[i] = (y[i-1]*x[i+1] + y[i+1]*x[i]) / (x[i+1]+x[i-1])? No, x is 1 unit apart.
+    # Just use the average of neighbors if they exist.
+    ```
+    
+    Actually, let's keep it simple for interpolation: For each `idx` in `spike_indices`, we replace `y_new[idx]` by interpolating between `y_new[max(0, idx-1)]` and `y_new[min(len(y)-1, idx+1)]`.
+    
+    Wait, if the peaks are "narrow", a spike is usually just one point or very few.
+    If $y$ values are at indices $i-1, i, i+1$. If $i$ is a spike, its value becomes $(y_{i-1} + y_{i+1})/2$.
+    
+    Wait, if multiple consecutive points are spikes? The prompt implies they are "narrow", so likely single points.
+    I will do:
+    ```python
+        if idx > 0 and idx < len(y)-1:
+            y_new[idx] = (y_new[idx-1] + y_new[idx+1]) / 2.0
+        elif idx == 0:
+            y_new[idx] = y_new[1]
+        elif idx == len(y)-1:
+            y_new[idx] = y_new[idx-1]
+    ```
+    
+    One more thing: I must save the result.
+    `save_result("T040_corrected.csv", y_new, raman_shift=x)`
+    
+    I will also print the Raman shifts of the spikes.
+    
+    Let's check if `mad_val` is 0. If so, any deviation from median > 0 is a spike? No, usually it means we don't flag them or use a small constant. But 100x MAD is likely $>0$.
+    
+    I will perform the calculation in one block.
+[15:54:29.076] [Gemma TEXT] step 3 · (빈 응답 — 컨텍스트 초과 의심)
+[15:54:29.077] [Gemma STATS] prompt 16600 tok · out 2781 tok · wall 22.47s · eval 22.00s (126.4 tok/s) · load 0.24s · done=stop
+[15:54:29.077] [ERROR] 28.67s · LLM 3회 · 도구 2회
+    The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check _NUM_CTX and the Ollama host.
+══════════════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════════════
+ AILA · T040 · gemma4:12b @ http://192.168.1.15:11434
+ session : bench_2026-08-10_AILA_AILA_T040_f4c459
+ started : 2026-08-10 15:54:44
+ thinking: ON — gemma4:12b capabilities=['completion', 'vision', 'audio', 'tools', 'thinking'] → thinking 지원
+══════════════════════════════════════════════════════════════════════════════
+
+[15:54:44.353] [QUESTION]
+    Remove the narrow spikes from T040.csv and save the corrected spectrum. Treat a point as a spike when it deviates from the 5-point moving median by more than 100x the MAD(Median Absolute Deviation), and replace it by linear interpolation from its neighbours. Report the positions of the spikes you removed. 
+    
+    ---
+    When you are done, end your reply with a JSON block holding the values you were asked to
+    report, like this:
+    
+    ```json
+    {"key": value, ...}
+    ```
+    
+    The JSON block must include these keys, spelled exactly like this, with the shape described for each:
+      "spikes": list of numbers - the Raman shift in cm-1 of every point you treated as a spike, ascending. Numbers only, not objects
+    
+    Give plain JSON numbers and strings - no units, no LaTeX, no thousands separators. If the
+    task asked you to refuse, explain, or ask a question instead of measuring, say so in plain
+    text and omit the block.
+[15:54:44.365] [Gemma <- PROMPT] step 1 · ReAct propose · 2 msgs
+    system(9236ch) · human(893ch)
+[15:54:52.521] [Gemma THINKING] step 1 · 2437ch
+    The user wants me to remove "narrow spikes" from a specific file `T040.csv`.
+    I need to:
+    1.  Identify and load `T040.csv`. I'll start by listing uploaded files or checking if it exists in the session artifacts. Since the prompt mentions `T040.csv` specifically, and my instructions say "If the user attaches a data file... call list_uploaded_files", I'll assume it's an uploaded file first, but the title of the session is `bench_2026-08-10_AILA_AILA_T040_f4c459`, which suggests a filename. Wait, if it's "uploaded", I use `list_uploaded_files`. If it's part of the measurement session (which is likely given the session name), it might be in `list_results` or `list_session_artifacts`.
+    2.  Actually, looking at the prompt: "Remove the narrow spikes from T040.csv". The filename `T040.csv` matches the session's specific identifier part. I should check if there is a file named `T040.csv` in the current session or uploaded files.
+    3.  I'll use `list_uploaded_files` to see if it's an external upload.
+    4.  If not found as an upload, I'll look for it in my local results/artifacts using `list_session_artifacts` (maybe it was a measurement result). Wait, the prompt says "T040.csv". It might be a file already known or just an identifier of a specific peak.
+    5.  Wait, looking at the tool `load_spectrum`, I can pass a filename to it. Let's first see what files are available.
+    
+    Actually, standard procedure for "removed spikes" is:
+    1.  Load the data using `run_analysis`.
+    2.  Implement the logic:
+        -   Calculate 5-point moving median.
+        -   Calculate MAD (Median Absolute Deviation) of the *difference* between the original signal and the rolling median? Or just the raw signal's MAD? Usually, it's relative to the local window or global. The instruction says "deviates from the 5-point moving median by more than 100x the MAD". This implies $MAD$ should be calculated on the whole sequence (or a relevant part) or maybe per window. Usually, in these types of tasks, it's over the whole spectrum unless specified.
+        -   Actually, let's look at the logic: `|y_i - median(window)| > 100 * MAD`.
+        -   Identify indices where this condition is met.
+        -   Replace those points with linear interpolation.
+    3.  Save the corrected spectrum using `save_result` in the same call.
+    4.  Report the Raman shift values of the removed spikes.
+    
+    Let's start by finding the file. I will check if "T040.csv" is an uploaded file or a session artifact.
+[15:54:52.521] [Gemma TOOL_CALLS] step 1 · 1개
+    1) list_uploaded_files({})
+[15:54:52.522] [Gemma STATS] prompt 15761 tok · out 689 tok · wall 8.16s · eval 5.45s (126.4 tok/s) · load 0.24s · done=stop
+[15:54:52.522] [ReAct REASONING] step 1 · 도구 1개 실행 결정 → list_uploaded_files
+[15:54:52.522] [ReAct ACTING] step 1 · list_uploaded_files
+    {}
+[15:54:52.523] [ReAct OBSERVATION] step 1 · list_uploaded_files · ok · 1 ms
+    {"ok": true, "count": 1, "files": [{"file_id": "2026-08-10/T040.csv", "filename": "T040.csv", "kind": "text", "bytes": 36472}]}
+[15:54:52.525] [Gemma <- PROMPT] step 2 · ReAct propose · 4 msgs
+    system(9236ch) · human(893ch) · ai(0ch)[list_uploaded_files] · tool(127ch)
+[15:54:54.020] [Gemma THINKING] step 2 · 261ch
+    The file `T040.csv` is available as an uploaded file with ID `2026-08-10/T040.csv`.
+    
+    Now I need to:
+    1.  Inspect the file structure using `inspect_file`.
+    2.  Use `run_analysis` to process it.
+    
+    Wait, "T040.csv" is a single spectrum. Let's see what columns it has.
+[15:54:54.020] [Gemma TOOL_CALLS] step 2 · 1개
+    1) inspect_file({"file_id": "2026-08-10/T040.csv"})
+[15:54:54.021] [Gemma STATS] prompt 16529 tok · out 134 tok · wall 1.50s · eval 1.06s (126.8 tok/s) · load 0.25s · done=stop
+[15:54:54.021] [ReAct REASONING] step 2 · 도구 1개 실행 결정 → inspect_file
+[15:54:54.021] [ReAct ACTING] step 2 · inspect_file
+    {"file_id": "2026-08-10/T040.csv"}
+[15:54:54.038] [ReAct OBSERVATION] step 2 · inspect_file · ok · 17 ms
+    {"ok": true, "file_id": "2026-08-10/T040.csv", "filename": "T040.csv", "kind": "text", "bytes": 36472, "n_rows": 1801, "n_cols": 2, "columns": ["raman_shift_cm-1", "intensity"], "dtypes": {"raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 1801}, "intensity": {"min": -19.536069, "max": 1373.736242, "mean": 24.940255, "n_valid": 1801}}, "head": [[200.0, -5.172294], [201.0, -12.193538], [202.0, 10.157415], [203.0, 0.892665], [204.0, -7.376657]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/T040.csv']."}
+[15:54:54.039] [Gemma <- PROMPT] step 3 · ReAct propose · 6 msgs
+    system(9236ch) · human(893ch) · ai(0ch)[list_uploaded_files] · tool(127ch) · ai(0ch)[inspect_file] · tool(870ch)
+[15:55:11.661] [Gemma THINKING] step 3 · 4550ch
+    The columns are `raman_shift_cm-1` and `intensity`.
+    
+    Plan:
+    1.  Run a script to find spikes.
+        -   Load the data from `file_ids=["2026-08-10/T040.csv"]`.
+        -   Calculate the 5-point moving median of `intensity`. (Padding or shrinking? Usually, standard convolution with padding is best for consistent size).
+        -   Calculate the MAD of the intensity. $MAD = \text{median}(|y - \text{median}(y)|)$. Wait, usually it's median of absolute differences from the mean/median? Yes, "Median Absolute Deviation" is $\text{median}(|x_i - \text{median}(X)|)$.
+        -   Identify indices where $|y_i - \text{median\_window}_i| > 100 \cdot MAD$.
+        -   Collect the `raman_shift_cm-1` values at those points.
+        -   Linearly interpolate them. Actually, since I need to save it as a result, I should do the interpolation and then call `save_result`.
+    
+    Wait, "replace by linear interpolation from its neighbours" means if $y_i$ is a spike, and its neighbors are $y_{i-1}$ and $y_{i+1}$, interpolate.
+    Since there might be adjacent spikes (though unlikely for 100x MAD), I'll use `np.interp`.
+    
+    I will perform this in one `run_analysis` call to ensure the output of the calculation can be immediately saved as a result and the report values collected.
+    
+    Let's check if "MAD" is standard or something specific.
+    Median Absolute Deviation (MAD) = $\text{median}(|x - \text{median}(X)|)$.
+    Calculation:
+    1. $y$ = intensity vector.
+    2. `m_med` = median of a 5-point window for each point in $y$.
+    3. $\sigma_{mad} = \text{median}(\text{abs}(y - \text{median}(y)))$ ? Or is it the MAD of the data? "the MAD". Usually implies the global MAD of the signal (or of the residuals?). Let's assume it means the standard Median Absolute Deviation of the intensity array.
+    
+    Wait, if I have multiple consecutive spikes, interpolation needs to be robust.
+    But for 100x MAD, they are likely isolated single points.
+    
+    I will write a script that:
+    1. Reads `files` and gets $y$ (intensity) and $x$ (raman_shift).
+    2. Calculates moving median using `np.convolve(y, np.ones(5)/5, mode='same')`. Wait, that's a mean. A 5-point moving *median* is better done with scipy or just rolling. Since I don't have `scipy`, I can use a simple sliding window median or pad and convolve for mean? No, the prompt says "moving median".
+    Actually, standard numpy doesn't have a rolling median easily. Let me try to implement it: `y_med = np.array([np.median(y[max(0, i-2):min(len(y), i+3)]) for i in range(len(y))])`.
+    
+    Wait, the prompt says "difference from the 5-point moving median".
+    If I use `np.convolve` to find a mean and then call it "median", is that wrong? Yes.
+    I'll use a manual loop or windowing for the 5rd order if needed, but since it's only 1000 points, a list comprehension or a small convolution kernel approach (if I could do median) is fine. Actually, `np.convolve` with `[0.2, 0.2, 0.2, 0.2, 0.2]` is a mean.
+    
+    Let's think. Can I use `np.median(y_window)`?
+    $x_{i}$ is the point. $M_i = \text{med}(y[i-2:i+3])$.
+    $D_i = |y_i - M_i|$.
+    Condition: $D_i > 100 * MAD$.
+    
+    What's "the MAD"?
+    Standard definition of MAD is $\text{median}(|x - \text{median}(x)|)$.
+    I'll use that.
+    
+    Steps for the script:
+    1. Load file `2026-08-10/T040.csv`.
+    2. Compute rolling median (5 points).
+    3. Calculate global MAD of intensity.
+    4. Identify indices where $|y_i - \text{med}_i| > 100 \cdot \text{MAD}$.
+    5. For these indices, calculate the value using linear interpolation between the nearest non-spike neighbors or just use `np.interp` on the whole array if I mask the spikes first?
+    Actually, a better way to interpolate is:
+    Identify all "valid" points (not spikes).
+    Then $y_{new}$ = `np.interp(x_all, x_valid, y_valid)`. This handles multiple consecutive spikes automatically.
+    
+    Wait, the prompt says "replace it by linear interpolation from its neighbours". If I only replace the outliers, and they are sparse, this is equivalent to interpolating between neighbors.
+    
+    One detail: The 5-point moving median might have edge effects at -2, -1, +1, +2.
+    For a 5-point window centered at $i$, it's $[i-2, i+2]$.
+    If $i=0$, indices are $[-2, -1, 0, 1, 2]$. I can pad the array or just use a smaller window/clamped range. A common way to handle edges in these scripts is `np.pad` or simply using what's available. Since it's "5-point", I'll assume standard padding.
+    
+    Let's write the code.
+    Wait, one more check: 100x MAD. If MAD is 0 (all intensities are same), this would be a division by zero? No, $100 \cdot 0 = 0$. So if $|y_i - M_i| > 0$, it's a spike.
+    If the intensity varies at all, MAD will likely be non-zero.
+    
+    Let's execute.
+[15:55:11.662] [Gemma TEXT] step 3 · (빈 응답 — 컨텍스트 초과 의심)
+[15:55:11.662] [Gemma STATS] prompt 17076 tok · out 2164 tok · wall 17.62s · eval 17.16s (126.1 tok/s) · load 0.23s · done=stop
+[15:55:11.662] [ERROR] 27.31s · LLM 3회 · 도구 2회
+    The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check _NUM_CTX and the Ollama host.
+══════════════════════════════════════════════════════════════════════════════
+

@@ -1,0 +1,209 @@
+{
+  "task": "T118",
+  "axis": "identification",
+  "mode": "live",
+  "result": "error",
+  "reason": "The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check _NUM_CTX and the Ollama host.",
+  "checks_passed": 0,
+  "checks_total": 1,
+  "question": "T118.csv is a mixture synthesised from two library materials. Compare it with reference_library.csv and report which component dominates the signal, together with the similarity of both candidates.",
+  "criteria": "EXACT(material) + NUM(similarity ±0.01 ×2)",
+  "checks": [
+    {
+      "name": "dominant component",
+      "passed": false,
+      "score": 0.0,
+      "detail": "None (expected 'polystyrene')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [
+    {
+      "check": "dominant component",
+      "kind": "EXACT",
+      "reason": "None (expected 'polystyrene')"
+    }
+  ],
+  "blocked": [],
+  "input_files": [
+    "T118.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "",
+  "answer_json": {},
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08/T118.csv"
+      },
+      "ok": false
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/T118.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.spatial.distance import correlation\n\n# Load both data sources\n# T118 is a single spectrum (or a few, but we assume one main signal)\n# reference_library contains multiple samples of different materials\n\n# First, let's find the distinct materials in the reference library\nunique_mats = list(set(f['material'] for f in references)) # No, I can't see 'references' yet. \n# Actually, standard logic applies:\n# We need to process T118 and calculate its correlation with the average or specific entries of polystyrene/PMMA.\n\n# Let's just use run_analysis to get the data first.\n# Wait, I need to know which index corresponds to what.\n\n# Correction: I will perform the analysis in one block as requested by typical workflow.\n# 1. Load both files.\n# 2. Baseline correct T118 (if needed).\n# 3. Group/Average reference library by material if multiple entries exist.\n# 4. Normalize and correlate.\n\n# Looking at the data structure:\n# T118: [raman_shift_cm-1, intensity]\n# Reference: [spectrum_id, material, raman_shift_cm-1, intensity]\n\n# Step 1: Process T118 (Baselines and Normalization)\nt118_raw = [] # This is a list of spectra if there's more than one in the file.\n# But wait, T118.csv only has 2 columns: shift and intensity. It is effectively ONE spectrum.\n\n# Step 2: Extract reference profiles.\n# Since I don't know which entries belong to which, but they are labeled by 'material'.\n",
+        "file_ids": [
+          "2026-08-10/T118.csv",
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Identify files\nt118_data = None\nref_data = {} # material -> intensity_array\n\n# Load data from 'files' variable provided by the tool.\n# The list 'files' is injected and contains dictionaries for each file_id.\n\nfor f in files:\n    name = f['filename']\n    if \"T118\" in name:\n        # T118 has columns ['raman_shift_cm-1', 'intensity']\n        # We need to handle potential baseline if it's not flat.\n        # Given the -20 min value, a simple correction or just normalization might work.\n        t118_data = f['table']['intensity']\n    elif \"reference\" in name:\n        # reference_library has columns ['spectrum_id', 'material', 'raman_shift_cm-1', 'intensity']\n        # We need to group by material.\n        mat_map = {}\n        for i in range(len(f['table']['material'])):\n            m = f['table']['material'][i]\n            if m not in mat_map:\n                mat_map[m] = []\n            mat_map[m].append(f['table']['intensity'][i])\n        # Average the intensities for each material to get a robust profile\n        for m, seq in mat_map.items():\n            ref_data[m] = np.mean(seq, axis=0)\n\n# Extract T118 and its range (assuming it matches reference's 200-2000)\nif t118_data is not None:\n    # Basic cleanup of T118: Baseline correction using IPBSA if needed.\n    # However, since I can't call other functions in run_analysis easily unless they are tools...\n    # Wait, the prompt says \"run_analysis ... can run any baseline algorithm you write yourself\".\n    # Let's just do a simple linear/poly fit or use basic normalization if it looks okay.\n    # Actually, let's check the raw data first? No, I only have the code block.\n    \n    # Better: Normalize T118\n    t118_norm = (t118_data - np.min(t118_data)) / (np.max(t118_data) - np.min(t118_data))\n    \n    # Prepare candidates\n    candidates = [\"polystyrene\", \"PMMA\"]\n    results = {}\n    \n    for m in candidates:\n        if m in ref_data:\n            ref_raw = ref_data[m]\n            # Normalize reference\n            ref_norm = (ref_raw - np.min(ref_raw)) / (np.max(ref_raw) - np.min(ref_raw))\n            \n            # Use correlation as similarity metric\n            # Correlation is better than just Euclidean because of intensity scales.\n            # Since both are normalized, they should be very similar in scale.\n            corr = np.corrcoef(t118_norm, ref_norm)[0, 1]\n            results[m] = corr\n\n    print(f\"T118 vs Polystyrene: {results['polystyrene']:.4f}\")\n    print(f\"T118 vs PMMA: {results['PMMA']:.4f}\")\n\n    dominant = \"polystyrene\" if results['polystyrene'] > results['PMMA'] else \"PMMA\"\n    print(f\"Dominant: {dominant}\")\n",
+        "file_ids": [
+          "2026-08-10/T118.csv",
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Identify files\nt118_data = None\nref_data = {} \n\nfor f in files:\n    name = f['filename']\n    if \"T118\" in name:\n        t118_data = f['table']['intensity']\n    elif \"reference\" in name:\n        mat_map = {}\n        # The data is a set of records; we need to consolidate by material.\n        for i in range(len(f['table']['material'])):\n            m = f['table']['material'][i]\n            if m not in mat_map:\n                mat_map[m] = []\n            mat_map[m].append(f['table']['intensity'][i])\n        for m, seq in mat_map.items():\n            ref_data[m] = np.mean(seq, axis=0)\n\n# Process T118\nif t118_data is not None:\n    t118_raw = t118_data.astype(float)\n    # Normalize 1st pass (remove min/max influence) - simpler to use correlation on raw if they share scale, \n    # but since we don't know the relative scales of T118 vs Reference, we normalize both first.\n    t118_norm = (t118_raw - np.min(t118_raw)) / (np.max(t118_raw) - np.min(t118_raw))\n\n    candidates = [\"polystyrene\", \"PMMA\"]\n    results = {}\n    \n    for m in candidates:\n        if m in ref_data:\n            ref_raw = ref_data[m].astype(float)\n            # Normalize reference \n            ref_norm = (ref_raw - np.min(ref_raw)) / (np.max(ref_raw) - np.min(ref_raw))\n            \n            # Calculate correlation\n            # Using a manual calculation to avoid issues with corrcoef's interpretation of lists/shapes\n            # Pearson correlation: cov(x,y) / (std(x)*std(y))\n    \n    # Better way: just ensure they are same shape first. \n    # Since they might have slightly different sizes if the grid isn't identical?\n    # Actually, both seem to be 1801 for T118. Let's see ref_data[m] size.\n    \n    results = {}\n    for m in candidates:\n        if m in ref_data:\n            r = ref_data[m].astype(float)\n            # Ensure shape match if necessary, though usually they are both 1801 for this data\n            if len(r) != len(t118_norm):\n                # Re-sample/interpolate would go here but let's assume same length first.\n                pass\n            \n            # Calc corr\n            c = np.corrcoef(t118_norm, r)[0, 1] # This should work if they are both 1D arrays of same length\n            results[m] = c\n\n    print(f\"Polystyrene Similarity: {results.get('polystyrene', 0):.4f}\")\n    print(f\"PMMA Similarity: {results.get('PMMA', 0):.4f}\")\n    \n    if results.get('polystyrene', 0) > results.get('PMMA', 0):\n        print(\"Dominant: polystyrene\")\n    else:\n        print(\"Dominant: PMMA\")\n\n# Check if we have data before logic\nif t118_data is None:\n    print(\"Error: T118 data not found.\")\nelif \"polystyrene\" not in ref_data or \"PMMA\" not in ref_data:\n    print(f\"Available materials: {list(ref_data.keys())}\")\n",
+        "file_ids": [
+          "2026-08-10/T118.csv",
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Debugging step: ensure we know dimensions.\nt118_data = None\nref_data = {}\n\nfor f in files:\n    if \"T118\" in f['filename']:\n        t118_data = f['table']['intensity']\n    elif \"reference\" in f['filename']:\n        mat_map = {}\n        for i in range(len(f['table']['material'])):\n            m = f['table']['material'][i]\n            if m not in mat_map: mat_map[m] = []\n            mat_map[m].append(f['table']['intensity'][i])\n        for m, seq in mat_map.items():\n            ref_data[m] = np.mean(seq, axis=0)\n\nif t118_data is not None:\n    # T118 is usually a 1D array of size (N,)\n    t118_norm = (t118_data - np.min(t118_data)) / (np.max(t118_data) - np.min(t118_data))\n    print(f\"T118 shape: {t118_norm.shape}\")\n\n    results = {}\n    for m in [\"polystyrene\", \"PMMA\"]:\n        if m in ref_data:\n            r_raw = ref_data[m]\n            # Ensure it is a numpy array and not scalar\n            r_raw = np.array(r_raw)\n            r_norm = (r_raw - np.min(r_raw)) / (np.max(r_raw) - np.min(r_raw))\n            print(f\"{m} shape: {r_norm.shape}\")\n            \n            # Calculate correlation safely\n            # Using corrcoef on two 1D arrays yields a 2x2 matrix, we want [0, 1]\n            if r_norm.shape == t118_norm.shape:\n                corr = np.corrcoef(t118_norm, r_norm)[0, 1]\n            else:\n                # If they differ in size but are both 1D, we might need interpolation\n                # but here let's assume they match if lengths are close enough.\n                # Just for safety check the length.\n                print(f\"Mismatch! T118 {t118_norm.shape} vs {m} {r_norm.shape}\")\n                corr = 0.0\n            results[m] = corr\n\n    print(f\"Scores: {results}\")\n",
+        "file_ids": [
+          "2026-08-10/T118.csv",
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Look at the raw data structure of the reference library\ncounts = {}\nfor f in files:\n    if \"reference\" in f['filename']:\n        mat_list = f['table']['material']\n        int_data = f['table']['intensity']\n        unique_mats = set(mat_list)\n        print(f\"Found {len(unique_mats)} unique materials: {unique_mats}\")\n        for m in unique_mats:\n            count = list(mat_list).count(m)\n            counts[m] = count\n\n# Also check dimensions of the data.\n# If it's a 2D array, its shape should be (N_samples, N_points)\nfor f in files:\n    print(f\"File {f['filename']} intensity shape: {f['table']['intensity'].shape}\")\n\n# Now let's try to get the averages again correctly.\nref_data = {}\nfor f in files:\n    if \"reference\" in f['filename']:\n        mat_list = f['table']['material']\n        int_data = f['table']['intensity']\n        unique_mats = set(mat_list)\n        for m in unique_mats:\n            # Find all indices where this material appears\n            indices = [i for i, x in enumerate(mat_list) if x == m]\n            # Average the intensities at these indices\n            selected = int_data[indices]\n            ref_data[m] = np.mean(selected, axis=0)\n\nprint(f\"Processed average shapes: { {m: r.shape for m, r in ref_data.items()} }\")\n\n# Now process T118\nt118_data = None\nfor f in files:\n    if \"T118\" in f['filename']:\n        t118_data = f['table']['intensity']\n\nif t118_data is not None:\n    # Normalize\n    t118_norm = (t118_data - np.min(t118_data)) / (np.max(t118_data) - np.min(t118_data))\n    print(f\"T118 norm shape: {t118_norm.shape}\")\n\n    results = {}\n    for m in [\"polystyrene\", \"PMMA\"]:\n        if m in ref_data:\n            r_raw = ref_data[m]\n            r_norm = (r_raw - np.min(r_raw)) / (np.max(r_raw) - np.min(r_raw))\n            # Calculate Pearson Correlation accurately\n            # Using the standard formula: sum((x-mx)(y-my)) / (sqrt(sum(x-mx)^2)*sqrt(sum(y-my)^2))\n            # Since they are already normalized by min/max, we can use np.corrcoef or just a simplified version if shapes match.\n            if r_norm.shape == t118_norm.shape:\n                 results[m] = np.corrcoef(t118_norm, r_norm)[0, 1]\n            else:\n                # Fallback for different lengths (interpolation)\n                x_ref = np.linspace(0, 1, len(r_norm))\n                x_t118 = np.linspace(0, 1, len(t118_norm))\n                r_interp = np.interp(x_t118, x_ref, r_norm)\n                results[m] = np.corrcoef(t118_norm, r_interp)[0, 1]\n\n    print(f\"Final Scores: {results}\")\n",
+        "file_ids": [
+          "2026-08-10/T118.csv",
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": false
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "session_id": "bench_2026-08-10_AILA_AILA_T118_95d96e",
+  "elapsed_s": 117.81,
+  "errors": [
+    "The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check _NUM_CTX and the Ollama host."
+  ],
+  "warnings": [
+    "retried 1x after an infrastructure failure"
+  ],
+  "timed_out": false,
+  "abandoned": false
+}

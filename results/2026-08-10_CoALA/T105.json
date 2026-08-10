@@ -1,0 +1,193 @@
+{
+  "task": "T105",
+  "axis": "diagnostics",
+  "mode": "live",
+  "result": "fail",
+  "reason": "cause named: not found ['photobleach', 'bleach', '광표백']",
+  "checks_passed": 4,
+  "checks_total": 5,
+  "question": "T105.csv holds 10 consecutive measurements of the same spot (column frame_index 0-9). Determine whether the Raman signal decreases and the background increases over time, quantify both trends by linear regression slope against the frame index, and name the cause. For each frame take the background as the median of that frame, and the signal as the frame maximum minus that median.",
+  "criteria": "KEYWORD(photobleaching) + NUM(slope 10%) + REL(sign)",
+  "checks": [
+    {
+      "name": "signal slope",
+      "passed": true,
+      "score": 1.0,
+      "detail": "-49.2885 (expected -49.2885, rel.err=4.351e-10 ≤ 0.1)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "background slope",
+      "passed": true,
+      "score": 1.0,
+      "detail": "24.856 (expected 24.856, rel.err=7.251e-10 ≤ 0.1)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    },
+    {
+      "name": "signal decreases",
+      "passed": true,
+      "score": 1.0,
+      "detail": "-49.2885 < 0",
+      "weight": 1.0,
+      "kind": "REL"
+    },
+    {
+      "name": "background increases",
+      "passed": true,
+      "score": 1.0,
+      "detail": "24.856 > 0",
+      "weight": 1.0,
+      "kind": "REL"
+    },
+    {
+      "name": "cause named",
+      "passed": false,
+      "score": 0.0,
+      "detail": "not found ['photobleach', 'bleach', '광표백']",
+      "weight": 1.0,
+      "kind": "KEYWORD"
+    }
+  ],
+  "failures": [
+    {
+      "check": "cause named",
+      "kind": "KEYWORD",
+      "reason": "not found ['photobleach', 'bleach', '광표백']"
+    }
+  ],
+  "blocked": [],
+  "input_files": [
+    "T105.csv"
+  ],
+  "answer_text": "The analysis of the data in `T105.csv` shows that as the frame index increases from 0 to 9:\n\n1.  **Background Trend**: The median intensity (background) increased over time with a calculated slope of approximately **24.86**.\n2.  **Signal Trend**: The peak signal (maximum intensity minus the median background) decreased significantly over time, with a negative slope of approximately **-49.29**.\n\nThe simultaneous increase in background and decrease in the net signal is characteristic of **photodamage** or **fluorescence quenching**, but specifically, since the signal height relative to the baseline (peak - median) is decreasing while the total intensity level is rising, it suggests that the laser power is creating a significant fluorescence contribution or the sample is being chemically altered/degraded by the high-intensity laser. Given the prompt's focus on \"signal\" vs \"background\", the most direct physical cause for this specific trend (increasing background and decreasing peak height) in Raman spectroscopy of dynamic samples over many frames is often **photodamage**.\n\n```json\n{\"signal_slope\": -49.28848876363636, \"background_slope\": 24.85596066060606, \"cause\": \"photodamage\"}\n```",
+  "answer_json": {
+    "signal_slope": -49.28848876363636,
+    "background_slope": 24.85596066060606,
+    "cause": "photodamage"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/T105.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# The data is in 'files' (since I passed the file_id)\ndata = files[0]['table']\nframe_indices = data['frame_index'].values\nraman_shifts = data['raman_shift_cm-1'].values\nintensities = data['intensity'].values\n\n# Group indices by frame\nunique_frames = np.unique(frame_indices)\nbackgrounds = []\nsignals = []\n\nfor i, f in enumerate(unique_frames):\n    mask = (frame_indices == f)\n    # The task says: \"For each frame take the background as the median of that frame\"\n    bg = np.median(intensities[mask])\n    backgrounds.append(bg)\n    # \"and the signal as the frame maximum minus that median\"\n    sig = np.max(intensities[mask]) - bg\n    signals.append(sig)\n\nx = np.arange(len(unique_frames))\n# Perform linear regression for both signals and background\n# Using polyfit of degree 1 (linear)\nbg_fit = np.polyfit(x, backgrounds, 1)\nsig_fit = np.polyfit(x, signals, 1)\n\n# The slopes are the first coefficients of the fit polynomials\nbg_slope = bg_fit[0]\nsig_slope = sig_fit[0]\n\nprint(f\"Background Slope: {bg_slope}\")\nprint(f\"Signal Slope: {sig_slope}\")\nprint(f\"Max Background: {max(backgrounds)}\")\nprint(f\"Max Signal: {max(signals)}\")\n",
+        "file_ids": [
+          "2026-08-10/T105.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# The data is in the files list provided by the tool\ndata = files[0]['table']\nframe_indices = data['frame_index']\nraman_shifts = data['raman_shift_cm-1']\nintensities = data['intensity']\n\n# Ensure they are converted to numpy arrays if they aren't already\n# In some environments, the 'table' dict values might be pandas Series or numpy arrays.\n# If it's a pandas series, .values is correct, but the error suggests it's an array.\n# To be safe, we use np.array() or just access indices if they are standard lists/arrays.\n\nframe_indices = np.array(frame_indices)\nintensities = np.array(intensities)\n\n# Get unique frames and compute metrics\nunique_frames = np.unique(frame_indices)\nbackgrounds = []\nsignals = []\n\nfor f in unique_frames:\n    mask = (frame_indices == f)\n    current_intensities = intensities[mask]\n    bg = np.median(current_intensities)\n    sig = np.max(current_intensities) - bg\n    backgrounds.append(bg)\n    signals.append(sig)\n\n# Linear regressions\nx = np.arange(len(unique_frames))\nbg_fit = np.polyfit(x, backgrounds, 1)\nsig_fit = np.polyfit(x, signals, 1)\n\nprint(f\"Background Slope: {bg_fit[0]}\")\nprint(f\"Signal Slope: {sig_fit[0]}\")\n",
+        "file_ids": [
+          "2026-08-10/T105.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -37,
+    "temperature_status": "NOT_REACHED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -38,
+    "temperature_status": "NOT_STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "session_id": "bench_2026-08-10_CoALA_CoALA_T105_9d9770",
+  "elapsed_s": 30.75,
+  "errors": [],
+  "warnings": [
+    "retried 1x after an infrastructure failure"
+  ],
+  "timed_out": false,
+  "abandoned": false
+}

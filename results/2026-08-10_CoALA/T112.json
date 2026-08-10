@@ -1,0 +1,159 @@
+{
+  "task": "T112",
+  "axis": "diagnostics",
+  "mode": "live",
+  "result": "error",
+  "reason": "The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check the Ollama host and context size.",
+  "checks_passed": 0,
+  "checks_total": 2,
+  "question": "In T112.csv a strong background hides the Raman peaks. Apply IPBSA baseline correction with order 5, report the peaks recovered (prominence 5% of range), and state how many peaks were invisible before the correction.",
+  "criteria": "ARRAY(cos>=0.99, NRMSE<=0.02) + SET(peak ±3 cm-1) + EXACT(count)",
+  "checks": [
+    {
+      "name": "peak positions",
+      "passed": false,
+      "score": 0.0,
+      "detail": "no value (expected 9)",
+      "weight": 1.0,
+      "kind": "SET"
+    },
+    {
+      "name": "result array",
+      "passed": false,
+      "score": 0.0,
+      "detail": "no spectrum was saved",
+      "weight": 2.0,
+      "kind": "POSTHOC"
+    }
+  ],
+  "failures": [
+    {
+      "check": "peak positions",
+      "kind": "SET",
+      "reason": "no value (expected 9)"
+    },
+    {
+      "check": "result array",
+      "kind": "POSTHOC",
+      "reason": "no spectrum was saved"
+    }
+  ],
+  "blocked": [],
+  "input_files": [
+    "T112.csv"
+  ],
+  "answer_text": "",
+  "answer_json": {},
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/T112.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# The raw intensity from T112.csv\nx = data['raman_shift_cm-1']\ny = data['intensity']\n\n# First pass: Find peaks on the raw signal (to see what was \"visible\")\n# We define 'invisible' as a peak that does not have at least 5% of the total range prominence.\n# However, since they are hidden by background, let's look for any peaks first.\nfrom scipy.signal import find_peaks\n\ndef count_prominent(y_data):\n    # Prominence is defined as % of range (max - min)\n    # Let's just use the standard definition but interpret \"visible\" \n    # based on the requirement: prominence > 5% of total range.\n    total_range = np.ptp(y_data)\n    threshold = 0.05 * total_range\n    peaks, _ = find_peaks(y_data, height=None, prominence=threshold)\n    return peaks\n\n# Actually, the prompt asks: \"how many peaks were invisible before the correction\"\n# and then wants us to report the ones recovered after 1-pass IPBSA.\n# Let's define visibility as having a prom > 5% of range.\nraw_peaks_indices = find_peaks(y)[2] # This is not how find_peaks works, I need to check my own logic.\n# Wait, the tool definition says: \"report the peaks recovered (prominence 5% of range)\"\n# Let's calculate the threshold first.\n\nrange_val = np.ptp(y)\nthreshold = 0.05 * range_val\n\n# Identifying \"visible\" peaks before correction\n# A peak is visible if it has prominence > 10% (standard check), but here we use 5%.\n# Let's find all local maxima first.\npeaks_raw, props_raw = find_peaks(y)\n# Filtering for the specific threshold\nvisible_indices_before = [i for i in peaks_raw if props_raw['prominenec'] > threshold]\n\nprint(f\"Total range: {range_val}\")\nprint(f\"Threshold (5%): {threshold}\")\nprint(f\"Number of visible indices before correction: {len(visible_indices_before)}\")\n\n# Apply IPBSA as requested in the prompt\n# The instruction says \"Apply IPBSA baseline correction with order 5\"\n# I should use the internal ipbsa function if possible, or do it manually.\n# Since the tool description for run_analysis mentions:\n# \"ipbsa(y, order=5, max_iterations=100, threshold=0.001) returns (corrected, background)\"\nfrom scipy import signal \n\ndef ipbsa_manual(y, order=5):\n    # This is a simplified version if the internal one isn't available\n    # But wait, the instructions say \"ipbsa(...) is injected\". Let me use that.\n    pass\n\n# Wait, I can't call other tools inside run_analysis. I must use the provided functions.\n# I will assume ipbsa() is available as per documentation.\nfrom scipy import signal # Just in case \n# Re-evaluating: The instruction says \"ipbsa(y, order=5...) returns (corrected, background)\" is injected.\n\n# Let's do the analysis correctly.\nimport numpy as np\n\n# Step 1: Calculate threshold and find peaks before correction\nrange_val = np.max(y) - np.min(y)\ntarget_threshold = 0.05 * range_val\npeaks_raw, _ = find_peaks(y) # just get all peaks to check prominence later? No, find_peaks with height doesn't distinguish.\n\n# Let's use a simple search for \"invisible\" ones.\n# If a peak is invisible before correction, it means its prominence was < 5% of the range.\n# A peak that is hidden by background might still be technically there but have low prominence relative to the massive background.\n# After subtraction, its prominence will increase significantly relative to the new (smaller) range.\n\n# Let's perform calculation:\ndef get_visible_count(y_data, thresh):\n    peaks, _ = find_peaks(y_data) # all local peaks\n    # Wait, I need to check how many were \"visible\" (prom > 5% of total range)\n    # This is a bit ambiguous. Usually it means any peak meeting the criteria.\n    # Let's re-read: \"report the peaks recovered (prominence 5% of range), and state how many peaks were invisible before the correction.\"\n    # If a peak had prominence < 0.05 * range_before, it was 'invisible'.\n    # After subtraction, if it now has prominence > 0.05 * range_after, it's 'recovered'.\n    pass\n\n# Let's try to use the standard logic:\n# 1. Identify peaks in raw data with prom > threshold_raw. (These are \"visible\").\n# 2. ...<잘림>"
+      },
+      "ok": false
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "session_id": "bench_2026-08-10_CoALA_CoALA_T112_7bbd67",
+  "elapsed_s": 52.17,
+  "errors": [
+    "The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check the Ollama host and context size."
+  ],
+  "warnings": [
+    "retried 1x after an infrastructure failure"
+  ],
+  "timed_out": false,
+  "abandoned": false
+}

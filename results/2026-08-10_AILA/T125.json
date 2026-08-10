@@ -2,32 +2,36 @@
   "task": "T125",
   "axis": "identification",
   "mode": "live",
-  "result": "pass",
-  "reason": "",
-  "checks_passed": 1,
+  "result": "error",
+  "reason": "The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check _NUM_CTX and the Ollama host.",
+  "checks_passed": 0,
   "checks_total": 1,
   "question": "Report the material in reference_library.csv most similar to T125.csv, and present at least two basis peaks that distinguish it from the second-ranked candidate.",
   "criteria": "EXACT(material) + SET(basis peaks >=2 items, ±3 cm-1)",
   "checks": [
     {
       "name": "material",
-      "passed": true,
-      "score": 1.0,
-      "detail": "'PET' (expected 'PET')",
+      "passed": false,
+      "score": 0.0,
+      "detail": "None (expected 'PET')",
       "weight": 2.0,
       "kind": "EXACT"
     }
   ],
-  "failures": [],
+  "failures": [
+    {
+      "check": "material",
+      "kind": "EXACT",
+      "reason": "None (expected 'PET')"
+    }
+  ],
   "blocked": [],
   "input_files": [
     "T125.csv",
     "reference_library.csv"
   ],
-  "answer_text": "The analysis was performed by comparing the target spectrum `T125.csv` against a reference library containing spectra for polystyrene, PET, PMMA, calcite, aragonite, and silicon.\n\nThe spectra were normalized and compared using the Pearson correlation coefficient to determine similarity. The results are as follows:\n- **Most similar material:** PET (correlation coefficient $\\approx 0.9945$)\n- **Second most similar material:** PMMA (correlation coefficient $\\approx 0.1507$)\n\nTo distinguish PET from PMMA, the following characteristic basis peaks of PET were identified, which are either absent or significantly different in PMMA:\n1. **$1614\\text{ cm}^{-1}$**: This is the most intense peak for PET and is entirely absent in the PMMA spectrum.\n2. **$1096\\text{ cm}^{-1}$**: A prominent peak in PET that does not appear as a significant feature in PMMA.\n\nWhile both materials show activity around $1730\\text{ cm}^{-1}$, this region is not distinguishing. In contrast, the peaks at $1614$ and $1096\\text{ cm}^{-1}$ provide clear evidence for the identification of PET over PMMA.\n\n```json\n{\"material\": \"PET\"}\n```",
-  "answer_json": {
-    "material": "PET"
-  },
+  "answer_text": "",
+  "answer_json": {},
   "tool_calls": [
     {
       "name": "list_uploaded_files",
@@ -47,114 +51,6 @@
         "file_id": "2026-08-10/T125.csv"
       },
       "ok": true
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\n\n# Load reference library to see unique materials\nref_file = files['2026-08-10/reference_library.csv']\nmaterials = np.unique(ref_file['table']['material'])\nprint(f\"Materials in library: {materials}\")\n",
-        "file_ids": [
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": false
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\n\n# Load reference library to see unique materials\nref_data = files[0]['table']\nmaterials = np.unique(ref_data['material'])\nprint(f\"Materials in library: {materials}\")\n",
-        "file_ids": [
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": true
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\nfrom scipy import stats\n\n# Target spectrum T125\nt_data = files[0]['table']\ntx = t_data['raman_shift_cm-1']\nty = t_data['intensity']\n\n# Reference library\nref_data = files[1]['table']\nrx = ref_data['raman_shift_cm-1']\nry = ref_data['intensity']\nrmat = ref_data['material']\n\nunique_mats = np.unique(rmat)\nresults = []\n\nfor mat in unique_mats:\n    # Filter intensities for this material\n    mask = (rmat == mat)\n    # We assume the x-axis is consistent for all entries of the same material\n    # Let's check if we can just average the spectra. \n    # Since the library has 21612 rows and 6 materials, each has ~3600 points? \n    # No, 200-2000 with step 1 is 1801 points. \n    # 21612 / 1801 = 12 spectra total in the library.\n    \n    # Group by spectrum_id just in case, then average them?\n    # Or simply: since they all share the same x-range and likely step, \n    # we can reshape if there are multiple copies.\n    \n    mat_y = ry[mask]\n    # Determine how many spectra per material\n    n_pts = len(tx) # target has 1801 points\n    num_spectra = len(mat_y) // n_pts\n    \n    if num_spectra > 0:\n        reshaped_y = mat_y[:num_spectra * n_pts].reshape((num_spectra, n_pts))\n        avg_y = np.mean(reshaped_y, axis=0)\n        \n        corr, _ = stats.pearsonr(ty, avg_y)\n        results.append((mat, corr, avg_y))\n\n# Rank by correlation\nresults.sort(key=lambda x: x[1], reverse=True)\n\ntop_mat, top_corr, top_y = results[0]\nsec_mat, sec_corr, sec_y = results[1]\n\nprint(f\"Top match: {top_mat} (corr={top_corr:.4f})\")\nprint(f\"Second match: {sec_mat} (corr={sec_corr:.4f})\")\n\n# Find distinguishing peaks\ndef get_peaks(y, x, threshold=0.1):\n    # Simple peak detection: local maxima above a normalized threshold\n    y_norm = (y - np.min(y)) / (np.max(y) - np.min(y))\n    peaks = []\n    for i in range(1, len(y_norm)-1):\n        if y_norm[i] > y_norm[i-1] and y_norm[i] > y_norm[i+1] and y_norm[i] > threshold:\n            peaks.append((x[i], y_norm[i]))\n    return peaks\n\np1 = get_peaks(top_y, tx)\np2 = get_peaks(sec_y, tx)\n\nprint(f\"Peaks in {top_mat}: {p1}\")\nprint(f\"Peaks in {sec_mat}: {p2}\")\n",
-        "file_ids": [
-          "2026-08-10/T125.csv",
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": false
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\nfrom scipy import stats\n\n# Identify files by checking the metadata in each dict of the 'files' list\nt125_file = None\nref_lib_file = None\n\nfor f in files:\n    if 'T125.csv' in f['filename']:\n        t125_file = f\n    elif 'reference_library.csv' in f['filename']:\n        ref_lib_file = f\n\nif t125_file is None or ref_lib_file is None:\n    print(\"Missing files\")\n    exit()\n\n# Target spectrum T125\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\n# Reference library\nrx = ref_lib_file['table']['raman_shift_cm-1']\nry = ref_lib_file['table']['intensity']\nrmat = ref_lib_file['table']['material']\n\nunique_mats = np.unique(rmat)\nresults = []\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    n_pts = len(tx) \n    num_spectra = len(mat_y) // n_pts\n    \n    if num_spectra > 0:\n        # Check if the shift axis is indeed aligned (200 to 2000)\n        # Since we assume it's sorted and identical for a material, just reshape.\n        reshaped_y = mat_y[:num_spectra * n_pts].reshape((num_spectra, n_pts))\n        avg_y = np.mean(reshaped_y, axis=0)\n        \n        corr, _ = stats.pearsonr(ty, avg_y)\n        results.append((mat, corr, avg_y))\n\nresults.sort(key=lambda x: x[1], reverse=True)\n\ntop_mat, top_corr, top_y = results[0]\nsec_mat, sec_corr, sec_y = results[1]\n\nprint(f\"Top match: {top_mat} (corr={top_corr:.4f})\")\nprint(f\"Second match: {sec_mat} (corr={sec_corr:.4f})\")\n\ndef get_peaks(y, x, threshold=0.1):\n    # Normalize first to make thresholds meaningful\n    y_norm = (y - np.min(y)) / (np.max(y) - np.min(y))\n    peaks = []\n    for i in range(1, len(y_norm)-1):\n        if y_norm[i] > y_norm[i-1] and y_norm[i] > y_norm[i+1] and y_norm[i] > threshold:\n            peaks.append((x[i], y_norm[i]))\n    return peaks\n\np1 = get_peaks(top_y, tx)\np2 = get_peaks(sec_y, tx)\n\nprint(f\"Peaks in {top_mat}: {p1}\")\nprint(f\"Peaks in {sec_mat}: {p2}\")\n",
-        "file_ids": [
-          "2026-08-10/T125.csv",
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": false
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\nfrom scipy import stats\n\n# Identify files by checking the metadata in each dict of the 'files' list\nt125_file = None\nref_lib_file = None\n\nfor f in files:\n    if 'T125.csv' in f['filename']:\n        t125_file = f\n    elif 'reference_library.csv' in f['filename']:\n        ref_lib_file = f\n\n# Target spectrum T125\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\n# Reference library\nrx = ref_lib_file['table']['raman_shift_cm-1']\nry = ref_lib_file['table']['intensity']\nrmat = ref_lib_file['table']['material']\n\nunique_mats = np.unique(rmat)\nresults = []\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    n_pts = len(tx) \n    num_spectra = len(mat_y) // n_pts\n    \n    if num_spectra > 0:\n        reshaped_y = mat_y[:num_spectra * n_pts].reshape((num_spectra, n_pts))\n        avg_y = np.mean(reshaped_y, axis=0)\n        corr, _ = stats.pearsonr(ty, avg_y)\n        results.append((mat, corr, avg_y))\n\nresults.sort(key=lambda x: x[1], reverse=True)\n\ntop_mat, top_corr, top_y = results[0]\nsec_mat, sec_corr, sec_y = results[1]\n\nprint(f\"Top match: {top_mat} (corr={top_corr:.4f})\")\nprint(f\"Second match: {sec_mat} (corr={sec_corr:.4f})\")\n\ndef get_peaks(y, x, threshold=0.1):\n    y_norm = (y - np.min(y)) / (np.max(y) - np.min(y))\n    peaks = []\n    for i in range(1, len(y_norm)-1):\n        if y_norm[i] > y_norm[i-1] and y_norm[i] > y_norm[i+1] and y_norm[i] > threshold:\n            peaks.append((x[i], y_norm[i]))\n    return peaks\n\np1 = get_peaks(top_y, tx)\np2 = get_peaks(sec_y, tx)\n\nprint(f\"Peaks in {top_mat}: {p1}\")\nprint(f\"Peaks in {sec_mat}: {p2}\")\n",
-        "file_ids": [
-          "2026-08-10/T125.csv",
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": false
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\n\nt125_file = next(f for f in files if 'T125.csv' in f['filename'])\nref_lib_file = next(f for f in files if 'reference_library.csv' in f['filename'])\n\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\nrmat = ref_lib_file['table']['material']\nry = ref_lib_file['table']['intensity']\n\nn_pts = len(tx)\nunique_mats = np.unique(rmat)\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    print(f\"Material {mat}: length={len(mat_y)}, required_per_spectrum={n_pts}\")\n",
-        "file_ids": [
-          "2026-08-10/T125.csv",
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": false
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\n\nt125_file = None\nref_lib_file = None\nfor f in files:\n    if 'T125.csv' in f['filename']: t125_file = f\n    if 'reference_library.csv' in f['filename']: ref_lib_file = f\n\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\nrmat = ref_lib_file['table']['material']\nry = ref_lib_file['table']['intensity']\n\nn_pts = len(tx)\nunique_mats = np.unique(rmat)\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    print(f\"Material {mat}: length={len(mat_y)}, required={n_pts}\")\n",
-        "file_ids": [
-          "2026-08-10/T125.csv",
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": true
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\n\nt125_file = None\nref_lib_file = None\nfor f in files:\n    if 'T125.csv' in f['filename']: t125_file = f\n    if 'reference_library.csv' in f['filename']: ref_lib_file = f\n\nrmat = ref_lib_file['table']['material']\nprint(f\"First 10 materials: {rmat[:10]}\")\nprint(f\"Type of rmat elements: {type(rmat[0])}\")\n",
-        "file_ids": [
-          "2026-08-10/T125.csv",
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": false
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\n\nt125_file = None\nref_lib_file = None\nfor f in files:\n    if 'T125.csv' in f['filename']: t125_file = f\n    if 'reference_library.csv' in f['filename']: ref_lib_file = f\n\nrmat = ref_lib_file['table']['material']\nprint(f\"First 10 materials: {rmat[:10]}\")\n",
-        "file_ids": [
-          "2026-08-10/T125.csv",
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": true
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\nfrom scipy import stats\n\nt125_file = None\nref_lib_file = None\nfor f in files:\n    if 'T125.csv' in f['filename']: t125_file = f\n    if 'reference_library.csv' in f['filename']: ref_lib_file = f\n\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\n# Convert to numpy arrays explicitly\nrmat = np.array(ref_lib_file['table']['material'])\nry = np.array(ref_lib_file['table']['intensity'])\n\nunique_mats = np.unique(rmat)\nresults = []\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    n_pts = len(tx) \n    num_spectra = len(mat_y) // n_pts\n    \n    if num_spectra > 0:\n        reshaped_y = mat_y[:num_spectra * n_pts].reshape((num_spectra, n_pts))\n        avg_y = np.mean(reshaped_y, axis=0)\n        corr, _ = stats.pearsonr(ty, avg_y)\n        results.append((mat, corr, avg_y))\n\nresults.sort(key=lambda x: x[1], reverse=True)\n\nif len(results) >= 2:\n    top_mat, top_corr, top_y = results[0]\n    sec_mat, sec_corr, sec_y = results[1]\n    print(f\"Top match: {top_mat} (corr={top_corr:.4f})\")\n    print(f\"Second match: {sec_mat} (corr={sec_corr:.4f})\")\n\n    def get_peaks(y, x, threshold=0.1):\n        # Normalize 0-1\n        ymin, ymax = np.min(y), np.max(y)\n        y_norm = (y - ymin) / (ymax - ymin)\n        peaks = []\n        for i in range(1, len(y_norm)-1):\n            if y_norm[i] > y_norm[i-1] and y_norm[i] > y_norm[i+1] and y_norm[i] > threshold:\n                peaks.append((x[i], y_norm[i]))\n        return peaks\n\n    p1 = get_peaks(top_y, tx)\n    p2 = get_peaks(sec_y, tx)\n    print(f\"Peaks in {top_mat}: {p1}\")\n    print(f\"Peaks in {sec_mat}: {p2}\")\nelse:\n    print(f\"Not enough matches found. Found: {len(results)}\")\n",
-        "file_ids": [
-          "2026-08-10/T125.csv",
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": true
     }
   ],
   "artifacts": [],
@@ -165,6 +61,7 @@
     "is_on": false,
     "power_armed": false,
     "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
     "x_speed_mm_s": 2.0,
     "y_speed_mm_s": 2.0,
     "z_speed_mm_s": 0.05,
@@ -174,7 +71,7 @@
     "trigger_mode": "internal",
     "shutter_mode": "auto",
     "num_accumulations": 1,
-    "num_kinetics": 1,
+    "num_kinetics": 3,
     "temperature_C": -40,
     "temperature_status": "STABILIZED",
     "cooler_on": true,
@@ -194,7 +91,8 @@
       0.033
     ],
     "detector_Nx": 1024,
-    "detector_Ny": 255
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
   },
   "state_after": {
     "x": 37.8759,
@@ -203,6 +101,7 @@
     "is_on": false,
     "power_armed": false,
     "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
     "x_speed_mm_s": 2.0,
     "y_speed_mm_s": 2.0,
     "z_speed_mm_s": 0.05,
@@ -212,7 +111,7 @@
     "trigger_mode": "internal",
     "shutter_mode": "auto",
     "num_accumulations": 1,
-    "num_kinetics": 1,
+    "num_kinetics": 3,
     "temperature_C": -40,
     "temperature_status": "STABILIZED",
     "cooler_on": true,
@@ -232,12 +131,17 @@
       0.033
     ],
     "detector_Nx": 1024,
-    "detector_Ny": 255
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
   },
-  "session_id": "bench_2026-08-10_AILA_AILA_T125_1749dc",
-  "elapsed_s": 148.44,
-  "errors": [],
-  "warnings": [],
+  "session_id": "bench_2026-08-10_AILA_AILA_T125_a04383",
+  "elapsed_s": 18.35,
+  "errors": [
+    "The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check _NUM_CTX and the Ollama host."
+  ],
+  "warnings": [
+    "retried 1x after an infrastructure failure"
+  ],
   "timed_out": false,
   "abandoned": false
 }

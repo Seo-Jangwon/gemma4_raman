@@ -64,7 +64,8 @@ def _env(*names: str, default: str) -> str:
 # ── 모델 ──────────────────────────────────────────────────────────────────────
 # 두 에이전트(AILA/CoALA)와 KB 캡션이 전부 이 하나를 쓴다.
 # 비교 실험의 독립변수는 오케스트레이션 하나여야 하므로, 여기가 갈라지면 안 된다.
-OLLAMA_MODEL = _env("RAMAN_OLLAMA_MODEL", default="gemma4:31b")
+# gemma4:31b, gemma4:12b
+OLLAMA_MODEL = _env("RAMAN_OLLAMA_MODEL", default="gemma4:12b")
 
 # ── 호스트 ────────────────────────────────────────────────────────────────────
 # OLLAMA_HOST 도 함께 보는 이유: ollama 공식 클라이언트가 쓰는 표준 변수명이라

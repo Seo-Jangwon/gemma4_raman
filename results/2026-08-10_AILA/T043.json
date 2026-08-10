@@ -1,0 +1,194 @@
+{
+  "task": "T043",
+  "axis": "data processing",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "Find the major Raman peaks of T043.csv (polystyrene). Use scipy.signal.find_peaks with prominence set to 5% of the intensity range, and report the 6 largest by prominence in ascending order of position, with their intensities.",
+  "criteria": "SET(6 items, ±3 cm-1) + NUM(intensity 5%)",
+  "checks": [
+    {
+      "name": "peak positions",
+      "passed": true,
+      "score": 1.0,
+      "detail": "6/6 matched (submitted 6) [620.0, 1001.0, 1031.0, 1154.0, 1450.0, 1602.0] vs [620.0, 1001.0, 1031.0, 1154.0, 1450.0, 1602.0]",
+      "weight": 1.0,
+      "kind": "SET"
+    },
+    {
+      "name": "peak intensities",
+      "passed": true,
+      "score": 1.0,
+      "detail": "all within 5%",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T043.csv"
+  ],
+  "answer_text": "The analysis of T043.csv (polystyrene) was conducted by identifying peaks using a prominence threshold equal to 5% of the dynamic range of the intensity signal ($1016.83$ total range, $50.84$ threshold). The six largest peaks based on prominence were selected and then ordered by their Raman shift position.\n\nThe identified major peaks are:\n1. 620.0 cm$^{-1}$ (Intensity: 180.56)\n2. 1001.0 cm$^{-1}$ (Intensity: 996.92)\n3. 1031.0 cm$^{-1}$ (Intensity: 429.49)\n4. 1154.0 cm$^{-1}$ (Intensity: 149.29)\n5. 1450.0 cm$^{-1}$ (Intensity: 225.02)\n6. 1602.0 cm$^{-1}$ (Intensity: 627.53)\n\n```json\n{\n  \"peaks\": [620.0, 1001.0, 1031.0, 1154.0, 1450.0, 1602.0],\n  \"intensities\": [180.559322, 996.9167, 429.493726, 149.28919, 225.019169, 627.527858]\n}\n```",
+  "answer_json": {
+    "peaks": [
+      620.0,
+      1001.0,
+      1031.0,
+      1154.0,
+      1450.0,
+      1602.0
+    ],
+    "intensities": [
+      180.559322,
+      996.9167,
+      429.493726,
+      149.28919,
+      225.019169,
+      627.527858
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/T043.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load data\nx = data['raman_shift_cm-1']\ny = data['intensity']\n\n# Calculate range and threshold\ny_min = np.min(y)\ny_max = np.max(y)\nrange_y = y_max - y_min\nthreshold = 0.05 * range_y\nprint(f\"Intensity Range: {range_y:.4f}\")\nprint(f\"Prominence Threshold: {threshold:.4f}\")\n\n# Find peaks\npeaks, properties = find_peaks(y, prominence=threshold)\nprominences = properties['prominenec']\nprint(f\"Found {len(peaks)} peaks with threshold.\")\n\n# Filter for top 6 by prominence\n# The prompt says: \"report the 6 largest by prominence in ascending order of position\"\nif len(peaks) >= 6:\n    # Get indices of top 6 by prominence\n    # We look at the 'prominences' array which corresponds to peaks.\n    # To handle ties, we take the first few indices if needed.\n    sorted_indices = np.argsort(prominences)[::-1] # indices into the 'peaks' array\n    top_6_idx_into_peaks = sorted_indices[:6]\n    \n    # These are the actual peak positions and intensities for those top 6\n    # Now we must sort THESE specific ones by position.\n    final_subset = []\n    for idx in top_6_idx_into_peaks:\n        p_idx = peaks[idx]\n        final_subset.append((x[p_idx], y[p_idx]))\n    \n    # Sort the subset by x-coordinate (position)\n    final_subset.sort(key=lambda x: x[0])\n    \n    peak_positions = [item[0] for item in final_subset]\n    intensities = [item[1] for item in final_subset]\n    \n    print(f\"Final 6 peaks (sorted by position):\")\n    for p, i in zip(peak_positions, intensities):\n        print(f\"Pos: {p}, Int: {i}\")\nelse:\n    # If less than 6 are found, we just take all and sort them.\n    # But the prompt asks for \"the 6 largest\". If there aren't 6, I'll report all available.\n    # However, since it's a well-defined problem, usually there will be enough.\n    pass\n\n# The final result is ready. To comply with instructions, just print them clearly or let the script finish.\n# Since the requirement is for me to provide specific numbers in a JSON block, I need these values.\n",
+        "file_ids": [
+          "2026-08-10/T043.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# The files are accessible via the 'files' list if file_ids was provided.\n# There is only one file in this task.\ndf = files[0]['table']\nx = df['raman_shift_cm-1']\ny = df['intensity']\n\n# Calculate range and threshold\nrange_val = np.max(y) - np.min(y)\nthreshold = 0.05 * range_val\nprint(f\"Range: {range_val}\")\nprint(f\"Threshold: {threshold}\")\n\n# Find peaks\npeaks, properties = find_peaks(y, prominence=threshold)\nprominences = properties['prominenec']\n\nif len(peaks) > 0:\n    # Get the indices of the top 6 by prominence\n    # Sort indices based on prominence (descending)\n    sorted_indices = np.argsort(prominences)[::-1]\n    top_indices = sorted_indices[:6]\n    \n    # Select these peaks and their positions/intensities\n    selected_peaks = []\n    for i in top_indices:\n        idx = peaks[i]\n        selected_peaks.append((x[idx], y[idx]))\n    \n    # Now sort them by position (ascending)\n    selected_peaks.sort(key=lambda x: x[0])\n    \n    final_positions = [p[0] for p in selected_peaks]\n    final_intensities = [p[1] for p in selected_peaks]\n    \n    print(\"Final Peaks:\")\n    for pos, intens in zip(final_positions, final_intensities):\n        print(f\"Pos: {pos}, Intens: {intens}\")\nelse:\n    print(\"No peaks found.\")\n",
+        "file_ids": [
+          "2026_08_10/T043.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# The files are accessible via the 'files' list if file_ids was provided.\ndf = files[0]['table']\nx = df['raman_shift_cm-1']\ny = df['intensity']\n\nrange_val = np.max(y) - np.min(y)\nthreshold = 0.05 * range_val\nprint(f\"Range: {range_val}\")\nprint(f\"Threshold: {threshold}\")\n\npeaks, properties = find_peaks(y, prominence=threshold)\nprominences = properties['prominenec']\n\nif len(peaks) >= 6:\n    # Get the indices of the top 6 by prominence (descending)\n    sorted_indices = np.argsort(prominences)[::-1]\n    top_indices = sorted_indices[:6]\n    \n    # Select these peaks and their positions/intensities\n    selected_peaks = []\n    for i in top_indices:\n        idx = peaks[i]\n        selected_peaks.append((x[idx], y[idx]))\n    \n    # Sort by position (ascending)\n    selected_peaks.sort(key=lambda x: x[0])\n    \n    final_positions = [p[0] for p in selected_peaks]\n    final_intensities = [p[1] for p in selected_peaks]\n    \n    print(\"Final Positions:\", final_positions)\n    print(\"Final Intensities:\", final_intensities)\nelse:\n    # Fallback if less than 6 peaks found.\n    current_peaks = []\n    for i in range(len(peaks)):\n        idx = peaks[i]\n        current_peaks.append((x[idx], y[idx]))\n    current_peaks.sort(key=lambda x: x[0])\n    print(\"Final Positions:\", [p[0] for p in current_peaks])\n    print(\"Final Intensities:\", [p[1] for p in current_peaks])\n",
+        "file_ids": [
+          "2026-08-10/T043.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndf = files[0]['table']\nx = df['raman_shift_cm-1']\ny = df['intensity']\n\nrange_val = np.max(y) - np.min(y)\nthreshold = 0.05 * range_val\nprint(f\"Range: {range_val}\")\nprint(f\"Threshold: {threshold}\")\n\npeaks, properties = find_peaks(y, prominence=threshold)\n# Use the correct property key 'prominences'\nproms = properties['prominences']\n\nif len(peaks) >= 6:\n    sorted_indices = np.argsort(proms)[::-1]\n    top_indices = sorted_indices[:6]\n    \n    selected_peaks = []\n    for i in top_indices:\n        idx = peaks[i]\n        selected_peaks.append((x[idx], y[idx]))\n    \n    # Sort by position (ascending)\n    selected_peaks.sort(key=lambda x: x[0])\n    \n    final_positions = [p[0] for p in selected_peaks]\n    final_intensities = [p[1] for p in selected_peaks]\n    \n    print(\"Final Positions:\", final_positions)\n    print(\"Final Intensities:\", final_intensities)\nelse:\n    # If fewer than 6, just take all.\n    current_peaks = []\n    for i in range(len(peaks)):\n        idx = peaks[i]\n        current_peaks.append((x[idx], y[idx]))\n    current_peaks.sort(key=lambda x: x[0])\n    print(\"Final Positions:\", [p[0] for p in current_peaks])\n    print(\"Final Intensities:\", [p[1] for p in current_peaks])\n",
+        "file_ids": [
+          "2026-08-10/T043.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 15.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 15.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 15.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 15.0
+  },
+  "session_id": "bench_2026-08-10_AILA_AILA_T043_48a136",
+  "elapsed_s": 47.71,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

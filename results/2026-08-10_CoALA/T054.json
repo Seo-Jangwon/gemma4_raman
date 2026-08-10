@@ -1,0 +1,151 @@
+{
+  "task": "T054",
+  "axis": "data processing",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "In T054.csv find the detected peaks nearest to 1001 and 1602 cm-1 (prominence 5% of range) and report the ratio of their intensities (1001 over 1602).",
+  "criteria": "NUM(5%) + SET(2 items, ±3 cm-1)",
+  "checks": [
+    {
+      "name": "intensity ratio",
+      "passed": true,
+      "score": 1.0,
+      "detail": "1.60815 (expected 1.60815, rel.err=1.703e-10 ≤ 0.05)  [answer]",
+      "weight": 1.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T054.csv"
+  ],
+  "answer_text": "The analysis of the spectrum in `T054.csv` was performed by identifying peaks with a prominence of at least 5% of the total signal range. The peak nearest to $1001\\text{ cm}^{-1}$ was found at exactly $1001.0\\text{ cm}^{-1}$ with an intensity of $998.72$, and the peak nearest to $1602\\text{ cm}^{-1}$ was found at $1602.0\\text{ cm}^{-1}$ with an intensity of $621.04$. The calculated ratio of their intensities is approximately $1.608$.\n\n```json\n{\"ratio\": 1.6081484493105642}\n```",
+  "answer_json": {
+    "ratio": 1.6081484493105642
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/T054.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load the data from the provided file.\n# Since only one file is provided and it's T054.csv, we use it directly.\n# The analysis will look for peaks near 1001 and 1602.\n\nfile_id = '2026-08-10/T054.csv'\n# Assuming \"raman_shift_cm-1\" is the x-axis (index 0) and \"intensity\" is y-axis (index 1).\nx = data[0]['table']['raman_shift_cm-1']\ny = data[0]['table']['intensity']\n\n# Determine the range for prominence. \n# The prompt says \"prominence 5% of range\".\ny_range = np.ptp(y)\nprom_threshold = 0.05 * y_range\n\n# Find all peaks.\npeaks, _ = find_peaks(y, prominence=prom_threshold)\n\n# Identify indices for the peaks closest to 1001 and 1602.\ndef find_nearest_peak(target_x, x_array, peak_indices):\n    best_idx = -1\n    min_dist = float('inf')\n    for idx in peak_indices:\n        dist = abs(x_array[idx] - target_x)\n        if dist < min_dist:\n            min_dist = dist\n            best_idx = idx\n    return best_idx\n\nidx_1001 = find_nearest_peak(1001, x, peaks)\nidx_1602 = find_nearest_peak(1602, x, peaks)\n\n# Only proceed if both peaks were found.\nif idx_1001 != -1 and idx_1602 != -1:\n    val_1001 = y[idx_1001]\n    val_1602 = y[idx_1602]\n    ratio = val_1001 / val_1602\n    print(f\"Found peak near 1001 at {x[idx_1001]} with intensity {val_1001}\")\n    print(f\"Found peak near 1602 at {x[idx_1602]} with intensity {val_1602}\")\n    print(f\"Ratio (1001/1602): {ratio}\")\nelse:\n    # If one or both were not found, identify which ones failed.\n    if idx_1001 == -1: print(\"Peak near 1001 was not found.\")\n    if idx_1602 == -1: print(\"Peak near 1602 was not found.\")\n",
+        "file_ids": [
+          "2026-08-10/T054.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Access data from the 'files' list (the tool injects this based on file_ids)\n# There is only one file in the provided list for this task.\nfile_data = files[0]['table']\nx = file_data['raman_shift_cm-1']\ny = file_data['intensity']\n\n# Define prominence threshold (5% of range)\ny_range = np.ptp(y)\nprom_threshold = 0.05 * y_range\n\n# Find peaks with the specified prominence\npeaks, _ = find_peaks(y, prominence=prom_threshold)\n\ndef get_nearest_peak_idx(target_x, x_vals, peak_indices):\n    if len(peak_indices) == 0:\n        return -1\n    # Find index of the peak whose x-value is closest to target_x\n    idx = min(range(len(peak_indices)), key=lambda i: abs(x_vals[peak_indices[i]] - target_x))\n    return peak_indices[idx]\n\nidx1001 = get_nearest_peak_idx(1001, x, peaks)\nidx1602 = get_nearest_peak_idx(1602, x, peaks)\n\nif idx1001 != -1 and idx1602 != -1:\n    val1001 = y[idx1001]\n    val1602 = y[idx1602]\n    ratio = val1001 / val1602\n    print(f\"Peak near 1001 at x={x[idx1001]} has intensity {val1001}\")\n    print(f\"Peak near 1602 at x={x[idx1602]} has intensity {val1602}\")\n    print(f\"Final Ratio: {ratio}\")\nelse:\n    if idx1001 == -1: print(\"Failed to find peak near 1001.\")\n    if idx1602 == -1: print(\"Failed to find peak near 1602.\")\n",
+        "file_ids": [
+          "2026-08-10/T054.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "session_id": "bench_2026-08-10_CoALA_CoALA_T054_9de11c",
+  "elapsed_s": 35.32,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

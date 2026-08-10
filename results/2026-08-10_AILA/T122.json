@@ -1,0 +1,239 @@
+{
+  "task": "T122",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Report the identification info (spectrum_id and material) of the reference in reference_library.csv that best matches T122.csv.",
+  "criteria": "EXACT(spectrum_id) - naming the right material but the wrong entry is still a miss",
+  "checks": [
+    {
+      "name": "best-matching reference",
+      "passed": true,
+      "score": 1.0,
+      "detail": "spectrum_id='PMMA_02' (expected 'PMMA_02')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T122.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "Based on a comparison of the Raman spectrum in **T122.csv** against the reference library, the closest match was identified using cross-correlation between normalized intensity profiles.\n\nThe matching entry is **PMMA_02**, which corresponds to the material **PMMA**.\n\n```json\n{\"spectrum_id\": \"PMMA_02\", \"material\": \"PMMA\"}\n```",
+  "answer_json": {
+    "spectrum_id": "PMMA_02",
+    "material": "PMMA"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/T122.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load T122 data\nt122_data = files['T122.csv']['table']\nx_target = t122_data['raman_shift_cm-1'].values\ny_target = t122_cm-1_intensity = t122_data['intensity'].values # Wait, the column name is 'intensity' in the inspection\n\n# Correcting key access\nt122_x = t122_data['raman_shift_cm-1']\nt122_y = t122_data['intensity']\n\n# Find peaks in T122\npeaks_target, _ = find_peaks(t122_y, height=np.mean(t122_y)*2) # heuristic peak selection\npeak_x_target = t122_x[peaks_target]\n\nprint(f\"T122 peaks: {peak_x_target}\")\n\n# Load and process reference library\nref_data = files['reference_library.csv']['table']\n# Group by spectrum_id\nunique_ids = np.unique(ref_data['spectrum_id'])\n\nbest_match = None\nmax_score = -1\n\nfor sid in unique_ids:\n    subset = ref_data[ref_data['spectrum_id'] == sid]\n    x_ref = subset['raman_shift_cm-1'].values\n    y_ref = subset['intensity'].values\n    \n    # Find peaks in this reference spectrum\n    peaks_ref, _ = find_peaks(y_ref, height=np.mean(y_ref)*2)\n    peak_x_ref = x_ref[peaks_ref]\n    \n    # Compare peak positions to target (T122)\n    # We'll check the correlation or just the distance of the main peaks\n    if len(peak_x_ref) == 0: continue\n    \n    # Simple metric: find how many target peaks are \"close\" to a reference peak\n    # and calculate average distance. Or use cross-correlation of the whole spectrum.\n    # Since x-axis is common, correlation should work well if they match.\n    \n    # Normalize both for better comparison\n    y_target_norm = (t122_y - np.min(t122_y)) / (np.max(t122_y) - np.min(t122_y))\n    y_ref_norm = (y_ref - np.min(y_ref)) / (np.max(y_ref) - np.min(y_ref))\n    \n    # Correlation\n    corr = np.corrcoef(y_target_norm, y_ref_norm)[0, 1]\n    \n    if corr > max_score:\n        max_score = corr\n        best_match = (sid, subset['material'].iloc[0], corr)\n\nprint(f\"Best Match Found: {best_match}\")\n",
+        "file_ids": [
+          "2026-08-10/reference_library.csv",
+          "2026-08-10/T122.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load data\nt122 = files['T122.csv']['table']\nref_data = files['reference_library.csv']['table']\n\nx_target = t122['raman_shift_cm-1'].values\ny_target = t122['intensity'].values\n\n# Prepare target for correlation (normalized)\ny_t_norm = (y_target - np.min(y_target)) / (np.max(y_target) - np.min(y_target) + 1e-9)\n\nbest_match_id = \"\"\nbest_match_material = \"\"\nmax_corr = -1.0\n\n# Identify unique reference entries\nunique_ids = np.sort(np.unique(ref_data['spectrum_id']))\n\nfor sid in unique_ids:\n    subset = ref_data[ref_data['spectrum_id'] == sid]\n    y_ref = subset['intensity'].values\n    # Normalize reference for correlation\n    y_r_norm = (y_ref - np.min(y_ref)) / (np.max(y_ref) - np.min(y_ref) + 1e-9)\n    \n    corr = np.corrcoef(y_t_norm, y_r_norm)[0, 1]\n    if corr > max_corr:\n        max_corr = corr\n        best_match_id = sid\n        best_match_material = subset['material'].iloc[0]\n\nprint(f\"MATCH_ID:{best_match_id}\")\nprint(f\"MATCH_MAT:{best_match_material}\")\nprint(f\"CORR:{max_corr}\")",
+        "file_ids": [
+          "2026-08-10/reference_library.csv",
+          "2026-08-10/T122.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# The files list is a list of dicts matching the provided file_ids\n# item 0 is reference_library, item 1 is T122\nref_data = files[0]['table']\nt122_data = files[1]['table']\n\ny_target = t122_data['intensity'].values\ny_t_norm = (y_target - np.min(y_target)) / (np.max(y_target) - np.min(y_target) + 1e-9)\n\n# Get unique IDs from the reference data\nunique_ids = np.sort(np.unique(ref_data['spectrum_id']))\n\nbest_match_id = \"\"\nbest_match_material = \"\"\nmax_corr = -1.0\n\nfor sid in unique_ids:\n    subset = ref_data[ref_data['spectrum_id'] == sid]\n    y_ref = subset['intensity'].values\n    # Normalize reference for correlation\n    y_r_norm = (y_ref - np.min(y_ref)) / (np.max(y_ref) - np.min(y_ref) + 1e-9)\n    \n    corr = np.corrcoef(y_t_norm, y_r_norm)[0, 1]\n    if corr > max_corr:\n        max_corr = corr\n        best_match_id = sid\n        best_match_material = subset['material'].iloc[0]\n\nprint(f\"MATCH_ID:{best_match_id}\")\nprint(f\"MATCH_MAT:{best_match_material}\")\nprint(f\"CORR:{max_corr}\")",
+        "file_ids": [
+          "2026-08-10/reference_library.csv",
+          "2026-08-10/T122.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# The files list is a list of dicts matching the provided file_ids\n# item 0 is reference_library, item 1 is T122\nref_data = files[0]['table']\nt122_data = files[1]['table']\n\ny_target = t122_data['intensity']\ny_t_norm = (y_target - np.min(y_target)) / (np.max(y_target) - np.min(y_target) + 1e-9)\n\n# Get unique IDs from the reference data\nunique_ids = np.sort(np.unique(ref_data['spectrum_id']))\n\nbest_match_id = \"\"\nbest_match_material = \"\"\nmax_corr = -1.0\n\nfor sid in unique_ids:\n    subset = ref_data[ref_data['spectrum_id'] == sid]\n    y_ref = subset['intensity']\n    # Normalize reference for correlation\n    y_r_norm = (y_ref - np.min(y_ref)) / (np.max(y_ref) - np.min(y_ref) + 1e-9)\n    \n    corr = np.corrcoef(y_t_norm, y_r_norm)[0, 1]\n    if corr > max_corr:\n        max_corr = corr\n        best_match_id = sid\n        best_match_material = subset['material'][0] # Since it's a pandas-like or array structure? No, it's a dictionary of numpy arrays. Wait...\n\n# Let me double check what 'subset' is in run_analysis for filtering\n# Actually ref_data['spectrum_id'] == sid returns a boolean mask because it's a numpy array.\n# subset = ref_data[ref_data['spectrum_id'] == sid] \n# If ref_data is dict of arrays, then ref_data['spectrum_id'] == sid is a boolean array.\n# But how do I index the other columns? \n# Since there's no pandas in the sandbox (only numpy/scipy/matplotlib), \n# and 'ref_data' is a dict of numpy arrays...\n\n# Let's re-think.\n# ref_data['spectrum_id'] is an array.\n# mask = (ref_data['spectrum_id'] == sid)\n# y_ref = ref_data['intensity'][mask]\n# material_list = ref_data['material'] # this is the full array of labels for that id? No, it's one label per row.\n\n# Let's try a more robust way to get the name of the first row matching sid.\n",
+        "file_ids": [
+          "2026-08-10/reference_library.csv",
+          "2026-08-10/T122.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Item 0 is reference_library, item 1 is T122\nref_data = files[0]['table']\nt122_data = files[1]['table']\n\ny_target = t122_data['intensity']\ny_t_norm = (y_target - np.min(y_target)) / (np.max(y_target) - np.min(y_target) + 1e-9)\n\n# Unique IDs from the reference data\nunique_ids = np.sort(np.unique(ref_data['spectrum_id']))\n\nbest_match_id = \"\"\nbest_match_material = \"\"\nmax_corr = -1.0\n\nfor sid in unique_ids:\n    mask = (ref_data['spectrum_id'] == sid)\n    y_ref = ref_data['intensity'][mask]\n    y_r_norm = (y_ref - np.min(y_ref)) / (np.max(y_ref) - np.min(y_ref) + 1e-9)\n    \n    corr = np.corrcoef(y_t_norm, y_r_norm)[0, 1]\n    if corr > max_corr:\n        max_corr = corr\n        best_match_id = sid\n        # The first element in the mask will be of the matching material\n        best_match_material = ref_data['material'][mask][0]\n\nprint(f\"MATCH_ID:{best_match_id}\")\nprint(f\"MATCH_MAT:{best_match_material}\")\nprint(f\"CORR:{max_corr}\")",
+        "file_ids": [
+          "2026-08-10/reference_library.csv",
+          "2026-08-10/T122.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nref_data = files[0]['table']\nt122_data = files[1]['table']\n\nprint(f\"Ref IDs count: {len(np.unique(ref_data['spectrum_id']))}\")\n# Peek at some values\nids = ref_data['spectrum_id']\nfor i in range(min(5, len(ids))):\n    print(f\"ID Sample: {ids[i]} (Type: {type(ids[i])})\")\n\n# Let's also see T122 data\ny_t = t122_data['intensity']\nprint(f\"T122 Intensity Length: {len(y_t)}\")\n",
+        "file_ids": [
+          "2026-08-10/reference_library.csv",
+          "2026-08-10/T122.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\nref_data = files[0]['table']\nt122_data = files[1]['table']\n\ny_target = t122_data['intensity']\n# Normalize target\ndenom_t = (np.max(y_target) - np.min(y_target))\nif denom_t == 0: denom_t = 1e-9\ny_t_norm = (y_target - np.min(y_target)) / denom_t\n\nunique_ids = np.sort(np.unique(ref_data['spectrum_id']))\n\nbest_match_id = \"\"\nbest_match_material = \"\"\nmax_corr = -1.0\n\nfor sid in unique_ids:\n    mask = (ref_data['spectrum_id'] == sid)\n    y_ref = ref_data['intensity'][mask]\n    \n    if len(y_ref) == 0:\n        continue\n        \n    denom_r = (np.max(y_ref) - np.min(y_ref))\n    if denom_r == 0: denom_r = 1e-9\n    y_r_norm = (y_ref - np.min(y_ref)) / denom_r\n    \n    # Standard correlation\n    corr = np.corrcoef(y_t_norm, y_r_norm)[0, 1]\n    if not (np.isnan(corr) or np.isinf(corr)):\n        if corr > max_corr:\n            max_corr = corr\n            best_match_id = sid\n            # The material is at the same index as the first true in mask\n            best_match_material = ref_data['material'][mask][0]\n\nprint(f\"RESULT_ID:{best_match_id}\")\nprint(f\"RESULT_MAT:{best_match_material}\")\nprint(f\"SCORE:{max_corr}\")",
+        "file_ids": [
+          "2026-08-10/reference_library.csv",
+          "2026-08-10/T122.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nref_data = files[0]['table']\nt122_data = files[1]['table']\n\nprint(\"Unique IDs:\", ref_data['spectrum_id'])\nprint(\"First 5 T122 values:\", t122_data['intensity'][:5])\nprint(\"Any match found for 'PMMA_01'?\", (ref_data['spectrum_id'] == \"PMMA_01\").any())",
+        "file_ids": [
+          "2026-08-10/reference_library.csv",
+          "2026-08-10/T122.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\nref_data = files[0]['table']\nt122_data = files[1]['table']\n\n# Let's just identify the best match by iterating over the indices of the original table\n# and checking for uniqueness. This avoids issues with boolean masks on potential object arrays.\n\nbest_match_id = \"\"\nbest_match_material = \"\"\nmax_corr = -1.0\n\ny_target = t122_data['intensity']\ny_t_norm = (y_target - np.min(y_target)) / (np.max(y_target) - np.min(y_target) + 1e-9)\n\n# To find unique IDs, we can just use the set of values in the column.\nunique_ids = sorted(list(set(ref_data['spectrum_id'])))\n\nfor sid in unique_ids:\n    # Use a list comprehension or simple loop to get indices where ID matches\n    indices = [i for i, x in enumerate(ref_data['spectrum_id']) if x == sid]\n    if not indices: continue\n    \n    y_ref = ref_data['intensity'][indices]\n    # Note: indexing with a list of integers is supported by numpy arrays.\n    \n    denom_r = (np.max(y_ref) - np.min(y_ref))\n    if denom_r == 0: denom_r = 1e-9\n    y_r_norm = (y_ref - np.min(y_ref)) / denom_r\n    \n    corr = np.corrcoef(y_t_norm, y_r_norm)[0, 1]\n    if not (np.isnan(corr) or np.isinf(corr)):\n        if corr > max_corr:\n            max_corr = corr\n            best_match_id = sid\n            # Index into the material list using one of the indices found for this ID\n            best_match_material = ref_data['material'][indices[0]]\n\nprint(f\"RESULT_ID:{best_match_id}\")\nprint(f\"RESULT_MAT:{best_match_material}\")\nprint(f\"CORR:{max_corr}\")",
+        "file_ids": [
+          "2026-08-10/reference_library.csv",
+          "2026-08-10/T122.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "session_id": "bench_2026-08-10_AILA_AILA_T122_ebbe54",
+  "elapsed_s": 70.76,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

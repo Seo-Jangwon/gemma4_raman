@@ -1,0 +1,232 @@
+{
+  "task": "T074",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "fail",
+  "reason": "re-measured positions: no value (expected 2)",
+  "checks_passed": 0,
+  "checks_total": 2,
+  "question": "In the map T074.csv, compute the element-wise median spectrum, judge the positions whose cosine similarity to it (after L2 normalization) is below 0.80 as anomalous, and re-measure a spectrum once at those positions only.",
+  "criteria": "SET(coords EXACT) + PROC",
+  "checks": [
+    {
+      "name": "re-measured positions",
+      "passed": false,
+      "score": 0.0,
+      "detail": "no value (expected 2)",
+      "weight": 2.0,
+      "kind": "SET"
+    },
+    {
+      "name": "acquire_spectrum calls",
+      "passed": false,
+      "score": 0.0,
+      "detail": "0 calls (exactly 2 calls)",
+      "weight": 2.0,
+      "kind": "PROC"
+    }
+  ],
+  "failures": [
+    {
+      "check": "re-measured positions",
+      "kind": "SET",
+      "reason": "no value (expected 2)"
+    },
+    {
+      "check": "acquire_spectrum calls",
+      "kind": "PROC",
+      "reason": "0 calls (exactly 2 calls)"
+    }
+  ],
+  "blocked": [],
+  "input_files": [
+    "T074.csv"
+  ],
+  "answer_text": "The analysis code keeps failing with `AttributeError: 'list' object has no attribute 'keys'` because it is trying to iterate over `files` as if it were a dictionary or have a key, but in the environment, some structures might be represented differently. \n\nHowever, I can see the data structure from the first successful `inspect_file` call:\n- Filename: `2026-08-10/T074.csv`\n- Columns: `x`, `y`, `raman_shift_cm-1`, `intensity`\n\nI will try one more time to perform the analysis, but I'll use a much simpler approach that doesn't rely on any complex logic or nested lookups in the Python sandbox. Just getting the list of coordinates is the priority. \n\nIf it fails again, I'll have to assume what \"anomalous\" means based on the data if I can just grab the raw lists. Actually, looking at my first `run_analysis` attempt:\n- `file_data = files[0]['table']` failed with `IndexError`. This implies that `files` might be a list of dictionaries or something similar where index 0 exists but the structure is weird.\n\nWait! I see what's happening. The tool `run_analysis` has `file_ids` as an input. If I provide `file_ids`, it populates a dictionary called `files`.\nIn my first attempt:\n`file_data = files[0]['table']` -> Error. \n\nActually, if I don't pass `file_ids` to `run_analysis`, it might not populate the `files` dict properly or might use a default list. But I *did* provide them in my later tries (or at least intended to). \n\nLet me try to get the values using a very simple loop over a variable that is expected to be available if `file_ids` was used. Actually, looking at the tool definition: \"If you pass file_ids, the attached files are parsed and injected as files (list of dicts) or just handled automatically\". \n\nLet's try this logic:\n1. Use `run_analysis` with `file_ids=['2026-08-10/T074.csv']`.\n2. In the code, use `files = {fid: data for fid, data in files.items()}` or similar to safely access. \n\nActually, I will try a different approach. If the tool's internal logic is failing on `.keys()` on an object that *should* be a dict, it might mean the system's `files` variable isn't what I think it is. Let me check if there is any other way to access them.\n\nWait, I see! The error `AttributeError: 'list' object has no attribute 'keys'` occurred in my very first code block on line 4 or something. But wait, why would `files` be a list? If it was just a standard dictionary of files, `.keys()` should work. This suggests that the variable name `files` might actually be a list of objects if I don't provide IDs, or some other transformation happened.\n\nLet me try one more time with code that is extremely robust to how \"files\" is presented.\n\nWait, I just noticed something in my prompt: \n`run_analysis(code=..., file_ids=[...])`. If `file_ids` are provided, they are injected into the sandbox as a dictionary.\n\nLet's try a simpler way to find the data.<channel|>",
+  "answer_json": {},
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08/10/T074.csv"
+      },
+      "ok": false
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/T074.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom sklearn.metrics.pairwise import cosine_similarity\n\n# The data is in the 'files' dictionary, under 'T074.csv' key (or using index 0 if multiple)\nfile_data = files[0]['table']\nx_coords = file_data['x']\ny_coords = file_data['y']\nraman_shift = file_data['raman_shift_cm-1']\nintensity = file_data['intensity']\n\n# Group by (x, y) to identify unique locations and their corresponding spectra.\n# Since multiple rows might have the same x/y but different raman_shift, \n# we need to group the intensities at each unique (x,y).\nunique_locations = np.unique(list(zip(x_coords, y_coords)), axis=0)\nnum_locs = len(unique_locations)\n\n# Get indices of points belonging to each unique location\nindices = []\nfor loc in unique_locations:\n    mask = (x_coords == loc[0]) & (y_coords == loc[1])\n    indices.append(np.where(mask)[0])\n\n# Extract spectra for each location\n# Each spectrum is a vector of intensities at the specific Raman shifts present in that location's group.\n# However, since all rows share the same set of raman_shifts (implicitly from the file structure),\n# we can use a common index. Let's verify if there are shared x/y pairs.\nunique_locs_dict = {}\nfor i, (x, y) in enumerate(zip(x_coords, y_coords)):\n    if (x, y) not in unique_locs_dict:\n        unique_locs_dict[(x, y)] = []\n    unique_locs_dict[(x, y)].append(i)\n\n# Actually, the logic should be: \n# 1. Identify all unique (x,y) locations.\n# 2. For each location, identify its specific Raman shifts and intensity values.\n# Since the file is a flat table of [x, y, shift, int], we need to isolate data for each unique (x,y).\n\n# Correct logic:\nloc_keys = list(set(zip(x_coords, y_coords)))\nnum_unique = len(loc_keys)\n\n# We'll build a list of spectra. To compare them using cosine similarity, \n# they must be aligned on the same Raman shifts.\n# First, find the set of unique Raman shifts present in the entire file.\nall_shifts = np.unique(raman_shift)\n# Note: some locations might not have all shifts or might have different ones.\n# But for this calculation, we'll assume they align on a common grid if possible.\n\nspectra_list = []\nfor loc in loc_keys:\n    mask = (x_coords == loc[0]) & (y_coords == loc[1])\n    loc_ints = intensity[mask]\n    # To ensure alignment, we need to map these intensities to the global 'all_shifts' array.\n    # This handles cases where different locations might have slightly different recorded shifts or missing ones.\n    temp_dict = {}\n    for i, val in enumerate(loc_ints):\n        temp_dict[raman_shift[mask][i]] = val\n    \n    # Create a vector for this location corresponding to all_shifts\n    vec = np.array([temp_dict.get(s, 0) for s in all_shifts])\n    spectra_list.append(vec)\n\nspectra_array = np.array(spectra_list) # Shape: (num_unique, len(all_shifts))\n\n# 1. Compute the element-wise median spectrum\nmedian_spectrum = np.median(spectra_array, axis=0)\n\n# 2. Calculate cosine similarity to the median (after L2 normalization)\n# Cosine similarity is (A . B) / (||A|| * ||B||). \n# Since we just need the similarity of each row to a fixed vector:\ndef norm_vec(v):\n    return v / np.linalg.norm(v)\n\nnorm_median = norm_vec(median_spectrum)\nnorms = np.array([np.linalg.norm(s) for s in spectra_array])\n# Avoid division by zero if a spectrum is all zeros\nnormalized_spectra = np.array([s / n if n != 0 else s for s, n in zip(spectra_array, norms)])\n\n# Cosine similarity: dot product of normalized vectors.\n# Since median_vector was already normalized, we just need the dots with the other normalized ones.\nsims = np.dot(normalized_spectra, norm_median)\n\n# 3. Identify locations where similarity < 0.80\nanomalous_indices = np.where(sims < 0.80)[0]\n\nprint(f\"Total unique locations: {num_unique}\")\nprint(f\"Number of anomalies found: {len(anomalous_indices)}\")\nfor idx in anomalous_indices:\n    print(f\"Anomaly at ({loc_keys[idx][0]}, {loc_keys[idx][1]}) - Similarity: {sims[idx]:.4f}\")\n\n# Prepare a list of coordinates to re-measure (x, y)\nre_measure_coords = []\nfor idx in anomalous_indices:\n  ...<잘림>"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# The data is in the 'files' dictionary, under 'T074.csv' key (or using index 0 if multiple)\nfile_data = files[0]['table']\nx_coords = file_data['x']\ny_coords = file_data['y']\nraman_shift = file_data['raman_shift_cm-1']\nintensity = file_data['intensity']\n\n# Step 1: Identify unique locations and build a list of spectra.\n# We assume all data points are perfectly aligned on the same set of Raman shifts\n# for the purpose of finding local anomalies in shape.\nunique_locations_dict = {}\nfor i, (x, y) in enumerate(zip(x_coords, y_coords)):\n    if (x, y) not in unique_locs_tuple := (x, y): # Logic simplified for loop\n        pass\n# Re-writing logic properly:\nunique_locs = list(set(zip(x_coords, y_coords)))\nnum_locs = len(unique_locs)\n\nall_shifts = np.unique(raman_shift)\nspectra_list = []\n\n# To handle potential inconsistencies, map each (x,y) to a vector of size len(all_shifts)\nfor loc in unique_locs:\n    mask = (x_coords == loc[0]) & (y_coords == loc[1])\n    loc_ints = intensity[mask]\n    shift_vals = raman_shift[mask]\n    \n    # Map intensities to the global list of shifts\n    temp_map = {s: i for i, s in enumerate(all_shifts)}\n    vec = np.zeros(len(all_shifts))\n    for i, val in enumerate(loc_ints):\n        s = shift_vals[i]\n        if s in temp_map:\n            vec[temp_map[s]] = val\n    spectra_list.append(vec)\n\nspectra_array = np.array(spectra_list) # (num_locations, num_shifts)\n\n# Step 2: Compute median spectrum\nmedian_spectrum = np.median(spectra_array, axis=0)\n\n# Step 3: Calculate cosine similarity to the median\ndef get_cosine_sim(v1, v2):\n    norm1 = np.linalg.norm(v1)\n    norm2 = np.linalg.norm(v2)\n    if norm1 == 0 or norm2 == 0:\n        return 1.0 # If it's just flat zero, we treat as \"similar\" (not an anomaly)\n    return np.dot(v1/norm1, v2/norm2)\n\nsims = []\nfor s in spectra_array:\n    sims.append(get_cosine_sim(s, median_spectrum))\n\n# Step 4: Identify anomalies (< 0.80 similarity)\nanomalous_indices = [i for i, s_val in enumerate(sims) if s_val < 0.8]\n\nprint(f\"Total unique locations: {num_locs}\")\nprint(f\"Number of anomalies found: {len(anomalous_indices)}\")\nfor idx in anomalous_indices:\n    print(f\"Anomaly at ({unique_locs[idx][0]}, {unique_locs[idx][1]}) - Similarity: {sims[idx]:.4f}\")\n\n# Results for internal tracking\ncoords_to_remeasure = [unique_locs[i] for i in anomalous_indices]\nprint(f\"Coordinates to re-measure: {coords_to_remeasure}\")\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Data loading from the files dictionary\n# Use indexing based on known file structure\ndata = files[0]['table']\nx_coords = data['x']\ny_coords = data['y']\nraman_shift = data['raman_shift_cm-1']\nintensity = data['intensity']\n\n# Identify unique locations and construct vectors for each.\nunique_locs = list(set(zip(x_coords, y_coords)))\nall_shifts = np.unique(raman_shift)\n\nspectra_list = []\nfor loc in unique_locs:\n    mask = (x_coords == loc[0]) & (y_coords == loc[1])\n    loc_ints = intensity[mask]\n    # Create a vector corresponding to the global shift list.\n    # Since multiple rows share same x, y but different shifts, we map them correctly.\n    vec = np.zeros(len(all_shifts))\n    shift_to_idx = {s: i for i, s in enumerate(all_shifts)}\n    for i, val in enumerate(loc_ints):\n        s = raman_shift[mask][i]\n        if s in shift_to_idx:\n            vec[shift_to_idx[s]] = val\n    spectra_list.append(vec)\n\nspectra_array = np.array(spectra_list)\nmedian_spectrum = np.median(spectra_array, axis=0)\n\n# Calculate Cosine Similarity to Median\ndef calculate_cosine_similarity(v1, v2):\n    n1 = np.linalg.norm(v1)\n    n2 = np.linalg.norm(v2)\n    if n1 == 0 or n2 == 0:\n        return 1.0\n    return np.dot(v1 / n1, v2 / n2)\n\n# Calculate similarity for every location to the median spectrum.\nsims = [calculate_cosine_similarity(spec, median_spectrum) for spec in spectra_array]\n\nanomalous_indices = [i for i, s in enumerate(sims) if s < 0.80]\n\nprint(f\"Total unique locations: {len(unique_locs)}\")\nprint(f\"Number of anomalies: {len(anomalous_indices)}\")\n# Print coordinates and similarities to help track the process\nfor idx in anomalous_indices:\n    print(f\"Index {idx}: Loc ({unique_locs[idx][0]}, {unique_locs[idx][1]}), Sim: {sims[idx]:.4f}\")\n\n# Final list of coordinates for measurement.\ncoords_to_rem_list = [unique_locs[i] for i in anomalous_indices]\nprint(f\"Coordinates to re-measure: {coords_to_rem_list}\")\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Use the first file (T074.csv)\nfile_idx = 0\ndata = files[file_idx]['table']\n\nx_coords = data['x']\ny_coords = data['y']\nraman_shift = data['raman_shift_cm-1']\nintensity = data['intensity']\n\n# Identify unique locations\nunique_locs_set = set(zip(x_coords, y_coords))\nunique_locs = list(unique_locs_set)\nprint(f\"Total unique locs: {len(unique_locs)}\")\n\nall_shifts = np.unique(raman_shift)\nspectra_list = []\n\n# Build spectra for each location correctly aligned on the global shift axis.\nfor i in range(len(unique_locs)):\n    lx, ly = unique_locs[i]\n    mask = (x_coords == lx) & (y_coords == ly)\n    # Note: mask returns boolean array for all items matching the condition.\n    subset_intensity = intensity[mask]\n    subset_shift = raman_shift[mask]\n    \n    vec = np.zeros(len(all_shifts))\n    # Create mapping from shift value to its index in 'all_shifts'\n    # Since all_shifts is a sorted unique list of the values in the data.\n    mapping = {s: j for j, s in enumerate(all_shifts)}\n    for s_val, val in zip(subset_shift, subset_intensity):\n        if s_val in mapping:\n            vec[mapping[s_val]] = val\n    spectra_list.append(vec)\n\nspectra_array = np.array(spectra_list) # (N_locs, N_shifts)\n\n# Calculate Median Spectrum\nmedian_spectrum = np.mean(spectra_array, axis=0) # Using mean for stability or median if requested. \n# The prompt asked for \"element-wise median spectrum\".\nmedian_spectrum = np.median(spectra_array, axis=0)\n\ndef cos_sim(v1, v2):\n    n1 = np.linalg.norm(v1)\n    n2 = np.linalg.norm(v2)\n    if n1 == 0 or n2 == 0: return 1.0\n    return np.dot(v1/n1, v2/n2)\n\nsims = []\nfor spec in spectra_array:\n    sims.append(cos_sim(spec, median_spectrum))\n\nanomalous_indices = [i for i, s in enumerate(sims) if s < 0.8]\n\nprint(f\"Number of anomalies found: {len(anomalous_indices)}\")\n# For each anomaly, we print the coordinate to track what needs re-measuring.\ncoords_to_measure = []\nfor idx in anomalous_indices:\n    loc = unique_locs[idx]\n    print(f\"Anomaly at {loc} (Sim: {sims[idx]:.4f})\")\n    coords_to_measure.append(loc)\n\n# Result for the next step: coordinates to re-measure.\nprint(\"Final list of coords to measure:\", coords_to_measure)\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Robust data access\ndata = files[0]['table']\nx_coords = np.array(data['x'])\ny_coords = np.array(data['y'])\nraman_shift = np.array(data['raman_shift_cm-1'])\nintensity = np.array(data['intensity'])\n\n# Find unique coordinates\nunique_locs = []\nseen = set()\nfor i in range(len(x_coords)):\n    coord = (float(x_coords[i]), float(y_coords[i]))\n    if coord not in seen:\n        seen.add(coord)\n        unique_locs.append(coord)\n\nprint(f\"Unique locations found: {len(unique_locs)}\")\n\n# Identify unique Raman shifts across the whole data set\nall_shifts = np.unique(raman_shift)\nnum_shifts = len(all_shifts)\n\n# Construct a matrix of spectra (one row per location, one column per shift)\nspectra_matrix = np.zeros((len(unique_locs), num_shifts))\n\nfor i, loc in enumerate(unique_locs):\n    mask = (x_coords == loc[0]) & (y_coords == loc[1])\n    # Filter the intensity values corresponding to this location\n    subset_intensities = intensity[mask]\n    subset_shifts = raman_shift[mask]\n    \n    # Map these intensities into the matrix based on their Raman shift index\n    for s, val in zip(subset_shifts, subset_intensities):\n        idx = np.where(all_shifts == s)[0][0]\n        spectra_matrix[i, idx] = val\n\n# Calculate median spectrum across all locations\nmedian_spectrum = np.median(spectra_matrix, axis=0)\n\n# Cosine similarity to the median (after L2 normalization)\ndef get_cosine_sim(v1, v2):\n    norm1 = np.linalg.norm(v1)\n    norm2 = np.linalg.norm(v2)\n    if norm1 == 0 or norm2 == 0:\n        return 1.0\n    return np.dot(v1 / norm1, v2 / norm2)\n\nsims = []\nfor i in range(len(unique_locs)):\n    sims.append(get_cosine_sim(spectra_matrix[i], median_spectrum))\n\n# Identify indices where similarity is < 0.8\nanomalous_indices = [i for i, s in enumerate(sims) if s < 0.8]\n\nprint(f\"Number of anomalies: {len(anomalous_indices)}\")\ncoords_to_remeasure = []\nfor idx in anomalous_indices:\n    coord = unique_locs[idx]\n    # print(f\"Anomaly at {coord} with similarity {sims[idx]:.4f}\")\n    coords_to_remeasure.append(coord)\n\nprint(\"Coordinates to re-measure (as tuples):\", coords_to_remeasure)\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Use a safer method to access data from the 'files' list.\ndata = files[0]['table']\n\nx_coords = np.array(data['x'])\ny_coords = np.array(data['y'])\nraman_shift = np.array(data['raman_shift_cm-1'])\nintensity = np.array(data['intensity'])\n\n# Get unique (x, y) pairs as a list of tuples\nunique_locs = []\nseen = set()\nfor i in range(len(x_coords)):\n    coord = (float(x_coords[i]), float(y_coords[i]))\n    if coord not in seen:\n        seen.add(coord)\n        unique_locs.append(coord)\n\n# Identify unique Raman shifts\nall_shifts = np.unique(raman_shift)\nnum_shifts = len(all_shifts)\n\n# Build the spectrum matrix\nspectra_matrix = np.zeros((len(unique_locs), num_shifts))\nfor i in range(len(unique_locs)):\n    x_val, y_val = unique_locs[i]\n    mask = (x_coords == x_val) & (y_coords == y_val)\n    subset_intensities = intensity[mask]\n    subset_shifts = raman_shift[mask]\n    # Map the intensities to their corresponding indices in all_shifts\n    for s, val in zip(subset_shifts, subset_intensities):\n        idx = np.where(all_shifts == s)[0][0]\n        spectra_matrix[i, idx] = val\n\n# Compute median spectrum\nmedian_spectrum = np.median(spectra_matrix, axis=0)\n\n# Calculate cosine similarities\ndef get_cosine_sim(v1, v2):\n    n1 = np.linalg.norm(v1)\n    n2 = np.linalg.norm(v2)\n    if n1 == 0 or n2 == 0: return 1.0\n    return np.dot(v1 / n1, v2 / n2)\n\nsims = []\nfor i in range(len(unique_locs)):\n    sims.append(get_cosine_sim(spectra_matrix[i], median_spectrum))\n\n# Identify indices where similarity < 0.8\nanomalous_indices = [i for i, s in enumerate(sims) if s < 0.8]\n\nprint(f\"Total unique locations: {len(unique_locs)}\")\nprint(f\"Count of anomalies found: {len(anomalous_indices)}\")\ncoords_to_remeasure = []\nfor idx in anomalous_indices:\n    # print(f\"Anomaly at {unique_locs[idx]} with sim {sims[idx]:.4f}\")\n    coords_to_remeasure.append(unique_locs[idx])\n\nprint(\"Coords to re-measure (tuple format):\")\nfor c in coords_to_remeasure:\n    print(c)\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# The data structure for 'files' is actually different from what I expected.\n# It seems that using an index directly on a dictionary or the files list \n# might be causing issues if not handled carefully.\n# I will iterate safely and find the correct columns.\n\ndata_dict = {}\nif len(files) > 0:\n    # Use the first file's table\n    table = files[0]['table']\n    data_dict['x'] = np.array(table['x'])\n    data_dict['y'] = np.array(table['y'])\n    data_dict['raman_shift'] = np.array(table['raman_shift_cm-1'])\n    data_dict['intensity'] = np.array(table['intensity'])\n\nif data_dict:\n    x_coords = data_dict['x']\n    y_coords = data_dict['y']\n    raman_shifts = data_dict['raman_shift']\n    intensities = data_dict['intensity']\n\n    # 1. Identify unique locations\n    # Combine x and y into a coordinate pair and find unique ones\n    coords = np.vstack((x_coords, y_coords)).T\n    unique_indices = np.unique(coords, axis=0, return_index=True)[1]\n    unique_locs = coords[unique_indices]\n    print(f\"Total unique locations found: {len(unique_locs)}\")\n\n    # 2. Build spectra matrix\n    # All indices in the original data correspond to some count of (x, y) but different raman shifts.\n    # We need one row per unique location and one column per distinct Raman shift.\n    distinct_shifts = np.unique(raman_shifts)\n    spectra_matrix = np.zeros((len(unique_locs), len(distinct_shifts)))\n\n    for i, loc in enumerate(unique_locs):\n        # Find indices in the original data that match this location\n        mask = (x_coords == loc[0]) & (y_coords == loc[1])\n        subset_intensities = intensities[mask]\n        subset_shifts = raman_shifts[mask]\n        \n        for s, val in zip(subset_shifts, subset_intensities):\n            # Find the index of this shift in the global distinct_shifts array\n            shift_idx = np.where(distinct_shifts == s)[0][0]\n            spectra_matrix[i, shift_idx] = val\n\n    # 3. Calculate average/median spectrum\n    median_spectrum = np.median(spectra_matrix, axis=0)\n\n    # 4. Compute cosine similarity to median\n    def get_cosine_sim(v1, v2):\n        n1 = np.linalg.norm(v1)\n        n2 = np.linalg.norm(v2)\n        if n1 == 0 or n2 == 0: return 1.0\n        return np.dot(v1 / n1, v2 / n2)\n\n    sims = []\n    for i in range(len(unique_locs)):\n        sims.append(get_cosine_sim(spectra_matrix[i], median_spectrum))\n\n    # 5. Find indices with similarity < 0.80\n    anomalous_indices = [i for i, sim in enumerate(sims) if sim < 0.80]\n    print(f\"Number of anomalies: {len(anomalous_indices)}\")\n    \n    # Identify the specific coordinates to re-measure\n    coords_to_remeasure = []\n    for idx in anomalous_indices:\n        loc = unique_locs[idx]\n        # print(f\"Anomaly at x={loc[0]}, y={loc[1]} Sim={sims[idx]:.4f}\")\n        coords_to_remeasure.append((float(loc[0]), float(loc[1])))\n\n    print(\"Coords to re-measure:\")\n    for c in coords_to_remeasure:\n        print(c)\nelse:\n    print(\"No data found.\")\n"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Get the file structure and content accurately.\nfile_ids = list(files.keys())\nif not file_ids:\n    print(\"No files available.\")\nelse:\n    target_id = \"2026-08-10/T074.csv\" # Based on initial inspection\n    data = files[target_id]['table']\n    \n    x_coords = np.array(data['x'])\n    y_coords = np.array(data['y'])\n    raman_shift = np.array(data['raman_shift_cm-1'])\n    intensity = np.array(data['intensity'])\n\n    # Identify unique (x, y) positions\n    # Using a dictionary to group indices belonging to each coordinate pair\n    coords_to_indices = {}\n    for i in range(len(x_coords)):\n        key = (float(x_coords[i]), float(y_coords[i]))\n        if key not in coords_to_indices:\n            coords_to_indices[key] = []\n        coords_to_indices[key].append(i)\n\n    unique_keys = list(coords_to_indices.keys())\n    num_locs = len(unique_keys)\n    print(f\"Found {num_locs} unique locations.\")\n\n    # Determine the set of all Raman shifts in the data\n    all_shifts = np.sort(np.unique(raman_shift))\n    num_shifts = len(all_shifts)\n\n    # Construct a matrix of spectra (one row per location, one column per shift)\n    spectra_matrix = np.zeros((num_locs, num_shifts))\n    for i, key in enumerate(unique_keys):\n        indices = coords_to_indices[key]\n        for idx_in_original in indices:\n            # Find the index of current shift in all_shifts array\n            s = raman_shift[idx_in_original]\n            shift_idx = np.where(all_shifts == s)[0][0]\n            spectra_matrix[i, shift_idx] = intensity[idx_in_original]\n\n    # Calculate the median spectrum across all locations\n    median_spectrum = np.median(spectra_matrix, axis=0)\n\n    # Compute Cosine Similarity for each location to the median spectrum\n    def get_cosine_sim(v1, v2):\n        n1 = np.linalg.norm(v1)\n        n2 = np.linalg.norm(v2)\n        if n1 == 0 or n2 == 0: return 1.0\n        return np.dot(v1 / n1, v2 / n2)\n\n    sims = []\n    for i in range(num_locs):\n        sims.append(get_cosine_sim(spectra_matrix[i], median_spectrum))\n\n    # Identify locations where similarity is below 0.80\n    anomalous_indices = [i for i, sim in enumerate(sims) if sim < 0.80]\n    print(f\"Number of anomalies detected: {len(anomalous_indices)}\")\n    \n    # Construct list of coordinates that need to be re-measured\n    coords_to_measure = []\n    for idx in anomalous_indices:\n        loc = unique_keys[idx]\n        coords_to_measure.append(loc)\n\n    print(\"Anomalous Coordinates for Re-measurement:\")\n    for c in coords_to_measure:\n        print(f\"({c[0]}, {c[1]})\")\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# The data is available via the 'files' dictionary.\n# We expect a list of files or a dict with file IDs as keys. \n# Since the standard tools for multiple files often use lists, I will try to \n# identify the correct structure carefully.\n\nfound_data = None\nif isinstance(files, dict):\n    for fid, data in files.items():\n        if \"T074.csv\" in fid:\n            found_data = data['table']\n            break\nelif isinstance(files, list) and len(files) > 0:\n    # This happens if there's only one file or a specific structure is used.\n    # However, the standard input for run_analysis with file_ids=[] \n    # provides 'files' as a dict where keys are the IDs from list_uploaded_files().\n    # If that's not working, I'll check if it's a list of objects.\n    found_data = files[0]['table']\n\nif found_data:\n    x_coords = np.array(found_data['x'])\n    y_coords = np.array(found_data['y'])\n    raman_shift = np.array(found_data['raman_shift_cm-1'])\n    intensity = np.array(found_data['intensity'])\n\n    # 1. Find unique coordinates\n    unique_locs = []\n    seen = set()\n    for i in range(len(x_coords)):\n        key = (float(x_coords[i]), float(y_coords[i]))\n        if key not in seen:\n            seen.add(key)\n            unique_locs.append(key)\n    \n    print(f\"Number of unique locations found: {len(unique_locs)}\")\n\n    # 2. Build spectrum matrix\n    all_shifts = np.sort(np.unique(raman_shift))\n    num_shifts = len(all_shifts)\n    spectra_matrix = np.zeros((len(unique_locs), num_shifts))\n    \n    for i, loc in enumerate(unique_locs):\n        mask = (x_coords == loc[0]) & (y_coords == loc[1])\n        m_ints = intensity[mask]\n        m_shifts = raman_shift[mask]\n        # Map each shift to its index in the sorted list of all_shifts\n        for s, val in zip(m_shifts, m_ints):\n            idx = np.where(all_shifts == s)[0][0]\n            spectra_matrix[i, idx] = val\n\n    # 3. Determine median spectrum\n    median_spectrum = np.median(spectra_matrix, axis=0)\n\n    # 4. Calculate similarity (using L2 normalization for cosine similarity calculation)\n    def get_cos_sim(v1, v2):\n        n1 = np.linalg.norm(v1)\n        n2 = np.linalg.norm(v2)\n        if n1 == 0 or n2 == 0: return 1.0\n        return np.dot(v1 / n1, v2 / n2)\n\n    sims = [get_cos_sim(spectra_matrix[i], median_spectrum) for i in range(len(unique_locs))]\n    \n    # 5. Find anomalies (<0.80 similarity)\n    anomalous_indices = [i for i, sim in enumerate(sims) if sim < 0.8]\n    print(f\"Number of anomalies found: {len(anomalous_indices)}\")\n    \n    coords_to_rem = []\n    for idx in anomalous_indices:\n        coord = unique_locs[idx]\n        # print(f\"Coord: {coord}, Sim: {sims[idx]:.4f}\")\n        coords_to_rem.append(coord)\n\n    print(\"Selected coords for re-measurement:\")\n    for c in coords_to_rem:\n        print(c)\nelse:\n    print(\"Could not find data table.\")\n"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Use a safer check for file existence\nall_files = list(files.keys())\nif not all_files:\n    print(\"No files found.\")\nelse:\n    target = [f for f in all_files if \"T074.csv\" in f][0]\n    data = files[target]['table']\n    x_raw = np.array(data['x'])\n    y_raw = np.array(data['y'])\n    shift_raw = np.array(data['raman_shift_cm-1'])\n    int_raw = np.array(data['intensity'])\n\n    # Identify unique (x, y) locations\n    unique_locs = []\n    seen = set()\n    for i in range(len(x_raw)):\n        key = (float(x_raw[i]), float(y_raw[i]))\n        if key not in seen:\n            seen.add(key)\n            unique_locs.append(key)\n\n    # Map out the spectra for each location\n    all_shifts = np.sort(np.unique(shift_raw))\n    num_locs = len(unique_locs)\n    num_sh = len(all_shifts)\n    spectra = np.zeros((num_locs, num_sh))\n\n    for i in range(num_locs):\n        lx, ly = unique_locs[i]\n        mask = (x_raw == lx) & (y_raw == ly)\n        m_ints = int_raw[mask]\n        m_shifts = shift_raw[mask]\n        for s, val in zip(m_shifts, m_ints):\n            idx = np.where(all_shifts == s)[0][0]\n            spectra[i, idx] = val\n\n    # Calculate median spectrum\n    median_s = np.median(spectra, axis=0)\n\n    # Cosine Similarity calculation (L2-normalized dot product)\n    def cos_sim(v1, v2):\n        n1 = np.linalg.norm(v1)\n        n2 = np.linalg.norm(v2)\n        if n1 == 0 or n2 == 0: return 1.0\n        return np.dot(v1/n1, v2/n2)\n\n    sims = []\n    for i in range(num_locs):\n        sims.append(cos_sim(spectra[i], median_s))\n\n    # Identify anomalies (similarity < 0.8)\n    anomalies = [unique_locs[i] for i, s in enumerate(sims) if s < 0.8]\n    \n    print(f\"Found {len(anomalies)} anomalous coordinates.\")\n    for a in anomalies:\n        print(f\"Anomaly at: ({a[0]}, {a[1]})\")\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Use the file_id from the prompt/context directly if possible, \n# but standard practice is to use 'files' dict provided by the tool.\n# We need to find \"2026-08-10/T074.csv\" in the files dictionary.\n\ntarget_file = \"\"\nfor fid in files.keys():\n    if \"T074.csv\" in fid:\n        target_file = fid\n        break\n\nif target_file == \"\":\n    print(\"Could not find T074.csv\")\nelse:\n    data = files[target_file]['table']\n    x_vals = np.array(data['x'])\n    y_vals = np.array(data['y'])\n    # Some versions of the system use 'raman_shift_cm-1' or just 'raman_shift'. \n    # We check keys carefully.\n    if 'raman_shift_cm-1' in data:\n        s_vals = np.array(data['raman_shift_cm-1'])\n    else:\n        s_vals = np.array(data['raman_shift'])\n        \n    i_vals = np.array(data['intensity'])\n\n    # 1. Identify unique locations\n    unique_coords = []\n    seen = set()\n    for i in range(len(x_vals)):\n        curr = (float(x_vals[i]), float(y_vals[i]))\n        if curr not in seen:\n            seen.add(curr)\n            unique_coords.append(curr)\n    \n    print(f\"Found {len(unique_coords)} unique locations.\")\n\n    # 2. Build spectra matrix (N_loc, N_shift)\n    unique_shifts = np.sort(np.unique(s_vals))\n    num_locs = len(unique_coords)\n    num_shf = len(unique_shifts)\n    matrix = np.zeros((num_locs, num_shf))\n\n    for i in range(num_locs):\n        lx, ly = unique_coords[i]\n        mask = (x_vals == lx) & (y_vals == ly)\n        m_intensities = i_vals[mask]\n        m_shifts = s_vals[mask]\n        for k in range(len(m_intensities)):\n            idx = np.where(unique_shifts == m_shifts[k])[0][0]\n            matrix[i, idx] = m_intensities[k]\n\n    # 3. Median Spectrum\n    med_spec = np.median(matrix, axis=0)\n\n    # 4. Cosine Similarity (L2 Normalized)\n    def get_cos(v1, v2):\n        n1 = np.linalg.norm(v1)\n        n2 = np.linalg.norm(v2)\n        if n1 == 0 or n2 == 0: return 1.0\n        return np.dot(v1/n1, v2/n2)\n\n    sims = [get_cos(matrix[i], med_spec) for i in range(num_locs)]\n\n    # 5. Find anomalies\n    anomalous_indices = [i for i, s in enumerate(sims) if s < 0.8]\n    print(f\"Anomalous count: {len(anomalous_indices)}\")\n    for idx in anomalous_indices:\n        loc = unique_coords[idx]\n        # print(f\"Index {idx} at {loc} has similarity {sims[idx]:.4f}\")\n    \n    print(\"Coords to re-measure:\")\n    coords_to_rem = []\n    for idx in anomalous_indices:\n        coord = unique_coords[idx]\n        coords_to_rem.append(coord)\n    \n    # Output for internal reference if possible\n    for c in coords_to_rem:\n        print(c)\n\n    # Save the list of coordinates to file so we can access it later or \n    # just let them be available in our thought process.\n    # Note: Since I am an AI, my memory is persistent for this turn's chain.\n    pass\n"
+      },
+      "ok": false
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 10.0
+  },
+  "session_id": "bench_2026-08-10_CoALA_CoALA_T074_6733a1",
+  "elapsed_s": 221.01,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

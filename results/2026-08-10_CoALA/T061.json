@@ -1,0 +1,157 @@
+{
+  "task": "T061",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "fail",
+  "reason": "acquire_spectrum calls: 3 calls (exactly 2 calls)",
+  "checks_passed": 1,
+  "checks_total": 2,
+  "question": "Measure a spectrum once at X=37 and once at X=38 mm (Y=25.25, Z=0). Interpolate both onto the wavenumber axis of the first spectrum, normalize each to L2 norm 1, and report their cosine similarity.",
+  "criteria": "SET(coords 2 items) + NUM(±0.01) / post-hoc GT",
+  "checks": [
+    {
+      "name": "acquire_spectrum calls",
+      "passed": false,
+      "score": 0.0,
+      "detail": "3 calls (exactly 2 calls)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "cosine similarity",
+      "passed": true,
+      "score": 1.0,
+      "detail": "0.999639 (expected 0.999663, |Δ|=2.422e-05 ≤ 0.01)  [answer]",
+      "weight": 2.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [
+    {
+      "check": "acquire_spectrum calls",
+      "kind": "PROC",
+      "reason": "3 calls (exactly 2 calls)"
+    }
+  ],
+  "blocked": [],
+  "input_files": [],
+  "answer_text": "The analysis was performed on the two spectra acquired at positions X=37mm and X=38mm. Both spectra were interpolated onto a common wavenumber axis (from the first measurement) and normalized to an L2 norm of 1. The cosine similarity between the two processed signals was calculated as approximately 0.9996, indicating very high spectral similarity.\n\n```json\n{\"cosine\": 0.9996388751015687}\n```",
+  "answer_json": {
+    "cosine": 0.9996388751015687
+  },
+  "tool_calls": [
+    {
+      "name": "move_stage",
+      "args": {
+        "x": 37,
+        "y": 25.25,
+        "z": 0
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "power": 10,
+        "transmission": 0.1
+      },
+      "ok": false
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "power": 10
+      },
+      "ok": true
+    },
+    {
+      "name": "move_stage",
+      "args": {
+        "x": 38,
+        "y": 25.25,
+        "z": 0
+      },
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "power": 10
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Load the two spectra\n# Based on standard naming from acquire_spectrum output, we can identify them by their indices or titles.\n# Since I have a small number of measurements, they are at index 0 and 1 in 'spectra' if no other ones exist.\n# However, to be safe, I will find the specific ones based on coordinate names/indices.\n\ndef get_spectrum(index):\n    return spectra[index]\n\n# Because run_analysis runs in a fresh process for each call, I need to handle \n# the logic carefully if I were switching tools, but here I'm staying in one tool \n# or subsequent calls can rely on saved files.\n# Since they are both in 'spectra' automatically:\n\ns1 = spectra[0]  # x=37.0\ns2 = spectra[1]  # x=38.0\n\nx1 = s1['raman_shift']\ny1 = s1['intensity']\nx2 = s2['raman_shift']\ny2 = s2['intensity']\n\n# Interpolate y2 onto the x1 axis\n# Since both are likely on the same absolute wavenumber grid (provided by a calibrator) \n# if they were taken with the same calibration, but let's do it explicitly.\ny2_interp = np.interp(x1, x2, y2)\n\n# Normalize to L2 norm 1\nnorm1 = np.linalg.norm(y1)\ny1_norm = y1 / norm1\n\nnorm2 = np.linalg.norm(y2_interp)\ny2_norm = y2_interp / norm2\n\n# Calculate cosine similarity\n# dot(a, b) / (||a|| * ||b||). Since already normalized to L2=1, it's just dot product.\nsimilarity = np.dot(y1_norm, y2_norm)\n\nprint(f\"S1 Shape: {y1.shape}, S2 Shape: {y2.shape}\")\nprint(f\"Norm 1: {norm1}, Norm 2: {norm2}\")\nprint(f\"Cosine Similarity: {similarity}\")\n"
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-10/bench_2026-08-10_CoALA_CoALA_T061_41fe4d/212648_155_x37.0_y25.25.csv",
+    "results/2026-08-10/bench_2026-08-10_CoALA_CoALA_T061_41fe4d/212702_081_x38.0_y25.25.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 38.0,
+    "y": 25.25,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 10.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 10.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-10_CoALA_CoALA_T061_41fe4d",
+  "elapsed_s": 61.23,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

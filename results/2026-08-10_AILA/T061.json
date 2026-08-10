@@ -1,0 +1,194 @@
+{
+  "task": "T061",
+  "axis": "procedure",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 2,
+  "checks_total": 2,
+  "question": "Measure a spectrum once at X=37 and once at X=38 mm (Y=25.25, Z=0). Interpolate both onto the wavenumber axis of the first spectrum, normalize each to L2 norm 1, and report their cosine similarity.",
+  "criteria": "SET(coords 2 items) + NUM(±0.01) / post-hoc GT",
+  "checks": [
+    {
+      "name": "acquire_spectrum calls",
+      "passed": true,
+      "score": 1.0,
+      "detail": "2 calls (exactly 2 calls)",
+      "weight": 1.0,
+      "kind": "PROC"
+    },
+    {
+      "name": "cosine similarity",
+      "passed": true,
+      "score": 1.0,
+      "detail": "0.985422 (expected 0.984351, |Δ|=0.001072 ≤ 0.01)  [answer]",
+      "weight": 2.0,
+      "kind": "NUM"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [],
+  "answer_text": "I have measured two Raman spectra at the specified locations (x=37 mm and x=38 mm) using a standard power of 15% and an exposure time of 2 seconds.\n\nThe first spectrum, taken at $(x, y) = (37.0, 25.25)$, has a peak intensity profile characteristic of the sample material. The second spectrum, taken at $(x, y) = (38.0, 25.25)$, was slightly varied in absolute intensity but showed a very similar spectral shape. \n\nAfter interpolating the second spectrum onto the wavenumber axis of the first and normalizing both to an L2 norm of 1, the calculated cosine similarity between them is approximately 0.9854. This high value indicates that the two measurements are highly consistent in their relative peak intensities across the scanned range, suggesting a homogeneous sample area at these coordinates.\n\n```json\n{\"cosine\": 0.9854224895927943}\n```",
+  "answer_json": {
+    "cosine": 0.9854224895927943
+  },
+  "tool_calls": [
+    {
+      "name": "get_hardware_status",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "search_knowledge_base",
+      "args": {
+        "query": "standard measurement parameters"
+      },
+      "ok": true
+    },
+    {
+      "name": "start_camera_stream",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "move_to_pixel",
+      "args": {
+        "pixel_x": 530,
+        "pixel_y": 400
+      },
+      "ok": true
+    },
+    {
+      "name": "move_stage",
+      "args": {
+        "x": 37,
+        "y": 25.25,
+        "z": 0
+      },
+      "ok": true
+    },
+    {
+      "name": "run_autofocus",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 2,
+        "power": 15
+      },
+      "ok": true
+    },
+    {
+      "name": "move_stage",
+      "args": {
+        "x": 38,
+        "y": 25.25,
+        "z": 0
+      },
+      "ok": true
+    },
+    {
+      "name": "run_autofocus",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "acquire_spectrum",
+      "args": {
+        "exposure": 2,
+        "power": 15
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# The files were identified from the previous steps. \n# I will refer to them by their paths if needed, but since they are in the current session,\n# some internal logic might find them easily. However, it's best to be explicit.\n# Note: list_results provides labels that can be used. Since we don't have the IDs from a \n# specific call yet, I will just use the paths if possible or assume they are in 'spectra'.\n\n# To ensure I grab only these two and do nothing else:\n# I need to know which ones are exactly these two.\n# Based on current state:\n# Spectra 1 is at x=37, Spectra 2 is at x=38.\n# They are both in the 'spectra' list from the last couple of calls.\n\nvalid_spectra = []\nfor s in spectra:\n    if '37.0' in s['title'] or '38.0' in s['title']:\n        valid_spectra.append(s)\n\n# We want to make sure we have exactly two if possible, or just select them by x-coord.\ns1 = None\ns2 = None\nfor s in valid_spectra:\n    if '37.0' in s['title']:\n        s1 = s\n    elif '38.0' in s['title']:\n        s2 = s\n\nif s1 and s2:\n    # Get data\n    x1 = s1['raman_shift_cm-1'] # This is the x-axis for S1\n    y1 = s1['intensity']         # This is the y-axis (intensity)\n    \n    x2_orig = s2['raman_shift_cm-1']\n    y2_orig = s2['intensity']\n    \n    # 1. Interpolate S2 onto S1's x-axis\n    # Use np.interp(target_x, original_x, original_y)\n    y2_interp = np.interp(x1, x2_orig, y2_orig)\n    \n    # 2. Normalize to L2 norm of 1\n    def l2_norm_1(y):\n        return y / np.linalg.norm(y)\n    \n    y1_norm = l2_norm_1(y1)\n    y2_norm = l2_norm_1(y2_interp)\n    \n    # 3. Cosine similarity\n    # Since they are both L2 normalized to 1, cos_sim = sum(a * b) / (sqrt(sum(a^2)) * sqrt(sum(b^2)))\n    # becomes just the dot product because denominators are 1.\n    cos_sim = np.dot(y1_norm, y2_norm)\n    \n    print(f\"S1 length: {len(y1)}\")\n    print(f\"S2 interp length: {len(y2_interp)}\")\n    print(f\"Cosine Similarity: {cos_sim}\")\nelse:\n    print(\"Could not find both spectra.\")\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "for i, s in enumerate(spectra):\n    print(f\"Spectrum {i} keys: {list(s.keys())}\")\n    if 'raman_shift_cm-1' in s:\n        print(f\"S{i} has raman_shift_cm-1\")\n    elif 'x' in s:\n        print(f\"S{i} has x\")\n    else:\n        # search for anything with \"raman\" or \"shift\"\n        found = False\n        for k in s.keys():\n            if 'raman' in k or 'shift' in k:\n                print(f\"S{i} found related key: {k}\")\n                found = True\n        if not found:\n            print(\"No obvious x-axis keys for S{}\" .format(i))"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\n# Identify spectra by title keywords\ns1 = None\ns2 = None\nfor s in spectra:\n    if '37.0' in s['title']:\n        s1 = s\n    elif '38.0' in s['title']:\n        s2 = s\n\nif s1 and s2:\n    x1 = s1['raman_shift']\n    y1 = s1['intensity']\n    \n    x2_orig = s2['raman_shift']\n    y2_orig = s2['intensity']\n    \n    # Interpolate S2 onto x-axis of S1\n    y2_interp = np.interp(x1, x2_orig, y2_orig)\n    \n    # Normalize both to L2 norm 1\n    def normalize_l2(arr):\n        return arr / np.linalg.norm(arr)\n    \n    y1_norm = normalize_l2(y1)\n    y2_norm = normalize_l2(y2_interp)\n    \n    # Cosine similarity: \n    # Since they are both L2-normalized to 1, it's just the dot product.\n    cos_sim = np.dot(y1_norm, y2_norm)\n    \n    print(f\"S1 (x=37) norm length: {len(y1)}\")\n    print(f\"S2 (x=38) interp length: {len(y2_interp)}\")\n    print(f\"Cosine Similarity: {cos_sim}\")\nelse:\n    # Debug info if needed\n    for i, s in enumerate(spectra):\n        print(f\"S{i} title: {s['title']}\")\n"
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "results/2026-08-10/bench_2026-08-10_AILA_AILA_T061_150500/162352_649_x37.0_y25.25.csv",
+    "results/2026-08-10/bench_2026-08-10_AILA_AILA_T061_150500/162416_072_x38.0_y25.25.csv"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 20.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 20.0
+  },
+  "state_after": {
+    "x": 38.0,
+    "y": 25.25,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 15.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "power_setpoint_pct": 15.0,
+    "_unreadable": [
+      "get_ccd_info: Camera busy acquiring"
+    ]
+  },
+  "session_id": "bench_2026-08-10_AILA_AILA_T061_150500",
+  "elapsed_s": 102.85,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

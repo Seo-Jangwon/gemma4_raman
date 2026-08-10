@@ -2,32 +2,36 @@
   "task": "T125",
   "axis": "identification",
   "mode": "live",
-  "result": "pass",
-  "reason": "",
-  "checks_passed": 1,
+  "result": "error",
+  "reason": "The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check the Ollama host and context size.",
+  "checks_passed": 0,
   "checks_total": 1,
   "question": "Report the material in reference_library.csv most similar to T125.csv, and present at least two basis peaks that distinguish it from the second-ranked candidate.",
   "criteria": "EXACT(material) + SET(basis peaks >=2 items, ±3 cm-1)",
   "checks": [
     {
       "name": "material",
-      "passed": true,
-      "score": 1.0,
-      "detail": "'PET' (expected 'PET')",
+      "passed": false,
+      "score": 0.0,
+      "detail": "None (expected 'PET')",
       "weight": 2.0,
       "kind": "EXACT"
     }
   ],
-  "failures": [],
+  "failures": [
+    {
+      "check": "material",
+      "kind": "EXACT",
+      "reason": "None (expected 'PET')"
+    }
+  ],
   "blocked": [],
   "input_files": [
     "T125.csv",
     "reference_library.csv"
   ],
-  "answer_text": "Based on a correlation analysis between the spectrum of sample **T125** and the materials provided in the reference library, the most similar material is **PET**.\n\nThe similarity was determined by performing baseline correction (IPBSA) and normalization on the T125 spectrum, then calculating the Pearson correlation coefficient against representative profiles for each material in the library. PET showed a very high correlation ($\\approx 0.99$), while PMMA was the second-ranked candidate with a significantly lower correlation ($\\approx 0.14$).\n\nThe two basis peaks that distinguish **PET** from **PMMA** are:\n1.  **$1614\\text{ cm}^{-1}$**: A strong aromatic C=C stretching mode characteristic of PET, which is absent in PMMA.\n2.  **$1096\\text{ cm}^{-1}$**: A prominent C-O stretching vibration found in PET but not at this position in PMMA.\n\n```json\n{\"material\": \"PET\"}\n```",
-  "answer_json": {
-    "material": "PET"
-  },
+  "answer_text": "",
+  "answer_json": {},
   "tool_calls": [
     {
       "name": "list_uploaded_files",
@@ -47,50 +51,6 @@
         "file_id": "2026-08-10/T125.csv"
       },
       "ok": true
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# 1. Load data\nt125 = files[0] # Assuming T125 is first based on how I'll pass file_ids, but let's use names\n# Wait, run_analysis uses files list in order of file_ids passed.\n# Let's be explicit.\n\ndef get_spectrum(f, sid=None):\n    if sid is None: # T125 case\n        return f['table']['raman_shift_cm-1'], f['table']['intensity']\n    else: # Library case\n        mask = f['table']['spectrum_id'] == sid\n        return f['table']['raman_shift_cm-1'][mask], f['table']['intensity'][mask]\n\n# To avoid index errors, I'll find which is which.\nt125_file = [f for f in files if 'T125' in f['filename']][0]\nlib_file = [f for f in files if 'reference_library' in f['filename']][0]\n\nx_t, y_t = get_spectrum(t125_file)\n\n# Basic cleaning for T125: IPBSA baseline removal\nfrom scipy.ndimage import median_filter\ndef simple_norm(y):\n    return (y - np.min(y)) / (np.max(y) - np.min(y))\n\n# Using the injected ipbsa helper for T125\ny_t_corr, _ = ipbsa(y_t, order=4)\ny_t_norm = simple_norm(y_t_corr)\n\n# Process Library\nsids = np.unique(lib_file['table']['spectrum_id'])\nmaterials = {sid: lib_file['table']['material'][lib_file['table']['spectrum_id'] == sid][0] for sid in sids}\n\nscores = []\nfor sid in sids:\n    x_ref, y_ref = get_spectrum(lib_file, sid)\n    # Reference spectra are usually clean, but let's normalize them.\n    y_ref_norm = simple_norm(y_ref)\n    \n    # Correlation as similarity metric\n    corr = np.corrcoef(y_t_norm, y_ref_norm)[0, 1]\n    scores.append((sid, corr))\n\nscores.sort(key=lambda x: x[1], reverse=True)\nprint(\"Top matches:\")\nfor sid, score in scores[:5]:\n    print(f\"ID: {sid}, Material: {materials[sid]}, Score: {score:.4f}\")\n",
-        "file_ids": [
-          "2026-08-10/T125.csv",
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": false
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\n\n# Setup files\nt125_f = [f for f in files if 'T125' in f['filename']][0]\nlib_f = [f for f in files if 'reference_library' in f['filename']][0]\n\n# T125 data\nx_t = t125_f['table']['raman_shift_cm-1']\ny_t = t125_f['table']['intensity']\n\n# Baseline correction for T125\ny_t_corr, _ = ipbsa(y_t, order=4)\ndef normalize(y):\n    ymin, ymax = np.min(y), np.max(y)\n    if ymax == ymin: return y - ymin\n    return (y - ymin) / (ymax - ymin)\n\ny_t_norm = normalize(y_t_corr)\n\n# Library processing\nsids = np.unique(lib_f['table']['spectrum_id'])\nmaterials = {sid: lib_f['table']['material'][lib_f['table']['spectrum_id'] == sid][0] for sid in sids}\n\nresults = []\nfor sid in sids:\n    mask = lib_f['table']['spectrum_id'] == sid\n    x_ref = lib_f['table']['raman_shift_cm-1'][mask]\n    y_ref = lib_f['table']['intensity'][mask]\n    \n    if len(y_ref) == 0:\n        print(f\"Warning: {sid} is empty\")\n        continue\n        \n    # Normalize reference\n    y_ref_norm = normalize(y_ref)\n    \n    # Ensure length matches (T125 is 1801, let's check if ref is same)\n    if len(y_ref_norm) != len(y_t_norm):\n        # Interpolate reference to match T125 axis\n        f_interp = interp1d(x_ref, y_ref_norm, bounds_error=False, fill_value=0)\n        y_ref_resampled = f_interp(x_t)\n    else:\n        y_ref_resampled = y_ref_norm\n\n    corr = np.corrcoef(y_t_norm, y_ref_resampled)[0, 1]\n    results.append((sid, materials[sid], corr))\n\nresults.sort(key=lambda x: x[2], reverse=True)\n\nprint(\"Top matches:\")\nfor sid, mat, score in results[:3]:\n    print(f\"Material: {mat} ({sid}), Score: {score:.4f}\")\n\n# To find distinguishing peaks, we need the top 2 materials' average spectra (or just one of each)\ntop1_mat = results[0][1]\ntop2_mat = results[1][1]\nprint(f\"TOP1: {top1_mat}, TOP2: {top2_mat}\")\n",
-        "file_ids": [
-          "2026-08-10/T125.csv",
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": false
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\nfrom scipy.signal import find_peaks\n\n# Setup files\nt125_f = [f for f in files if 'T125' in f['filename']][0]\nlib_f = [f for f in files if 'reference_library' in f['filename']][0]\n\n# T125 data\nx_t = t125_f['table']['raman_shift_cm-1']\ny_t = t125_f['table']['intensity']\n\n# Baseline correction and normalization for T125\ny_t_corr, _ = ipbsa(y_t, order=4)\ndef normalize(y):\n    ymin, ymax = np.min(y), np.max(y)\n    if ymax == ymin: return y - ymin\n    return (y - ymin) / (ymax - ymin)\n\ny_t_norm = normalize(y_t_corr)\n\n# Library processing - Convert list to numpy array for masking\nsids_col = np.array(lib_f['table']['spectrum_id'])\nmats_col = np.array(lib_f['table']['material'])\nx_lib_col = lib_f['table']['raman_shift_cm-1']\ny_lib_col = lib_f['table']['intensity']\n\nunique_sids = np.unique(sids_col)\nresults = []\n\nfor sid in unique_sids:\n    mask = (sids_col == sid)\n    x_ref = x_lib_col[mask]\n    y_ref = y_lib_col[mask]\n    mat = mats_col[mask][0]\n    \n    # Normalize reference\n    y_ref_norm = normalize(y_ref)\n    \n    # Ensure lengths match for correlation\n    if len(y_ref_norm) != len(y_t_norm):\n        f_interp = interp1d(x_ref, y_ref_norm, bounds_error=False, fill_value=0)\n        y_ref_resampled = f_interp(x_t)\n    else:\n        y_ref_resampled = y_ref_norm\n\n    corr = np.corrcoef(y_t_norm, y_ref_resampled)[0, 1]\n    results.append((sid, mat, corr))\n\nresults.sort(key=lambda x: x[2], reverse=True)\n\nprint(\"Top Matches:\")\nfor res in results[:3]:\n    print(f\"Material: {res[1]} ({res[0]}), Correlation: {res[2]:.4f}\")\n\n# For the top 2 candidates, find peaks to distinguish them\ntop1_mat = results[0][1]\ntop2_mat = results[1][1]\nprint(f\"Comparison between Top1: {top1_mat} and Top2: {top2_mat}\")\n\n# Get normalized spectra for the best IDs of these materials\nbest_id1 = results[0][0]\nbest_id2 = [r[0] for r in results if r[1] == top2_mat][0]\n\nmask1 = (sids_col == best_id1)\ny_top1 = normalize(y_lib_col[mask1])\nx_top1 = x_lib_col[mask1]\n\nmask2 = (sids_col == best_id2)\ny_top2 = normalize(y_lib_col[mask2])\nx_top2 = x_lib_col[mask2]\n\n# Find peaks in top1 that are NOT in top2 or vice versa\npeaks1, _ = find_peaks(y_top1, height=0.3, distance=10)\npeaks2, _ = find_peaks(y_top2, height=0.3, distance=10)\n\nprint(f\"Top 1 Peaks: {x_top1[peaks1]}\")\nprint(f\"Top 2 Peaks: {x_top2[peaks2]}\")\n",
-        "file_ids": [
-          "2026-08-10/T125.csv",
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": true
-    },
-    {
-      "name": "run_analysis",
-      "args": {
-        "code": "import numpy as np\nfrom scipy.interpolate import interp1d\nfrom scipy.signal import find_peaks\n\n# Setup files\nt125_f = [f for f in files if 'T125' in f['filename']][0]\nlib_f = [f for f in files if 'reference_library' in f['filename']][0]\n\nsids_col = np.array(lib_f['table']['spectrum_id'])\nmats_col = np.array(lib_f['table']['material'])\nx_lib_col = lib_f['table']['raman_shift_cm-1']\ny_lib_col = lib_f['table']['intensity']\n\nunique_mats = np.unique(mats_col)\nmat_scores = []\n\n# Get T125 normalized\nx_t = t125_f['table']['raman_shift_cm-1']\ny_t_corr, _ = ipbsa(t125_f['table']['intensity'], order=4)\ndef normalize(y):\n    ymin, ymax = np.min(y), np.max(y)\n    return (y - ymin) / (ymax - ymin) if ymax != ymin else y - ymin\ny_t_norm = normalize(y_t_corr)\n\nfor mat in unique_mats:\n    mask_mat = (mats_col == mat)\n    # Average all spectra of this material to get a representative profile\n    indices = np.where(mask_mat)[0]\n    profiles = []\n    for idx in indices:\n        sid = sids_col[idx]\n        mask_sid = (sids_col == sid)\n        y_ref = y_lib_col[mask_sid]\n        x_ref = x_lib_col[mask_sid]\n        \n        y_ref_norm = normalize(y_ref)\n        f_interp = interp1d(x_ref, y_ref_norm, bounds_error=False, fill_value=0)\n        profiles.append(f_interp(x_t))\n    \n    avg_profile = np.mean(profiles, axis=0)\n    corr = np.corrcoef(y_t_norm, avg_profile)[0, 1]\n    mat_scores.append((mat, corr))\n\nmat_scores.sort(key=lambda x: x[1], reverse=True)\nprint(\"Material Rankings:\")\nfor mat, score in mat_scores:\n    print(f\"{mat}: {score:.4f}\")\n\n# Distinguish Top 1 (PET) vs Top 2 (PMMA)\ntop1 = mat_scores[0][0]\ntop2 = mat_scores[1][0]\n\ndef get_mat_avg(mat):\n    mask_mat = (mats_col == mat)\n    indices = np.where(mask_mat)[0]\n    profiles = []\n    for idx in indices:\n        sid = sids_col[idx]\n        mask_sid = (sids_col == sid)\n        y_ref = y_lib_col[mask_sid]\n        x_ref = x_lib_col[mask_sid]\n        y_ref_norm = normalize(y_ref)\n        f_interp = interp1d(x_ref, y_ref_norm, bounds_error=False, fill_value=0)\n        profiles.append(f_interp(x_t))\n    return np.mean(profiles, axis=0)\n\ny_top1_avg = get_mat_avg(top1)\ny_top2_avg = get_mat_avg(top2)\n\npeaks1, _ = find_peaks(y_top1_avg, height=0.3, distance=10)\npeaks2, _ = find_peaks(y_top2_avg, height=0.3, distance=10)\n\nprint(f\"\\nPeaks for {top1}: {x_t[peaks1]}\")\nprint(f\"Peaks for {top2}: {x_t[peaks2]}\")\n",
-        "file_ids": [
-          "2026-08-10/T125.csv",
-          "2026-08-10/reference_library.csv"
-        ]
-      },
-      "ok": true
     }
   ],
   "artifacts": [],
@@ -101,7 +61,7 @@
     "is_on": false,
     "power_armed": false,
     "beam_if_turned_on": "guide",
-    "last_requested_power_percent": 20.0,
+    "last_requested_power_percent": 10.0,
     "x_speed_mm_s": 2.0,
     "y_speed_mm_s": 2.0,
     "z_speed_mm_s": 0.05,
@@ -111,7 +71,7 @@
     "trigger_mode": "internal",
     "shutter_mode": "auto",
     "num_accumulations": 1,
-    "num_kinetics": 1,
+    "num_kinetics": 3,
     "temperature_C": -40,
     "temperature_status": "STABILIZED",
     "cooler_on": true,
@@ -132,7 +92,7 @@
     ],
     "detector_Nx": 1024,
     "detector_Ny": 255,
-    "power_setpoint_pct": 20.0
+    "power_setpoint_pct": 10.0
   },
   "state_after": {
     "x": 37.8759,
@@ -141,7 +101,7 @@
     "is_on": false,
     "power_armed": false,
     "beam_if_turned_on": "guide",
-    "last_requested_power_percent": 20.0,
+    "last_requested_power_percent": 10.0,
     "x_speed_mm_s": 2.0,
     "y_speed_mm_s": 2.0,
     "z_speed_mm_s": 0.05,
@@ -151,7 +111,7 @@
     "trigger_mode": "internal",
     "shutter_mode": "auto",
     "num_accumulations": 1,
-    "num_kinetics": 1,
+    "num_kinetics": 3,
     "temperature_C": -40,
     "temperature_status": "STABILIZED",
     "cooler_on": true,
@@ -172,11 +132,13 @@
     ],
     "detector_Nx": 1024,
     "detector_Ny": 255,
-    "power_setpoint_pct": 20.0
+    "power_setpoint_pct": 10.0
   },
-  "session_id": "bench_2026-08-10_CoALA_CoALA_T125_41c029",
-  "elapsed_s": 170.12,
-  "errors": [],
+  "session_id": "bench_2026-08-10_CoALA_CoALA_T125_edfead",
+  "elapsed_s": 27.79,
+  "errors": [
+    "The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check the Ollama host and context size."
+  ],
   "warnings": [
     "retried 1x after an infrastructure failure"
   ],

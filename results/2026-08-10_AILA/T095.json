@@ -1,0 +1,185 @@
+{
+  "task": "T095",
+  "axis": "data processing",
+  "mode": "live",
+  "result": "fail",
+  "reason": "result array: no spectrum was saved",
+  "checks_passed": 1,
+  "checks_total": 2,
+  "question": "Normalize T095.csv to L2 norm 1 and report its peaks (prominence 5% of range).",
+  "criteria": "ARRAY(rtol 1e-6) + SET(peak ±3 cm-1)",
+  "checks": [
+    {
+      "name": "peak positions",
+      "passed": true,
+      "score": 1.0,
+      "detail": "9/9 matched (submitted 9) [620.0, 795.0, 1001.0, 1031.0, 1155.0, 1184.0]... vs [620.0, 795.0, 1001.0, 1031.0, 1155.0, 1184.0]...",
+      "weight": 1.0,
+      "kind": "SET"
+    },
+    {
+      "name": "result array",
+      "passed": false,
+      "score": 0.0,
+      "detail": "no spectrum was saved",
+      "weight": 2.0,
+      "kind": "POSTHOC"
+    }
+  ],
+  "failures": [
+    {
+      "check": "result array",
+      "kind": "POSTHOC",
+      "reason": "no spectrum was saved"
+    }
+  ],
+  "blocked": [],
+  "input_files": [
+    "T095.csv"
+  ],
+  "answer_text": "I have processed the spectrum from `T095.csv`. The signal was first normalized to an L2 norm of 1, and then peak detection was performed using a prominence threshold set at 5% of the signal's range. This ensured that only significant peaks were identified relative to the overall scale of the data.\n\nThe identification process successfully isolated several distinct features in the spectrum. The peaks are listed below as their corresponding Raman shift values in cm⁻¹.\n\n```json\n{\"peaks\": [620, 795, 1001, 1031, 1155, 1184, 1450, 1583, 1602]}\n```",
+  "answer_json": {
+    "peaks": [
+      620,
+      795,
+      1001,
+      1031,
+      1155,
+      1184,
+      1450,
+      1583,
+      1602
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/T095.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load data\nx = data['T095']['raman_shift_cm-1']\ny = data['T095']['intensity']\n\n# 1. Normalize to L2 norm 1\n# The sum of squares of the intensities must equal 1.\nnorm_factor = np.sqrt(np.sum(y**2))\ny_normalized = y / norm_factor\n\n# 2. Find peaks with prominence 5% of range\n# Range is max(x) - min(x)\nrange_val = x.max() - x.min()\nthreshold = 0.05 * range_val\n\n# find_peaks logic:\n# scipy's 'prominence' is a measure of how much higher/lower a peak is compared to the immediate surroundings.\nindices, _ = find_peaks(y_normalized, prominence=threshold)\npeak_positions = x[indices].tolist()\n\nprint(f\"Range: {range_val}\")\nprint(f\"Threshold (5% of range): {threshold}\")\nprint(f\"Found {len(peak_positions)} peaks at: {peak_positions}\")\n\n# Save the result if needed, but here we just need to report them.\n# However, I should save a version since it's good practice for clarity in complex tasks.\n# Actually, the prompt asks me to \"report its peaks\". \n# Since the user wants a specific JSON at the end, I will provide that based on the printed output.\n",
+        "file_ids": [
+          "2026-08-10/T095.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Identify the correct file (T095)\ntarget_file = None\nfor f in files:\n    if 'T095.csv' in f['filename']:\n        target_file = f\n        break\n\nif target_file:\n    x = target_file['table']['raman_shift_cm-1']\n    y = target_file['table']['intensity']\n    \n    # 1. Normalize to L2 norm 1\n    # Sum of squares is the squared L2 norm. \n    norm_factor = np.sqrt(np.sum(y**2))\n    y_normalized = y / norm_factor\n\n    # 2. Find peaks with prominence 5% of range\n    x_min, x_max = x.min(), x.max()\n    range_val = x_max - x_min\n    threshold = 0.05 * range_val\n\n    indices, _ = find_peaks(y_normalized, prominence=threshold)\n    peak_positions = x[indices].tolist()\n\n    print(f\"Range: {x_max-x_min}\")\n    print(f\"Threshold: {threshold}\")\n    print(f\"Peak positions: {sorted(peak_positions)}\")\nelse:\n    print(\"Target file not found.\")\n",
+        "file_ids": [
+          "2026-08-10/T095.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load data\ntarget_data = None\nfor f in files:\n    if 'T095.csv' in f['filename']:\n        target_data = f\n        break\n\nif target_data:\n    x = target_data['table']['raman_shift_cm-1']\n    y = target_data['table']['intensity']\n    \n    # 1. Normalize to L2 norm 1\n    norm_val = np.linalg.norm(y)\n    y_norm = y / norm_val\n\n    # 2. Identify peaks with prominence > 5% of the current range\n    current_range = np.max(y_norm) - np.min(y_norm)\n    threshold = 0.05 * current_range\n    \n    indices, _ = find_peaks(y_norm, prominence=threshold)\n    # Get peak positions in cm-1 and sort them\n    peak_positions = sorted(x[indices].tolist())\n\n    print(f\"L2 Norm: {norm_val}\")\n    print(f\"Current Range: {current_range}\")\n    print(f\"Threshold: {threshold}\")\n    print(f\"Peak positions: {peak_positions}\")\nelse:\n    print(\"File not found.\")\n",
+        "file_ids": [
+          "2026-08-10/T095.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 25.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -30,
+    "temperature_status": "NOT_REACHED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 25.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 25.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -37,
+    "temperature_status": "NOT_STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 25.0
+  },
+  "session_id": "bench_2026-08-10_AILA_AILA_T095_e98f3e",
+  "elapsed_s": 74.14,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}

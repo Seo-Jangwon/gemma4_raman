@@ -1,11 +1,11 @@
 ══════════════════════════════════════════════════════════════════════════════
- AILA · T120 · gemma4:31b @ http://192.168.1.15:11434
- session : bench_2026-08-10_AILA_AILA_T120_2c56d4
- started : 2026-08-10 13:48:56
- thinking: ON — gemma4:31b capabilities=['completion', 'vision', 'tools', 'thinking'] → thinking 지원
+ AILA · T120 · gemma4:12b @ http://192.168.1.15:11434
+ session : bench_2026-08-10_AILA_AILA_T120_7e96e9
+ started : 2026-08-10 19:06:37
+ thinking: ON — gemma4:12b capabilities=['completion', 'vision', 'audio', 'tools', 'thinking'] → thinking 지원
 ══════════════════════════════════════════════════════════════════════════════
 
-[13:48:56.291] [QUESTION]
+[19:06:37.139] [QUESTION]
     Extract the peak positions of T120.csv (prominence 5% of range), treat peaks within 3 cm-1 as matching, and find the most similar material in reference_library.csv by the ratio of matched peaks to reference peaks (1:1 nearest-neighbour pairing, no duplicates). 
     
     ---
@@ -22,90 +22,191 @@
     Give plain JSON numbers and strings - no units, no LaTeX, no thousands separators. If the
     task asked you to refuse, explain, or ask a question instead of measuring, say so in plain
     text and omit the block.
-[13:48:56.350] [Gemma <- PROMPT] step 1 · ReAct propose · 2 msgs
+[19:06:37.146] [Gemma <- PROMPT] step 1 · ReAct propose · 2 msgs
     system(9236ch) · human(811ch)
-[13:49:06.221] [Gemma THINKING] step 1 · 874ch
-    The user wants me to analyze two files: `T120.csv` (the sample) and `reference_library.csv` (the reference).
+[19:06:42.154] [Gemma THINKING] step 1 · 1007ch
+    The user wants me to:
+    1.  Extract peak positions from `T120.csv` with a prominence threshold of 5% of the range.
+    2.  Compare these peaks to a reference library (`reference_library.csv`) where peaks within $3 \text{ cm}^{-1}$ are considered matching (1:1 nearest-neighbor, no duplicates).
+    3.  Determine the most similar material based on the ratio of matched peaks to total reference peaks.
+    
+    I need to identify the files first.
+    `T120.csv`: I assume this is an uploaded file or a measurement result. The prompt says "T120.csv", suggesting it's one of the files I can access via `list_uploaded_files`. Wait, if it's an uploaded file, I should check `list_uploaded_files`. If it's a local acquisition, I might need to find it in `list_results`. However, usually "file.csv" names like this refer to uploads or specific files provided.
+    `reference_library.csv`: This is likely another uploaded file containing reference spectra/peaks.
+    
+    I will start by listing the uploaded files to confirm their existence and IDs.
+[19:06:42.154] [Gemma TOOL_CALLS] step 1 · 1개
+    1) list_uploaded_files({})
+[19:06:42.155] [Gemma STATS] prompt 15757 tok · out 269 tok · wall 5.01s · eval 2.13s (126.6 tok/s) · load 0.24s · done=stop
+[19:06:42.155] [ReAct REASONING] step 1 · 도구 1개 실행 결정 → list_uploaded_files
+[19:06:42.155] [ReAct ACTING] step 1 · list_uploaded_files
+    {}
+[19:06:42.156] [ReAct OBSERVATION] step 1 · list_uploaded_files · ok · 1 ms
+    {"ok": true, "count": 2, "files": [{"file_id": "2026-08-10/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829}, {"file_id": "2026-08-10/T120.csv", "filename": "T120.csv", "kind": "text", "bytes": 36703}]}
+[19:06:42.159] [Gemma <- PROMPT] step 2 · ReAct propose · 4 msgs
+    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch)
+[19:06:43.644] [Gemma THINKING] step 2 · 354ch
+    I have found the two files: `reference_library.csv` and `T120.csv`.
+    
+    Now I need to inspect them to understand their structure.
+    - `T120.csv`: I need to find which column is Raman shift (cm-1) and which is intensity.
+    - `reference_library.csv`: This likely contains multiple materials or just a list of peaks for several materials.
+    
+    I'll inspect both files.
+[19:06:43.645] [Gemma TOOL_CALLS] step 2 · 1개
+    1) inspect_file({"file_id": "2026-08-10/T120.csv"})
+[19:06:43.645] [Gemma STATS] prompt 16155 tok · out 130 tok · wall 1.49s · eval 1.02s (127.3 tok/s) · load 0.25s · done=stop
+[19:06:43.645] [ReAct REASONING] step 2 · 도구 1개 실행 결정 → inspect_file
+[19:06:43.645] [ReAct ACTING] step 2 · inspect_file
+    {"file_id": "2026-08-10/T120.csv"}
+[19:06:43.663] [ReAct OBSERVATION] step 2 · inspect_file · ok · 18 ms
+    {"ok": true, "file_id": "2026-08-10/T120.csv", "filename": "T120.csv", "kind": "text", "bytes": 36703, "n_rows": 1801, "n_cols": 2, "columns": ["raman_shift_cm-1", "intensity"], "dtypes": {"raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 1801}, "intensity": {"min": -19.597471, "max": 998.939361, "mean": 39.258661, "n_valid": 1801}}, "head": [[200.0, 4.486165], [201.0, -4.433726], [202.0, -4.539069], [203.0, 2.660969], [204.0, -5.388181]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/T120.csv']."}
+[19:06:43.664] [Gemma <- PROMPT] step 3 · ReAct propose · 6 msgs
+    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(867ch)
+[19:06:44.744] [Gemma THINKING] step 3 · 119ch
+    `T120.csv` is a standard Raman spectrum: `raman_shift_cm-1` and `intensity`.
+    
+    Now I'll inspect `reference_library.csv`.
+[19:06:44.744] [Gemma TOOL_CALLS] step 3 · 1개
+    1) inspect_file({"file_id": "2026-08-10/reference_library.csv"})
+[19:06:44.744] [Gemma STATS] prompt 16699 tok · out 74 tok · wall 1.08s · eval 0.58s (127.1 tok/s) · load 0.24s · done=stop
+[19:06:44.744] [ReAct REASONING] step 3 · 도구 1개 실행 결정 → inspect_file
+[19:06:44.744] [ReAct ACTING] step 3 · inspect_file
+    {"file_id": "2026-08-10/reference_library.csv"}
+[19:06:44.791] [ReAct OBSERVATION] step 3 · inspect_file · ok · 46 ms
+    {"ok": true, "file_id": "2026-08-10/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829, "n_rows": 21612, "n_cols": 4, "columns": ["spectrum_id", "material", "raman_shift_cm-1", "intensity"], "dtypes": {"spectrum_id": "text", "material": "text", "raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 21612}, "intensity": {"min": 0.017118, "max": 1000.0, "mean": 25.348885, "n_valid": 21612}}, "head": [["PS_01", "polystyrene", 200.0, 0.072777], ["PS_01", "polystyrene", 201.0, 0.072997], ["PS_01", "polystyrene", 202.0, 0.073218], ["PS_01", "polystyrene", 203.0, 0.07344], ["PS_01", "polystyrene", 204.0, 0.073663]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/reference_library.csv']."}
+[19:06:44.791] [Gemma <- PROMPT] step 4 · ReAct propose · 8 msgs
+    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(867ch) · ai(0ch)[inspect_file] · tool(1090ch)
+[19:07:32.610] [Gemma THINKING] step 4 · 17507ch
+    `reference_library.csv` contains `spectrum_id`, `material`, `raman_shift_cm-1`, and `intensity`. It seems to have many entries for different materials.
     
     Plan:
-    1. List uploaded files to get `file_id`s for both.
-    2. Inspect both files to understand their structure (identify Raman shift and intensity columns).
-    3. Use `run_analysis` to:
-        a. Process the spectrum from `T120.csv`.
-        b. Detect peaks with a prominence of 5% of the intensity range.
-        c. Load the reference data from `reference_library.csv`.
-        d. For each material in the library, calculate the similarity based on matched peaks (within $\pm 3\text{ cm}^{-1}$).
-        e. Matching is 1:1 nearest-neighbor pairing without duplicates.
-        f. The "most similar" material is the one with the highest ratio of `matched_peaks / reference_peaks`.
-    4. Report the resulting material and provide it in the JSON block.
+    1.  Extract peaks from `T120.csv`. The prompt specifies a prominence of 5% of the range (range = max - min).
+        *   $Range = 2000 - 200 = 1800$.
+        *   $Threshold = 0.05 \times 1800 = 90$.
+        *   Actually, prominence is usually relative to the peak's neighbors or base. But "prominence 5% of range" likely means $0.05 \times (max - min)$. Let me double check if it meant something else like absolute units but based on a percentage.
+    2.  Identify unique materials in `reference_library.csv`. Each material has a set of peaks or at least records associated with it. Wait, the library is a large list.
+    3.  Compare peak positions from `T120` to reference peaks for each material.
+        *   Matching rule: $| \text{peak\_T} - \text{peak\_ref} | < 3$.
+        *   Pairing: 1:1 nearest-neighbor, no duplicates. This means once a peak in `T120` is matched to a piece of the reference or vice versa? Actually "no duplicates" and "1:1 nearest-neighbour" usually implies that if we find multiple candidate references for one T120 peak, we take the closest. If there are multiple T120 peaks close to one reference point, only one can match.
+        *   Actually, a more standard interpretation of "1:1 nearest-neighbor pairing, no duplicates" in this context is: For each peak in `T120`, find if there exists a peak in the *reference set for that material* within 3 units. If multiple exist, pick closest. But to ensure 1:1 and no repeats, we need to be careful.
+        *   Wait, let's look at the scoring: "ratio of matched peaks to reference peaks".
+        *   If I have a set of T-peaks $\{T_i\}$ and a set of R-peaks $\{R_{m,j}\}$ for material $m$.
+        *   For each $T_i$, find if there's an $R_{m,j}$ such that $|T_i - R_{m,j}| < 3$. If multiple, pick the one with minimum distance.
+        *   Wait, "1:1 nearest-neighbor pairing" usually means we pair every $T_i$ to its closest neighbor in the reference set of the same material? Or we match as many as possible such that each $R_{m,j}$ is used at most once? Let's clarify.
+        *   Actually, let's re-read: "ratio of matched peaks to reference peaks". This suggests we look at how many of the reference peaks are "matched" by a peak in T120. Or rather, for each material, count how many pairs $(T_i, R_{m,j})$ exist such that $|T_i - R_{m,j}| < 3$ and they are uniquely assigned?
+        *   Let's simplify: A match occurs if there is at least one $R \in \text{Reference\_Peaks}(m)$ for a given $T \in T120$ peak such that $|T-R| < 3$. However, "no duplicates" and "1:1" suggests that if multiple $T$ are within 3 units of the same $R$, only one counts? Or if one $T$ is within 3 units of two different $Rs$?
+        *   Usually, in these problems, it means:
+            Identify all $T$-peaks.
+            For each material $m$:
+            1. Identify distinct peaks in `reference_library.csv` for that material (a peak is a peak if there are multiple entries with same/similar x-coords? No, usually just the unique x values). Wait, looking at `inference`, I have many rows. A "peak" might be a point that stands out or simply every row in the data. But usually, these datasets have one entry per 1cm^1 or so.
+            2. Let $R_m$ be the set of distinct x-values (raman\_shift) for material $m$. (Since it's a list of rows, multiple entries might exist? No, `inference` showed many unique values). Or maybe even better: unique coordinates that have significant intensity? But I don't know what "significant" is.
+            3. Given the rule "1:1 nearest-neighbour pairing, no duplicates", it means for every $T_i$, find its closest neighbor in $\{R_{m,j}\}$. If $|T_i - R_{m,j}| < 3$ and $R_{m,j}$ hasn't been taken by another $T_{i'}$ (or even if it has, we just need to know how many unique $R_{m,j}$ are "hit" by a $T_i$).
+        *   Wait, "ratio of matched peaks to reference peaks". This denominator is the number of distinct peak positions in the reference for that material.
+        *   Let's refine:
+            - Find all unique x-coordinates in `reference_library.csv` per material? No, just iterate through the rows and identify segments or points? Actually, looking at common practice here: each row in `reference_library.csv` might be a point on a curve. A "peak" would be identified by local maxima if not specified, but usually, these are 1-D arrays where we find peaks via peak finding.
+            - Wait, I don't have to "find" them if they are already in the file? The prompt says "reference_library.csv ... match ... ratio of matched peaks".
+        *   Let's look at `reference_library` more closely: it has ~21k rows. This suggests many data points.
+        *   If I extract peak positions from $T120$ using 5% prominence, I get a set $\{x_1, x_2, ...\}$.
+        *   In the reference library, for each material, there is a set of entries. A "peak" in the reference is likely a point that stands out or simply any measurement at that position? Since they are many points, maybe it's a signal-based peak search on the raw data if I were doing it manually, but here I should probably just treat each row as a potential "signal". However, "ratio of matched peaks to reference peaks" implies there is a finite set of "reference peaks".
+        *   If the standard `find_peaks` or similar isn't used on the reference library (because we are given the file), maybe it means simply looking for unique x-values that correspond to local maxima? Or, more likely, any point in `reference_library.csv` is considered a "peak" if it stands out from its neighbors?
+        *   Actually, let's look at common patterns:
+            Step 1: Identify peaks in $T$ (prominence 5% of range).
+            Step 2: For each material $m$, find the set of unique Raman shifts that are "peaks" in the reference. How do we know if they are peaks? Since I have the raw data, I should probably use a peak-finding algorithm. But wait, the instruction doesn't say "find peaks in reference", it says "matched peaks to reference peaks". This implies there is a known set of "reference peaks".
+            Wait, looking at the data: `reference_library` has 21612 rows and 4 columns. If I look for unique `raman_shift_cm-1` that have some property? No, probably just any point in the spectrum that is a local maximum or significant. But usually, if it's a "peak", it's a peak.
+            Actually, let's re-read: "...find the most similar material ... by the ratio of matched peaks to reference peaks". If the reference data is just a list of x and y values for various materials, a "reference peak" is likely any point in that dataset that corresponds to a local maximum or simply is part of the set.
+            But wait! I have `run_analysis`. Maybe there's an easier way.
+        *   Let's consider the possibility: $T120$ has peaks $P_t = \{p_{t,1}, p_{t,2}, ...\}$. Reference library for material $m$ has "peaks" $P_m = \{r_{m,1}, r_{m,2}, ...\}$.
+            A match occurs if $|p_{t,i} - r_{m,j}| < 3$.
+        *   What is $P_m$? If it's not defined by a peak finding algorithm in the prompt, and "reference_library.csv" is just data, maybe every entry in the list that is distinct in `raman_shift_cm-1` is considered a potential peak? No, there are 21k rows for only some materials (probably like 6). That's ~3500 points per material.
+        *   Ah! If I find peaks in $T$ using the prominence rule, then for each material, I consider all its entries in `reference_library` as "potential matches" or maybe identify its peaks first?
+        *   Wait, if there's no peak finding specified for the reference, but there is one for $T120$, it might be that the "reference peaks" are simply any data points in the reference file that satisfy a similar condition? Or just any distinct x-values. But 3500 unique values for a Raman spectrum of 2000 range is likely every 0.6 units.
+        *   Let's assume $P_m$ consists of all x-coordinates in `reference_library` that are "peaks" (local maxima). Or more simply, because t
+    … <9507자 생략>
+[19:07:32.611] [Gemma TOOL_CALLS] step 4 · 1개
+    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load T120\nt120 = next(s for s in spectra if \"T120\" in s['title'] or s['base'].endswith(\"T120.csv\"))\nx_t = t120['raman_shift_cm-1']\ny_t = t120['intensity']\n\n# Calculate prominence: 5% of range\nr_min, r_max = np.min(x_t), np.max(x_t)\nprom_threshold = 0.05 * (r_max - r_min)\nindices_t = find_peaks(y_t, prominence=prom_threshold)[0]\nt_peaks = x_t[indices_t]\n\n# Load reference library\n# The structure is: spectrum_id, material, raman_shift_cm-1, intensity\nref_data = []\nfor s in spectra: # This refers to the items in 'spectra' list from run_analysis\n    # Wait, I should iterate over results of the analysis if they were added. \n    # But here I am processing the files directly via the 'files' variable.\n    pa
+    … <2786자 생략>)
+[19:07:32.612] [Gemma STATS] prompt 17254 tok · out 5910 tok · wall 47.82s · eval 47.34s (124.8 tok/s) · load 0.23s · done=stop
+[19:07:32.612] [ReAct REASONING] step 4 · 도구 1개 실행 결정 → run_analysis
+[19:07:32.612] [ReAct ACTING] step 4 · run_analysis
+    {"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load T120\nt120 = next(s for s in spectra if \"T120\" in s['title'] or s['base'].endswith(\"T120.csv\"))\nx_t = t120['raman_shift_cm-1']\ny_t = t120['intensity']\n\n# Calculate prominence: 5% of range\nr_min, r_max = np.min(x_t), np.max(x_t)\nprom_threshold = 0.05 * (r_max - r_min)\nindices_t = find_peaks(y_t, prominence=prom_threshold)[0]\nt_peaks = x_t[indices_t]\n\n# Load reference library\n# The structure is: spectrum_id, material, raman_shift_cm-1, intensity\nref_data = []\nfor s in spectra: # This refers to the items in 'spectra' list from run_analysis\n    # Wait, I should iterate over results of the analysis if they were added. \n    # But here I am processing the files directly via the 'files' variable.\n    pass\n\n# Correction: The tool says \"files\" is a list of dictionaries for each item in file_ids.\nfor f_idx, f in enumerate(files):\n    if \"reference_library\" in f['filename']:\n        df = f['table']\n        # Process per material\n        materials = sorted(list(set(df['material'])))\n        results = {}\n        for m in materials:\n            m_data = df[df['material'] == m]\n          
+    … <2386자 생략>
+[19:07:33.841] [ReAct OBSERVATION] step 4 · run_analysis · FAIL · 1229 ms
+    {"ok": false, "error": "NameError: name 'next' is not defined", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 396, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 5, in <module>\nNameError: name 'next' is not defined\n"}
+[19:07:33.842] [Gemma <- PROMPT] step 5 · ReAct propose · 10 msgs
+    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(867ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[run_analysis] · tool(442ch)
+[19:07:53.901] [Gemma THINKING] step 5 · 5276ch
+    The `next` function isn't available or I just shouldn't use it. Use standard iteration.
+    Also, the logic should be precise regarding "1:1 nearest-neighbor".
     
-    Let's start by listing and inspecting files.
-[13:49:06.221] [Gemma TOOL_CALLS] step 1 · 1개
-    1) list_uploaded_files({})
-[13:49:06.221] [Gemma STATS] prompt 15757 tok · out 248 tok · wall 9.87s · eval 3.95s (62.8 tok/s) · load 0.28s · done=stop
-[13:49:06.221] [ReAct REASONING] step 1 · 도구 1개 실행 결정 → list_uploaded_files
-[13:49:06.222] [ReAct ACTING] step 1 · list_uploaded_files
-    {}
-[13:49:06.223] [ReAct OBSERVATION] step 1 · list_uploaded_files · ok · 2 ms
-    {"ok": true, "count": 2, "files": [{"file_id": "2026-08-10/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829}, {"file_id": "2026-08-10/T120.csv", "filename": "T120.csv", "kind": "text", "bytes": 36703}]}
-[13:49:06.224] [Gemma <- PROMPT] step 2 · ReAct propose · 4 msgs
-    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch)
-[13:49:08.697] [Gemma THINKING] step 2 · 105ch
-    I have the file IDs: `2026-08-10/reference_library.csv` and `2026-08-10/T120.csv`. Now I'll inspect them.
-[13:49:08.697] [Gemma TOOL_CALLS] step 2 · 2개
-    1) inspect_file({"file_id": "2026-08-10/T120.csv"})
-    2) inspect_file({"file_id": "2026-08-10/reference_library.csv"})
-[13:49:08.697] [Gemma STATS] prompt 16134 tok · out 116 tok · wall 2.47s · eval 1.83s (63.3 tok/s) · load 0.25s · done=stop
-[13:49:08.697] [ReAct REASONING] step 2 · 도구 2개 실행 결정 → inspect_file, inspect_file
-[13:49:08.698] [ReAct ACTING] step 2 · inspect_file
-    {"file_id": "2026-08-10/T120.csv"}
-[13:49:08.849] [ReAct OBSERVATION] step 2 · inspect_file · ok · 151 ms
-    {"ok": true, "file_id": "2026-08-10/T120.csv", "filename": "T120.csv", "kind": "text", "bytes": 36703, "n_rows": 1801, "n_cols": 2, "columns": ["raman_shift_cm-1", "intensity"], "dtypes": {"raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 1801}, "intensity": {"min": -19.597471, "max": 998.939361, "mean": 39.258661, "n_valid": 1801}}, "head": [[200.0, 4.486165], [201.0, -4.433726], [202.0, -4.539069], [203.0, 2.660969], [204.0, -5.388181]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/T120.csv']."}
-[13:49:08.849] [ReAct ACTING] step 2 · inspect_file
-    {"file_id": "2026-08-10/reference_library.csv"}
-[13:49:08.889] [ReAct OBSERVATION] step 2 · inspect_file · ok · 40 ms
-    {"ok": true, "file_id": "2026-08-10/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829, "n_rows": 21612, "n_cols": 4, "columns": ["spectrum_id", "material", "raman_shift_cm-1", "intensity"], "dtypes": {"spectrum_id": "text", "material": "text", "raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 21612}, "intensity": {"min": 0.017118, "max": 1000.0, "mean": 25.348885, "n_valid": 21612}}, "head": [["PS_01", "polystyrene", 200.0, 0.072777], ["PS_01", "polystyrene", 201.0, 0.072997], ["PS_01", "polystyrene", 202.0, 0.073218], ["PS_01", "polystyrene", 203.0, 0.07344], ["PS_01", "polystyrene", 204.0, 0.073663]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/reference_library.csv']."}
-[13:49:08.890] [Gemma <- PROMPT] step 3 · ReAct propose · 7 msgs
-    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch)
-[13:49:37.201] [Gemma THINKING] step 3 · 2524ch
-    Data interpretation:
-    `T120.csv`: Columns are `raman_shift_cm-1` and `intensity`. This is a single spectrum.
-    `reference_library.csv`: Columns are `spectrum_id`, `material`, `raman_shift_cm-1`, `intensity`. This contains multiple spectra for different materials.
+    Let me try again with a cleaner script. I will also check for the number of unique x values in the reference to see if they are clearly "peaks" (i.e., sparse) or just a dense grid. If it's a dense grid, then maybe "reference peaks" should be found using something like `find_peaks` as well?
+    Actually, I don't have time to guess. If the count of unique $x$ is large (~1000), but $T$ has only ~10-20.
+    Wait! If there are 3500 items in the list for one material, and the range is 2000, it means they are spaced every 0.6 units.
+    If a "peak" corresponds to an actual physical peak (like a band), then there should only be a few of them.
+    However, if I can't find a clear definition, I'll just use the set of unique $x$ values that have some intensity or are distinct enough.
     
-    Analysis logic:
-    1. Extract peaks from `T120.csv`:
-        - Use `scipy.signal.find_peaks`.
-        - Prominence threshold = 5% of (max intensity - min intensity).
-    2. Process the reference library:
-        - For each unique material in the library, there might be multiple spectra (`spectrum_id`). I should probably take an average or a representative spectrum for that material, OR treat the "reference peaks" as a known set per material. Looking at the `reference_library.csv`, it seems like it's stored as long-form data.
-        - Wait, usually reference libraries have a defined list of peak positions. But here I have full spectra. Let me check if different `spectrum_id` for the same `material` are essentially the same or if I should find peaks in each and merge them. The prompt says "find the most similar material... by the ratio of matched peaks to reference peaks". This implies there is a set of "reference peaks" for each material.
-        - Since I have full spectra for the references, I should probably extract the peaks from the reference spectra first using the same or a standard method. However, the prompt doesn't specify how to get "reference peaks" from the library CSV. It just says "reference peaks". This usually means the characteristic peaks of that material.
-        - Let me re-read: "find the most similar material in reference_library.csv by the ratio of matched peaks to reference peaks". I will assume I need to find the characteristic peaks for each material in the library first. Since the reference data is probably clean, I'll use `find_peaks` on them too, or perhaps average spectra per material and then find peaks. Let's try averaging spectra of the same material first, or just pick one if they are identical.
-        - Actually, looking at the stats, intensities go up to 1000. I'll use a similar prominence for references or just standard peak detection.
+    Wait! There is a possibility: maybe "reference peaks" means elements in `reference_library.csv` where the material name is changed? No, they are grouped by material.
+    Let's look at the structure again: `spectrum_id`, `material`, `raman_shift_cm-1`, `intensity`.
+    If I use `find_peaks` on the reference data to identify "reference peaks", what parameters should I use? The prompt doesn't say. It only gives a rule for $T120$.
     
-    Wait, "ratio of matched peaks to reference peaks" implies:
-    $\text{Score} = \frac{\#\text{Matched Peaks}}{\#\text{Reference Peaks}}$
+    Wait, maybe $T120$ and "reference\_library" are different types of files?
+    Maybe $T120$ is a single spectrum and `reference_library` contains many.
+    If I use the count of "matched peaks to reference peaks", if there are 3500 items in the list, but only 10-20 match, the ratio will be very small unless "reference peaks" means something else.
     
-    Refining the matching algorithm:
-    - Match sample peaks $P_s$ and reference peaks $P_r$.
-    - 1:1 nearest-neighbour pairing, no duplicates.
-    - Two peaks match if $|p_s - p_r| \le 3 \text{ cm}^{-1}$.
+    Actually, maybe a "peak" is simply any $x$ value that has an intensity higher than its neighbors?
+    Let's try to find all unique x's in `reference_library` for each material and see how many there are. If the number of unique x's is small (e.g., < 100), then they might be the "peaks". If it's large, maybe I should only count ones that are part of a peak.
     
-    I will write a Python script in `run_analysis` to do all this.
-[13:49:37.202] [Gemma TEXT] step 3 · (빈 응답 — 컨텍스트 초과 의심)
-[13:49:37.202] [Gemma STATS] prompt 17143 tok · out 1717 tok · wall 28.31s · eval 27.51s (62.4 tok/s) · load 0.25s · done=stop
-[13:49:37.202] [ERROR] 40.98s · LLM 3회 · 도구 3회
+    Let me refine the script to:
+    1. Identify $T$ peaks using the rule.
+    2. For each material in `reference_library`:
+        a. Find "candidate" reference points (unique x-values).
+        b. Calculate match ratio as (count of matched candidate points) / (total count of candidate points).
+    3. Compare ratios and pick the highest.
+    
+    One more thing: "1:1 nearest-neighbour pairing, no duplicates".
+    This means for each $t \in T\_peaks$, find the closest $r$ in candidates. If distance is < 3, then it's a match if that $r$ hasn't been matched to another $t$.
+    
+    Wait! What if two different $t$'s are within 3 of the same $r$?
+    If I have $t_1 = 500.1$, $t_2 = 500.5$, and $r=500.4$. Both are close to $r$ but only one can claim it.
+    Actually, "1:1 nearest-neighbor" usually means each $t$ is paired with its closest neighbor, and if the pairing is unique (no two $t$'s share the same $r$), it's a match. Or simply that we want to maximize matches? No, the standard logic in these problems is:
+    For each $t \in T$, find $\min \{d(t, r) | \text{all } r\}$. If min\_dist $< 3$, then assign $t$ to that $r$. Then count how many unique $r$'s were assigned.
+    
+    Let's run the code.
+    I also need to handle "no duplicates" - this means if multiple $t$'s match the same $r$, it only counts as one? Or does it mean we only consider $t$ values that are at least some distance apart?
+    Actually, since the $T$-peaks were found with a 5% prominence, they should be well-separated.
+    So each $t$ is almost certain to be near its own unique $r$.
+    
+    Let's look for "reference peaks" carefully. If there are many values in `reference_library` that represent different data points (e.g., every 0.5 units), they aren't really "peaks". A peak is a feature.
+    If I use `find_peaks` on the reference as well, but what parameters?
+    Maybe I should just count unique $x$ values and if the ratio is very low for all materials (because there are many points), then maybe "reference peaks" meant something else.
+    But wait, look at the logic: "the most similar material ... by the ratio of matched peaks to reference peaks".
+    If I have 3500 candidates per material, and only ~15 match, the ratio is $15/3500 \approx 0.004$. This doesn't seem like a good discriminator unless one material has significantly more matches (e.g., 20).
+    However, if "reference peaks" refers to something distinct (like unique x-values that have an intensity above some threshold or are local maxima), then the number of "ref_peaks" would be smaller.
+    
+    I'll assume "reference_peaks" means the set of all $x$ values in `reference_library` for a given material, but I will check how many unique ones exist.
+    Actually, if there are thousands of points, maybe they aren't "peaks". Let's try to see.
+    
+    Wait! If several rows have same x? No, it's probably a continuous spectrum or segments.
+    Let's just use the count of distinct $x$ values as "reference_peaks" for now, but I'll make sure to filter them properly if they are clearly duplicates.
+    
+    Actually, let's think about "1:1 nearest-neighbor". If multiple $t$'s are within 3 units of different $r$'s, it's a match.
+    The most likely scenario is that `reference_library` has unique entries for what it considers to be "peaks" or just samples.
+    
+    I will perform the calculation now.
+[19:07:53.901] [Gemma TEXT] step 5 · (빈 응답 — 컨텍스트 초과 의심)
+[19:07:53.901] [Gemma STATS] prompt 23327 tok · out 2417 tok · wall 20.06s · eval 19.45s (124.3 tok/s) · load 0.24s · done=stop
+[19:07:53.902] [ERROR] 76.76s · LLM 5회 · 도구 4회
     The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check _NUM_CTX and the Ollama host.
 ══════════════════════════════════════════════════════════════════════════════
 
 ══════════════════════════════════════════════════════════════════════════════
- AILA · T120 · gemma4:31b @ http://192.168.1.15:11434
- session : bench_2026-08-10_AILA_AILA_T120_4f1648
- started : 2026-08-10 13:49:52
- thinking: ON — gemma4:31b capabilities=['completion', 'vision', 'tools', 'thinking'] → thinking 지원
+ AILA · T120 · gemma4:12b @ http://192.168.1.15:11434
+ session : bench_2026-08-10_AILA_AILA_T120_dc0f16
+ started : 2026-08-10 19:08:09
+ thinking: ON — gemma4:12b capabilities=['completion', 'vision', 'audio', 'tools', 'thinking'] → thinking 지원
 ══════════════════════════════════════════════════════════════════════════════
 
-[13:49:52.446] [QUESTION]
+[19:08:09.089] [QUESTION]
     Extract the peak positions of T120.csv (prominence 5% of range), treat peaks within 3 cm-1 as matching, and find the most similar material in reference_library.csv by the ratio of matched peaks to reference peaks (1:1 nearest-neighbour pairing, no duplicates). 
     
     ---
@@ -122,419 +223,113 @@
     Give plain JSON numbers and strings - no units, no LaTeX, no thousands separators. If the
     task asked you to refuse, explain, or ask a question instead of measuring, say so in plain
     text and omit the block.
-[13:49:52.456] [Gemma <- PROMPT] step 1 · ReAct propose · 2 msgs
+[19:08:09.102] [Gemma <- PROMPT] step 1 · ReAct propose · 2 msgs
     system(9236ch) · human(811ch)
-[13:50:03.124] [Gemma THINKING] step 1 · 1005ch
-    The user wants me to analyze two files: `T120.csv` (the sample) and `reference_library.csv` (the reference library).
+[19:08:14.011] [Gemma THINKING] step 1 · 954ch
+    The user wants me to identify the most similar material from `reference_library.csv` for a spectrum named `T120.csv`.
     
     Plan:
-    1.  List uploaded files to get their IDs.
-    2.  Inspect both files (`T120.csv` and `reference_library.csv`) to understand their structure (columns for Raman shift, intensity, material names, etc.).
-    3.  Use `run_analysis` to perform the following calculations:
-        a.  Load `T120.csv`.
-        b.  Extract peak positions from `T120.csv` using a prominence of 5% of the intensity range.
-        c.  Load `reference_library.csv`.
-        d.  For each material in the library:
-            i.  Identify its reference peaks.
-            ii. Match these peaks with the extracted peaks from `T120.csv` using a 3 cm-1 tolerance (1:1 nearest-neighbour pairing, no duplicates).
-            iii. Calculate the ratio of matched peaks to reference peaks.
-        e.  Find the material with the highest ratio.
-    4.  Report the most similar material in the requested JSON format.
+    1.  List uploaded files to find the IDs for `T120.csv` and `reference_library.csv`.
+    2.  Inspect both files to understand their structure (identify columns for Raman shift, intensity, and material name).
+    3.  Analyze `T120.csv`:
+        *   Perform peak detection with a prominence of 5% of the range.
+        *   Extract peak positions.
+    4.  Analyze `reference_library.csv` to get a list of reference spectra (peak positions) for each material.
+    5.  Compare the peaks of `T120.csv` against each material in `reference_library.csv`:
+        *   Peaks within 3 cm⁻¹ are considered matches.
+        *   Use 1:1 nearest-neighbor pairing, no duplicates.
+        *   Calculate the ratio of matched peaks (from T120) to total peaks in the reference.
+    6.  Identify the material with the highest ratio and output its name.
     
-    Let's start by listing and inspecting the files.
-[13:50:03.125] [Gemma TOOL_CALLS] step 1 · 1개
+    Let's start by listing uploaded files.
+[19:08:14.012] [Gemma TOOL_CALLS] step 1 · 1개
     1) list_uploaded_files({})
-[13:50:03.125] [Gemma STATS] prompt 15757 tok · out 292 tok · wall 10.67s · eval 4.65s (62.8 tok/s) · load 0.26s · done=stop
-[13:50:03.125] [ReAct REASONING] step 1 · 도구 1개 실행 결정 → list_uploaded_files
-[13:50:03.125] [ReAct ACTING] step 1 · list_uploaded_files
+[19:08:14.012] [Gemma STATS] prompt 15754 tok · out 275 tok · wall 4.91s · eval 2.17s (126.8 tok/s) · load 0.25s · done=stop
+[19:08:14.012] [ReAct REASONING] step 1 · 도구 1개 실행 결정 → list_uploaded_files
+[19:08:14.012] [ReAct ACTING] step 1 · list_uploaded_files
     {}
-[13:50:03.127] [ReAct OBSERVATION] step 1 · list_uploaded_files · ok · 1 ms
+[19:08:14.014] [ReAct OBSERVATION] step 1 · list_uploaded_files · ok · 2 ms
     {"ok": true, "count": 2, "files": [{"file_id": "2026-08-10/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829}, {"file_id": "2026-08-10/T120.csv", "filename": "T120.csv", "kind": "text", "bytes": 36703}]}
-[13:50:03.129] [Gemma <- PROMPT] step 2 · ReAct propose · 4 msgs
+[19:08:14.016] [Gemma <- PROMPT] step 2 · ReAct propose · 4 msgs
     system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch)
-[13:50:04.966] [Gemma THINKING] step 2 · 58ch
-    Now I will inspect both files to understand their columns.
-[13:50:04.966] [Gemma TOOL_CALLS] step 2 · 2개
+[19:08:15.155] [Gemma THINKING] step 2 · 112ch
+    I have the IDs: `2026-08-10/T120.csv` and `2026-08-10/reference_library.csv`.
+    
+    Now I need to inspect both files.
+[19:08:15.156] [Gemma TOOL_CALLS] step 2 · 1개
     1) inspect_file({"file_id": "2026-08-10/T120.csv"})
-    2) inspect_file({"file_id": "2026-08-10/reference_library.csv"})
-[13:50:04.967] [Gemma STATS] prompt 16178 tok · out 76 tok · wall 1.84s · eval 1.20s (63.4 tok/s) · load 0.26s · done=stop
-[13:50:04.967] [ReAct REASONING] step 2 · 도구 2개 실행 결정 → inspect_file, inspect_file
-[13:50:04.967] [ReAct ACTING] step 2 · inspect_file
+[19:08:15.156] [Gemma STATS] prompt 16158 tok · out 87 tok · wall 1.14s · eval 0.68s (127.6 tok/s) · load 0.24s · done=stop
+[19:08:15.156] [ReAct REASONING] step 2 · 도구 1개 실행 결정 → inspect_file
+[19:08:15.156] [ReAct ACTING] step 2 · inspect_file
     {"file_id": "2026-08-10/T120.csv"}
-[13:50:04.986] [ReAct OBSERVATION] step 2 · inspect_file · ok · 19 ms
+[19:08:15.173] [ReAct OBSERVATION] step 2 · inspect_file · ok · 17 ms
     {"ok": true, "file_id": "2026-08-10/T120.csv", "filename": "T120.csv", "kind": "text", "bytes": 36703, "n_rows": 1801, "n_cols": 2, "columns": ["raman_shift_cm-1", "intensity"], "dtypes": {"raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 1801}, "intensity": {"min": -19.597471, "max": 998.939361, "mean": 39.258661, "n_valid": 1801}}, "head": [[200.0, 4.486165], [201.0, -4.433726], [202.0, -4.539069], [203.0, 2.660969], [204.0, -5.388181]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/T120.csv']."}
-[13:50:04.986] [ReAct ACTING] step 2 · inspect_file
+[19:08:15.173] [Gemma <- PROMPT] step 3 · ReAct propose · 6 msgs
+    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(867ch)
+[19:08:16.286] [Gemma THINKING] step 3 · 121ch
+    `T120.csv` is a standard spectrum: `raman_shift_cm-1` (200-2000) and `intensity`.
+    
+    Now I inspect `reference_library.csv`.
+[19:08:16.286] [Gemma TOOL_CALLS] step 3 · 1개
+    1) inspect_file({"file_id": "2026-08-10/reference_library.csv"})
+[19:08:16.286] [Gemma STATS] prompt 16658 tok · out 81 tok · wall 1.11s · eval 0.64s (127.3 tok/s) · load 0.23s · done=stop
+[19:08:16.286] [ReAct REASONING] step 3 · 도구 1개 실행 결정 → inspect_file
+[19:08:16.286] [ReAct ACTING] step 3 · inspect_file
     {"file_id": "2026-08-10/reference_library.csv"}
-[13:50:05.026] [ReAct OBSERVATION] step 2 · inspect_file · ok · 39 ms
+[19:08:16.333] [ReAct OBSERVATION] step 3 · inspect_file · ok · 46 ms
     {"ok": true, "file_id": "2026-08-10/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829, "n_rows": 21612, "n_cols": 4, "columns": ["spectrum_id", "material", "raman_shift_cm-1", "intensity"], "dtypes": {"spectrum_id": "text", "material": "text", "raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 21612}, "intensity": {"min": 0.017118, "max": 1000.0, "mean": 25.348885, "n_valid": 21612}}, "head": [["PS_01", "polystyrene", 200.0, 0.072777], ["PS_01", "polystyrene", 201.0, 0.072997], ["PS_01", "polystyrene", 202.0, 0.073218], ["PS_01", "polystyrene", 203.0, 0.07344], ["PS_01", "polystyrene", 204.0, 0.073663]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/reference_library.csv']."}
-[13:50:05.027] [Gemma <- PROMPT] step 3 · ReAct propose · 7 msgs
-    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch)
-[13:50:32.223] [Gemma THINKING] step 3 · 3107ch
-    `T120.csv` contains `raman_shift_cm-1` and `intensity`.
-    `reference_library.csv` contains `spectrum_id`, `material`, `raman_shift_cm-1`, and `intensity`.
+[19:08:16.334] [Gemma <- PROMPT] step 4 · ReAct propose · 8 msgs
+    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(867ch) · ai(0ch)[inspect_file] · tool(1090ch)
+[19:08:58.272] [Gemma THINKING] step 4 · 3643ch
+    `reference_library.csv` contains: `spectrum_id`, `material`, `raman_shift_cm-1`, and `intensity`.
     
-    The goal is:
-    1. Extract peaks of `T120.csv` (prominence = 5% of range).
-    2. Reference library has full spectra. I need to extract reference peak positions for each material first, or if the "reference peaks" are already implicit in the data, I should probably find them too. Wait, the prompt says "find the most similar material ... by the ratio of matched peaks to reference peaks". This implies there's a set of "reference peaks" associated with each material.
-    The `reference_library.csv` contains raw spectra (rows for shift and intensity). I must first extract the peak positions from these reference spectra using a consistent method, or maybe they are already provided? No, it looks like they are just intensities.
-    Wait, usually "reference peaks" means a specific list of characteristic wavenumbers. But since only a CSV with raw data is provided, I should probably extract the peaks from the reference spectra as well using the same prominence criterion or something similar?
-    Re-reading: "Extract the peak positions of T120.csv (prominence 5% of range), treat peaks within 3 cm-1 as matching, and find the most similar material in reference_library.csv by the ratio of matched peaks to reference peaks".
+    I need to perform the analysis:
+    1.  Get peak positions for `T120.csv` (prominence = 5% of range). The range is ~1800 cm⁻¹, so prominence is around 90. However, the prompt says "5% of range", which usually refers to the data extent in that column or a specific value calculated from it.
+    2.  Group `reference_library.csv` by material and get the peak positions for each.
+    3.  Compare.
     
-    The prompt doesn't explicitly say how to get "reference peaks" from `reference_library.csv`. However, if I'm given raw spectra for materials like polystyrene, PET, etc., the standard procedure is to find their peak positions.
-    Let's check if there are multiple spectra per material (the `spectrum_id` suggests this). I should probably average them or just take one representative spectrum? No, usually you group by material and extract peaks from a "typical" spectrum or use the provided data.
-    Actually, let's see: maybe the reference library contains one sample of each material? The `head` shows "PS_01". Let's check how many materials are there.
+    Actually, I can do all this in one `run_analysis` call. I'll need both files.
     
-    Let's write a script to:
-    1. Extract peaks from `T120.csv`.
-    2. Group `reference_library.csv` by material. For each material, extract the peak positions using the same prominence rule (5% of range) on its spectra (perhaps averaging them first if there are multiple).
-    3. Perform the matching logic: 1:1 nearest-neighbor pairing within 3 cm-1.
-    4. Calculate the ratio `matched_peaks / reference_peaks`.
-    5. Identify the material with the highest ratio.
+    Wait, "prominence 5% of range". The range is $2000 - 200 = 1800$. $5\%$ is 90.
+    I should calculate the peak positions for `T120.csv` using standard scipy or similar if needed, but since I have to be precise about "prominence", I'll just use a fixed value or calc it.
     
-    One detail: "prominence 5% of range". I'll use `scipy.signal.find_peaks` for this. Range is `max(intensity) - min(intensity)`.
+    Let's refine the analysis:
+    - Identify peaks in T120.
+    - Group reference data by material and extract unique peak locations for each. Actually, many rows might share same material/spectra_id.
+    - Match.
     
-    Wait, if there are many spectra per material in the library, extracting peaks from each and then averaging positions might be messy. I will group by material, average the intensities (if normalized), find the peaks of the average spectrum. Or just take the first spectrum of each material if they are expected to be similar. Given the file size (~746 KB) and number of rows (21612), with 1801 points per spectrum, there are about 12 unique spectra ($21612 / 1801 \approx 12$).
+    One detail: "treat peaks within 3 cm-1 as matching". This means if a peak in T120 is at $x$ and there's a peak in reference at $y$, they match if $|x - y| < 3$.
+    "1:1 nearest-neighbour pairing, no duplicates":
+    If I have peaks $P = [p_1, p_2, ...]$ from T120.
+    And for each material $M$, a set of reference peaks $R = [r_1, r_2, ...]$.
+    I need to find how many $p \in P$ match some $r \in R$.
     
-    Let's implement this in `run_analysis`.
-[13:50:32.224] [Gemma TOOL_CALLS] step 3 · 1개
-    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load files\nt120_data = files['2026-08-10/T120.csv']['table']\nref_data = files['2026-08-10/reference_library.csv']['table']\n\ndef get_peaks(x, y):\n    prominence = 0.05 * (np.max(y) - np.min(y))\n    peaks, properties = find_peaks(y, prominence=prominence)\n    return x[peaks]\n\n# Extract peaks for T120\nt120_x = t120_data['raman_shift_cm-1']\nt120_y = t120_data['intensity']\nt120_peaks = get_peaks(t120_x, t120_y)\nprint(f\"T120 peaks: {t120_peaks}\")\n\n# Process reference library\nmaterials = np.unique(ref_data['material'])\nresults = {}\n\nfor mat in materials:\n    mat_mask = ref_data['material'] == mat\n    mat_x = ref_data['raman_shift_cm-1'][mat_mask]\n    mat_y = ref_data['intensity'][mat_mask]\n    \n    # 
-    … <1691자 생략>)
-[13:50:32.224] [Gemma STATS] prompt 17147 tok · out 1647 tok · wall 27.20s · eval 26.41s (62.4 tok/s) · load 0.26s · done=stop
-[13:50:32.224] [ReAct REASONING] step 3 · 도구 1개 실행 결정 → run_analysis
-[13:50:32.224] [ReAct ACTING] step 3 · run_analysis
-    {"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load files\nt120_data = files['2026-08-10/T120.csv']['table']\nref_data = files['2026-08-10/reference_library.csv']['table']\n\ndef get_peaks(x, y):\n    prominence = 0.05 * (np.max(y) - np.min(y))\n    peaks, properties = find_peaks(y, prominence=prominence)\n    return x[peaks]\n\n# Extract peaks for T120\nt120_x = t120_data['raman_shift_cm-1']\nt120_y = t120_data['intensity']\nt120_peaks = get_peaks(t120_x, t120_y)\nprint(f\"T120 peaks: {t120_peaks}\")\n\n# Process reference library\nmaterials = np.unique(ref_data['material'])\nresults = {}\n\nfor mat in materials:\n    mat_mask = ref_data['material'] == mat\n    mat_x = ref_data['raman_shift_cm-1'][mat_mask]\n    mat_y = ref_data['intensity'][mat_mask]\n    \n    # Assuming one spectrum per material for simplicity, or average them\n    # Let's check how many spectra there are per material\n    u_ids = np.unique(ref_data['spectrum_id'][mat_mask])\n    if len(u_ids) > 1:\n        # Average the intensities across spectra of the same material\n        avg_y = []\n        unique_x = np.unique(mat_x)\n        for sid in u_ids:\n            sid_mask = (ref_data['sp
-    … <1291자 생략>
-[13:50:33.386] [ReAct OBSERVATION] step 3 · run_analysis · FAIL · 1161 ms
-    {"ok": false, "error": "TypeError: list indices must be integers or slices, not str", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 396, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 5, in <module>\nTypeError: list indices must be integers or slices, not str\n"}
-[13:50:33.386] [Gemma <- PROMPT] step 4 · ReAct propose · 9 msgs
-    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch)
-[13:50:50.773] [Gemma THINKING] step 4 · 370ch
-    The error `TypeError: list indices must be integers or slices, not str` happened at line 5.
-    Line 5 was: `t120_data = files['2026-08-10/T120.csv']['table']`.
-    Wait, `files` is a list of dicts, not a dict keyed by file_id. I should iterate through the `files` list to find the one with the correct `file_id`.
+    Wait, "find the most similar material in reference_library.csv by the ratio of matched peaks to reference peaks".
+    This means:
+    $\text{Ratio} = \frac{\text{count of unique pairs } (p, r) \text{ such that } |p-r| < 3}{\text{number of reference peaks for that material}}$.
     
-    Let's fix the code. I will use a helper to get the table by ID.
-[13:50:50.773] [Gemma TOOL_CALLS] step 4 · 1개
-    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal the signal import find_peaks # Correction: from scipy.signal import find_peaks\n# Wait, let me rewrite carefully.\n\nimport numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id:\n            return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef get_peaks(x, y):\n    prominence = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=prominence)\n    return x[peaks]\n\n# Extract peaks for T120\nt120_x = t120_table['raman_shift_cm-1']\nt120_y = t120_table['intensity']\nt120_peaks = get_peaks(t120_x, t120_y)\nprint(f\"T120 peaks: {t120
-    … <1725자 생략>)
-[13:50:50.774] [Gemma STATS] prompt 18958 tok · out 1040 tok · wall 17.39s · eval 16.72s (62.2 tok/s) · load 0.24s · done=stop
-[13:50:50.774] [ReAct REASONING] step 4 · 도구 1개 실행 결정 → run_analysis
-[13:50:50.774] [ReAct ACTING] step 4 · run_analysis
-    {"code": "import numpy as np\nfrom scipy.signal the signal import find_peaks # Correction: from scipy.signal import find_peaks\n# Wait, let me rewrite carefully.\n\nimport numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id:\n            return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef get_peaks(x, y):\n    prominence = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=prominence)\n    return x[peaks]\n\n# Extract peaks for T120\nt120_x = t120_table['raman_shift_cm-1']\nt120_y = t120_table['intensity']\nt120_peaks = get_peaks(t120_x, t120_y)\nprint(f\"T120 peaks: {t120_peaks}\")\n\n# Process reference library\nmaterials = np.unique(ref_table['material'])\nresults = {}\n\nfor mat in materials:\n    mat_mask = ref_table['material'] == mat\n    mat_x = ref_table['raman_shift_cm-1'][mat_mask]\n    mat_y = ref_table['intensity'][mat_mask]\n    \n    u_ids = np.unique(ref_table['spectrum_id'][mat_mask])\n    if len(u_ids) > 1:\n        # Average the intensities acros
-    … <1325자 생략>
-[13:50:50.816] [ReAct OBSERVATION] step 4 · run_analysis · FAIL · 42 ms
-    {"ok": false, "error": "Code policy violation: Syntax error: invalid syntax (<unknown>, line 2)", "hint": "Analysis only with numpy/scipy/matplotlib. No hardware/file/network access."}
-[13:50:50.817] [Gemma <- PROMPT] step 5 · ReAct propose · 11 msgs
-    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch)
-[13:51:04.185] [Gemma THINKING] step 5 · 211ch
-    I had a typo in the previous turn: `from scipy.signal the signal import find_peaks`. I tried to fix it but might have left something or created another syntax error. Let me clean up the code and be very precise.
-[13:51:04.185] [Gemma TOOL_CALLS] step 5 · 1개
-    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id:\n            return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef get_peaks(x, y):\n    p_val = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=p_val)\n    return x[peaks]\n\nt120_x = t120_table['raman_shift_cm-1']\nt120_y = t120_table['intensity']\nt120_peaks = get_peaks(t120_x, t120_y)\n\nmaterials = np.unique(ref_table['material'])\nresults = {}\n\nfor mat in materials:\n    mat_mask = ref_table['material'] == mat\n    u_ids = np.unique(ref_table['spectrum_id'][mat_mask])\n    if len(u_ids) > 1:\n  
-    … <1098자 생략>)
-[13:51:04.186] [Gemma STATS] prompt 20059 tok · out 789 tok · wall 13.37s · eval 12.72s (62.0 tok/s) · load 0.25s · done=stop
-[13:51:04.186] [ReAct REASONING] step 5 · 도구 1개 실행 결정 → run_analysis
-[13:51:04.186] [ReAct ACTING] step 5 · run_analysis
-    {"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id:\n            return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef get_peaks(x, y):\n    p_val = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=p_val)\n    return x[peaks]\n\nt120_x = t120_table['raman_shift_cm-1']\nt120_y = t120_table['intensity']\nt120_peaks = get_peaks(t120_x, t120_y)\n\nmaterials = np.unique(ref_table['material'])\nresults = {}\n\nfor mat in materials:\n    mat_mask = ref_table['material'] == mat\n    u_ids = np.unique(ref_table['spectrum_id'][mat_mask])\n    if len(u_ids) > 1:\n        y_list = []\n        for sid in u_ids:\n            sid_mask = (ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)\n            y_list.append(ref_table['intensity'][sid_mask])\n        avg_y = np.mean(y_list, axis=0)\n        x_vals = np.unique(ref_table['raman_shift_cm-1'][mat_mask])\n        ref_peaks = get_peaks(x_vals, avg_y)\n    else:\n        ref_peaks = get_peaks(ref_t
-    … <698자 생략>
-[13:51:05.359] [ReAct OBSERVATION] step 5 · run_analysis · FAIL · 1172 ms
-    {"ok": false, "error": "ValueError: zero-size array to reduction operation maximum which has no identity", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 396, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 37, in <module>\n  File \"<analysis>\", line 14, in get_peaks\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\.venv\\Lib\\site-packages\\numpy\\_core\\fromnumeric.py\", line 3123, in max\n    return _wrapreduction(a, np.maximum, 'max', axis, None, out,\n                          keepdims=keepdims, initial=initial, where=where)\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\.venv\\Lib\\site-packages\\numpy\\_core\\fromnumeric.py\", line 83, in _wrapreduction\n    return ufunc.reduce(obj, axis, dtype, out, **passkwargs)\n           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: zero-size array to reduction operation maximum which has no identity\n"}
-[13:51:05.359] [Gemma <- PROMPT] step 6 · ReAct propose · 13 msgs
-    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch)
-[13:51:22.101] [Gemma THINKING] step 6 · 734ch
-    The `ValueError: zero-size array` means that for some material in the library, I'm passing an empty array to `np.max`. This happens if `mat_mask` or the filtered data is empty (though `np.unique(ref_table['material'])` should prevent that). Or more likely, my logic for extracting `avg_y` might be producing something unexpected or some material has no spectra rows?
+    Wait, "1:1 nearest-neighbour pairing" usually implies we find the closest $r$ for each $p$, and if it's within 3, it counts.
+    And "no duplicates" means once a reference peak is matched to a T120 peak, it can't be used again? Or a T120 peak only matches one? The standard interpretation of "1:1 nearest-neighbor pairing" in this context is usually that each $p$ finds its closest $r$, and we check if that distance is $<3$. If multiple $p$ are close to the same $r$, only one counts (the pair is 1:1).
     
-    Let's check why it's failing. I suspect maybe a material exists in the 'material' column but has no data associated with it, or there's some mismatch in lengths.
-    Actually, let me add checks to `get_peaks` and prints for debugging. Also, I should ensure that when calculating `avg_y`, all spectra have the same x-axis length.
+    Let's do the analysis.
+    I will use `scipy.signal.find_peaks` for T120.
+    The range of `raman_shift_cm-1` in T120 is roughly $[200, 2000]$. The total range is $2000 - 200 = 1800$.
+    $5\%$ of $1800$ is $90$. I'll use `prominence=90`.
     
-    Let's refine the code to be more robust.
-[13:51:22.101] [Gemma TOOL_CALLS] step 6 · 1개
-    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id:\n            return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef get_peaks(x, y):\n    if len(y) == 0: return np.array([])\n    p_val = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=p_val)\n    return x[peaks]\n\nt120_x = t120_table['raman_shift_cm-1']\nt120_y = t120_table['intensity']\nt120_peaks = get_peaks(t120_x, t120_y)\n\nmaterials = np.unique(ref_table['material'])\nresults = {}\n\nfor mat in materials:\n    mat_mask = ref_table['material'] == mat\n    # Collect all spectrum IDs for this mate
-    … <1311자 생략>)
-[13:51:22.102] [Gemma STATS] prompt 21205 tok · out 991 tok · wall 16.74s · eval 16.06s (61.7 tok/s) · load 0.24s · done=stop
-[13:51:22.102] [ReAct REASONING] step 6 · 도구 1개 실행 결정 → run_analysis
-[13:51:22.102] [ReAct ACTING] step 6 · run_analysis
-    {"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id:\n            return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef get_peaks(x, y):\n    if len(y) == 0: return np.array([])\n    p_val = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=p_val)\n    return x[peaks]\n\nt120_x = t120_table['raman_shift_cm-1']\nt120_y = t120_table['intensity']\nt120_peaks = get_peaks(t120_x, t120_y)\n\nmaterials = np.unique(ref_table['material'])\nresults = {}\n\nfor mat in materials:\n    mat_mask = ref_table['material'] == mat\n    # Collect all spectrum IDs for this material\n    u_ids = np.unique(ref_table['spectrum_id'][mat_mask])\n    \n    y_list = []\n    x_vals = None\n    for sid in u_ids:\n        sid_mask = (ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)\n        curr_x = ref_table['raman_shift_cm-1'][sid_mask]\n        curr_y = ref_table['intensity'][sid_mask]\n        if len(curr_y) > 0:\n            y_list.append(curr_y)\n          
-    … <911자 생략>
-[13:51:23.234] [ReAct OBSERVATION] step 6 · run_analysis · ok · 1132 ms
-    {"ok": true, "stdout": "Best material: PET, Ratio: 0.0000\n", "image_count": 0, "images": []}
-[13:51:23.235] [Gemma <- PROMPT] step 7 · ReAct propose · 15 msgs
-    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch) · ai(0ch)[run_analysis] · tool(93ch)
-[13:51:33.973] [Gemma THINKING] step 7 · 543ch
-    Wait, the ratio is 0.0000 for everything? And it picked "PET"? This means either no peaks were matched or the peak extraction failed to find anything meaningful.
+    I will then process the reference library. It has many entries for different materials.
+    Note: The prompt says "ratio of matched peaks to reference peaks".
+    A "reference peak" is a peak in the reference spectrum. Since multiple spectra (different IDs) might share the same material name, I should probably consolidate them or treat each unique material's set of peaks as the base for comparison.
     
-    Let's look at the output again: `Best material: PET, Ratio: 0.0000`.
-    This suggests that most materials had a ratio of 0, and PET was just one of them. I need to see why no peaks were matched.
+    Wait, `reference_library` has many rows. If "polystyrene" appears multiple times with different `spectrum_id`, do they contribute to one pool of "reference peaks"?
+    Usually, in these tasks, we assume the distinct peak locations across all entries of a material are the reference. But often there's just one spectrum per name or they are very similar. I will group by `material` and find unique peak positions? No, standard procedure is to identify peaks for each *unique* data segment (spectrum_id) and then aggregate/average if needed, but "reference" usually implies the list of all known peaks for that material.
     
-    Maybe the prominence criterion is too strict for the reference library? Or maybe T120 has no peaks?
-    Let's print the peak positions for T120 and some reference materials in `run_analysis`.
-[13:51:33.973] [Gemma TOOL_CALLS] step 7 · 1개
-    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef get_peaks(x, y):\n    if len(y) == 0: return np.array([])\n    p_val = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=p_val)\n    return x[peaks]\n\nt120_x = t120_table['raman_shift_cm-1']\nt120_y = t120_table['intensity']\nt120_peaks = get_peaks(t120_x, t120_y)\nprint(f\"T120 peaks: {t120_peaks}\")\n\nmaterials = np.unique(ref_table['material'])\nfor mat in materials[:3]: # check first 3\n    mat_mask = ref_table['material'] == mat\n    sid = ref_t
-    … <345자 생략>)
-[13:51:33.973] [Gemma STATS] prompt 22248 tok · out 620 tok · wall 10.74s · eval 10.07s (61.6 tok/s) · load 0.24s · done=stop
-[13:51:33.973] [ReAct REASONING] step 7 · 도구 1개 실행 결정 → run_analysis
-[13:51:33.973] [ReAct ACTING] step 7 · run_analysis
-    {"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef get_peaks(x, y):\n    if len(y) == 0: return np.array([])\n    p_val = 0.05 * (np.max(y) - np.min(y))\n    peaks, _ = find_peaks(y, prominence=p_val)\n    return x[peaks]\n\nt120_x = t120_table['raman_shift_cm-1']\nt120_y = t120_table['intensity']\nt120_peaks = get_peaks(t120_x, t120_y)\nprint(f\"T120 peaks: {t120_peaks}\")\n\nmaterials = np.unique(ref_table['material'])\nfor mat in materials[:3]: # check first 3\n    mat_mask = ref_table['material'] == mat\n    sid = ref_table['spectrum_id'][mat_mask][0]\n    sid_mask = (ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)\n    ref_peaks = get_peaks(ref_table['raman_shift_cm-1'][sid_mask], ref_table['intensity'][sid_mask])\n    print(f\"Material {mat} peaks: {ref_peaks}\")\n", "file_ids": ["2026-08-10/T120.csv", "2026-08-10/reference_library.csv"]}
-[13:51:35.122] [ReAct OBSERVATION] step 7 · run_analysis · ok · 1149 ms
-    {"ok": true, "stdout": "T120 peaks: [ 631.  702.  797.  857. 1096. 1117. 1289. 1417. 1614. 1728.]\nMaterial PET peaks: []\nMaterial PMMA peaks: []\nMaterial aragonite peaks: []\n", "image_count": 0, "images": []}
-[13:51:35.123] [Gemma <- PROMPT] step 8 · ReAct propose · 17 msgs
-    system(9236ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch) · ai(0ch)[run_analysis] · tool(93ch) · ai(0ch)[run_analysis] · tool(212ch)
-[13:51:50.845] [Gemma THINKING] step 8 · 2597ch
-    Ah! The reference spectra have NO peaks with the 5% prominence rule. This is because they might be normalized or shifted or simply have a different noise/peak profile than T120.
+    Actually, let's look at how many materials there are: polystyrene, PET, PMMA, calcite, aragonite, silicon.
+    I will identify unique peak positions for each material from `reference_library.csv`.
     
-    Wait, let's look at the `inspect_file` for `reference_library.csv`:
-    Intensity range: min 0.017, max 1000. Mean 25.34.
-    T120 intensity range: min -19.5, max 998.9.
-    
-    The reference spectra are likely already processed or have a different distribution. If `find_peaks` with 5% prominence returns nothing for the library, it's possible that the peaks in the library are narrower or the background is such that the prominence is lower relative to the absolute range.
-    
-    Wait, if they are "reference" spectra, maybe they are already normalized so the highest peak is at 1000 and others are much smaller? But even then, a 5% prominence (50 units) should find something if there are peaks.
-    
-    Let's check one reference spectrum visually or print its values around some known peaks for PET, PMMA etc.
-    Actually, let me try a lower prominence for the library spectra to see if I can find *any* peaks. Or better yet, use the 5% rule only on T120 as requested ("Extract the peak positions of T120.csv (prominence 5% of range)"), and then assume the reference library's "reference peaks" are obtained differently?
-    No, the prompt says "... find the most similar material ... by the ratio of matched peaks to reference peaks". This implies I need to know what the reference peaks are.
-    
-    If they aren't provided in a separate list, I must extract them from `reference_library.csv`. If 5% prominence is too high for the library, maybe I should use a different method or check if the reference spectra are just "peak lists" in disguise? No, they have intensities.
-    
-    Let me try to find peaks in the reference library using a much lower prominence (e.g., 1%) or just `find_peaks` without prominence but with some height.
-    Better: let's look at the data for one material and see what it looks like. I'll print a few values.
-    
-    Actually, wait! If I am to "Extract the peak positions of T120.csv (prominence 5% of range)", that specifies the rule for T120. It does NOT explicitly say to use the same rule for the reference library. However, it's the most logical assumption unless there's a standard way.
-    
-    Let me try to extract peaks from the library using `find_peaks` with a more lenient prominence or simply find all local maxima and then filter? No, that's too many.
-    Maybe I should use a fixed prominence for reference spectra (e.g., 10 units) instead of a percentage?
-    
-    Let's try to plot one spectrum from the library to see why `find_peaks` failed.
-[13:51:50.845] [Gemma TOOL_CALLS] step 8 · 1개
-    1) run_analysis({"code": "import numpy as np\nimport matplotlib.pyplot as plt\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nref_table = get_table(files, '2026-08-10/reference_library.csv')\nmaterials = np.unique(ref_table['material'])\nmat = materials[0]\nmat_mask = ref_table['material'] == mat\nsid = ref_table['spectrum_id'][mat_mask][0]\nsid_mask = (ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)\n\nplt.plot(ref_table['raman_shift_cm-1'][sid_mask], ref_table['intensity'][sid_mask])\nplt.title(f\"Spectrum of {mat}\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Intensity\")\nplt.show()\n", "file_ids": ["2026-08-10/reference_library.csv"]})
-[13:51:50.846] [Gemma STATS] prompt 22993 tok · out 922 tok · wall 15.72s · eval 15.06s (61.2 tok/s) · load 0.25s · done=stop
-[13:51:50.846] [ReAct REASONING] step 8 · 도구 1개 실행 결정 → run_analysis
-[13:51:50.846] [ReAct ACTING] step 8 · run_analysis
-    {"code": "import numpy as np\nimport matplotlib.pyplot as plt\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nref_table = get_table(files, '2026-08-10/reference_library.csv')\nmaterials = np.unique(ref_table['material'])\nmat = materials[0]\nmat_mask = ref_table['material'] == mat\nsid = ref_table['spectrum_id'][mat_mask][0]\nsid_mask = (ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)\n\nplt.plot(ref_table['raman_shift_cm-1'][sid_mask], ref_table['intensity'][sid_mask])\nplt.title(f\"Spectrum of {mat}\")\nplt.xlabel(\"Raman Shift (cm-1)\")\nplt.ylabel(\"Intensity\")\nplt.show()\n", "file_ids": ["2026-08-10/reference_library.csv"]}
-[13:51:54.804] [ReAct OBSERVATION] step 8 · run_analysis · ok · 3958 ms
-    {"ok": true, "stdout": "", "image_count": 1, "images": ["/api/results/2026-08-10/bench_2026-08-10_AILA_AILA_T120_4f1648/fig135153_533_0.png"], "saved": {"title": "Analysis result", "image_url": "/api/results/2026-08-10/bench_2026-08-10_AILA_AILA_T120_4f1648/fig135153_533_0.png"}}
-[13:51:54.811] [Gemma <- PROMPT] step 9 · ReAct propose · 19 msgs
-    system(9402ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch) · ai(0ch)[run_analysis] · tool(93ch) · ai(0ch)[run_analysis] · tool(212ch) · ai(0ch)[run_analysis] · tool(280ch)
-[13:52:09.302] [Gemma THINKING] step 9 · 108ch
-    I can't see the plot, but I can check numerically. Let's find where the max is and look at the surroundings.
-[13:52:09.302] [Gemma TOOL_CALLS] step 9 · 1개
-    1) run_analysis({"code": "import numpy as np\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nref_table = get_table(files, '2026-08-10/reference_library.csv')\nmaterials = np.unique(ref_table['material'])\n\nfor mat in materials[:3]:\n    mat_mask = ref_table['material'] == mat\n    sid = ref_table['spectrum_id'][mat_mask][0]\n    sid_mask = (ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)\n    y = ref_table['intensity'][sid_mask]\n    x = ref_table['raman_shift_cm-1'][sid_mask]\n    print(f\"Material {mat}: Max intensity {np.max(y)}, Min {np.min(y)}\")\n    # Find indices of top 5 peaks\n    indices = np.argsort(y)[-5:]\n    for idx in indices:\n        print(f\"  Peak at {x[idx]:.1f}: {y[idx]:.1f}\")\n", "
-    … <48자 생략>)
-[13:52:09.303] [Gemma STATS] prompt 24177 tok · out 342 tok · wall 14.49s · eval 5.58s (61.3 tok/s) · load 0.25s · done=stop
-[13:52:09.303] [ReAct REASONING] step 9 · 도구 1개 실행 결정 → run_analysis
-[13:52:09.303] [ReAct ACTING] step 9 · run_analysis
-    {"code": "import numpy as np\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nref_table = get_table(files, '2026-08-10/reference_library.csv')\nmaterials = np.unique(ref_table['material'])\n\nfor mat in materials[:3]:\n    mat_mask = ref_table['material'] == mat\n    sid = ref_table['spectrum_id'][mat_mask][0]\n    sid_mask = (ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)\n    y = ref_table['intensity'][sid_mask]\n    x = ref_table['raman_shift_cm-1'][sid_mask]\n    print(f\"Material {mat}: Max intensity {np.max(y)}, Min {np.min(y)}\")\n    # Find indices of top 5 peaks\n    indices = np.argsort(y)[-5:]\n    for idx in indices:\n        print(f\"  Peak at {x[idx]:.1f}: {y[idx]:.1f}\")\n", "file_ids": ["2026-08-10/reference_library.csv"]}
-[13:52:09.795] [ReAct OBSERVATION] step 9 · run_analysis · FAIL · 492 ms
-    {"ok": false, "error": "ValueError: zero-size array to reduction operation maximum which has no identity", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 396, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 17, in <module>\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\.venv\\Lib\\site-packages\\numpy\\_core\\fromnumeric.py\", line 3123, in max\n    return _wrapreduction(a, np.maximum, 'max', axis, None, out,\n                          keepdims=keepdims, initial=initial, where=where)\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\.venv\\Lib\\site-packages\\numpy\\_core\\fromnumeric.py\", line 83, in _wrapreduction\n    return ufunc.reduce(obj, axis, dtype, out, **passkwargs)\n           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: zero-size array to reduction operation maximum which has no identity\n"}
-[13:52:09.796] [Gemma <- PROMPT] step 10 · ReAct propose · 21 msgs
-    system(9402ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch) · ai(0ch)[run_analysis] · tool(93ch) · ai(0ch)[run_analysis] · tool(212ch) · ai(0ch)[run_analysis] · tool(280ch) · ai(0ch)[run_analysis] · tool(1076ch)
-[13:52:31.302] [Gemma THINKING] step 10 · 485ch
-    Still getting the `zero-size array` error. This means for some materials, the filter `(ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)` is returning an empty array. This is very strange because I got `sid` from that same mask.
-    Wait! I see the problem: `ref_table['intensity'][sid_mask]`... if `sid_mask` is a boolean array of length 21612, and I use it to index... oh wait, the arrays in `ref_table['table']` are probably numpy arrays.
-    
-    Let's try this more carefully:
-[13:52:31.302] [Gemma TOOL_CALLS] step 10 · 1개
-    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef get_peaks(x, y):\n    if len(y) == 0: return np.array([])\n    # Prominence as a fraction of range\n    p_val = 0.05 * (np.max(y) - np.min(y))\n    # If the spectrum is flat or has very small range, we might want a minimum prominence\n    if p_val < 1: p_val = 1 # Use absolute if percentage is too low? No, stick to rule first.\n    peaks, _ = find_peaks(y, prominence=p_val)\n    return x[peaks]\n\n# T120 Peak Extraction (MANDATORY RULE: 5% range)\nt120_x = t120_table['raman
-    … <2303자 생략>)
-[13:52:31.303] [Gemma STATS] prompt 24859 tok · out 1265 tok · wall 21.51s · eval 20.74s (61.0 tok/s) · load 0.25s · done=stop
-[13:52:31.303] [ReAct REASONING] step 10 · 도구 1개 실행 결정 → run_analysis
-[13:52:31.303] [ReAct ACTING] step 10 · run_analysis
-    {"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef get_peaks(x, y):\n    if len(y) == 0: return np.array([])\n    # Prominence as a fraction of range\n    p_val = 0.05 * (np.max(y) - np.min(y))\n    # If the spectrum is flat or has very small range, we might want a minimum prominence\n    if p_val < 1: p_val = 1 # Use absolute if percentage is too low? No, stick to rule first.\n    peaks, _ = find_peaks(y, prominence=p_val)\n    return x[peaks]\n\n# T120 Peak Extraction (MANDATORY RULE: 5% range)\nt120_x = t120_table['raman_shift_cm-1']\nt120_y = t120_table['intensity']\nt120_peaks = get_peaks(t120_x, t120_y)\nprint(f\"T120 peaks ({len(t120_peaks)}): {t120_peaks}\")\n\n# Library Peak Extraction\n# Since the 5% rule failed for some, let's check if they have different scales.\nmaterials = np.unique(ref_table['material'])\nfinal_results = {}\n\nfor mat in materials:\n    mat_mask = ref_table['material'] == mat\n    u_i
-    … <1903자 생략>
-[13:52:32.420] [ReAct OBSERVATION] step 10 · run_analysis · ok · 1116 ms
-    {"ok": true, "stdout": "T120 peaks (10): [ 631.  702.  797.  857. 1096. 1117. 1289. 1417. 1614. 1728.]\n\nBest material: PET with ratio 0.0000\n", "image_count": 0, "images": []}
-[13:52:32.420] [Gemma <- PROMPT] step 11 · ReAct propose · 23 msgs
-    system(9402ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch) · ai(0ch)[run_analysis] · tool(93ch) · ai(0ch)[run_analysis] · tool(212ch) · ai(0ch)[run_analysis] · tool(280ch) · ai(0ch)[run_analysis] · tool(1076ch) · ai(0ch)[run_analysis] · tool(178ch)
-[13:52:43.411] [Gemma THINKING] step 11 · 260ch
-    Wait, it's still 0.0000! This is very suspicious. Let me check the peaks of one a specific material like polystyrene (PS) which always has strong peaks at ~1001 cm-1.
-    
-    Let's explicitly print the peak positions for every material and T120 to see where they are.
-[13:52:43.411] [Gemma TOOL_CALLS] step 11 · 1개
-    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef extract_peaks(x, y):\n    if len(y) == 0: return []\n    p = 0.01 * (np.max(y) - np.min(y)) # Using a very low prominence to see everything\n    pk, _ = find_peaks(y, prominence=p)\n    return x[pk]\n\nt120_x = t120_table['raman_shift_cm-1']\nt120_y = t120_table['intensity']\n# Use the requested 5% for T120\np_t120 = 0.05 * (np.max(t120_y) - np.min(t120_y))\npk_t120, _ = find_peaks(t120_y, prominence=p_t120)\nt120_peaks = t120_x[pk_t120]\nprint(f\"T120 peaks: {t120_peaks}\"
-    … <478자 생략>)
-[13:52:43.412] [Gemma STATS] prompt 26245 tok · out 629 tok · wall 10.99s · eval 10.33s (60.9 tok/s) · load 0.24s · done=stop
-[13:52:43.412] [ReAct REASONING] step 11 · 도구 1개 실행 결정 → run_analysis
-[13:52:43.412] [ReAct ACTING] step 11 · run_analysis
-    {"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef extract_peaks(x, y):\n    if len(y) == 0: return []\n    p = 0.01 * (np.max(y) - np.min(y)) # Using a very low prominence to see everything\n    pk, _ = find_peaks(y, prominence=p)\n    return x[pk]\n\nt120_x = t120_table['raman_shift_cm-1']\nt120_y = t120_table['intensity']\n# Use the requested 5% for T120\np_t120 = 0.05 * (np.max(t120_y) - np.min(t120_y))\npk_t120, _ = find_peaks(t120_y, prominence=p_t120)\nt120_peaks = t120_x[pk_t120]\nprint(f\"T120 peaks: {t120_peaks}\")\n\nmaterials = np.unique(ref_table['material'])\nfor mat in materials:\n    mat_mask = ref_table['material'] == mat\n    sid = ref_table['spectrum_id'][mat_mask][0]\n    sid_mask = (ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)\n    y = ref_table['intensity'][sid_mask]\n    x = ref_table['raman_shift_cm-1'][sid_mask]\n    pks = extract_peaks(x, y)\n    print(f\"{mat}: {pks}\"
-    … <78자 생략>
-[13:52:44.578] [ReAct OBSERVATION] step 11 · run_analysis · ok · 1166 ms
-    {"ok": true, "stdout": "T120 peaks: [ 631.  702.  797.  857. 1096. 1117. 1289. 1417. 1614. 1728.]\nPET: []\nPMMA: []\naragonite: []\ncalcite: []\npolystyrene: []\nsilicon: []\n", "image_count": 0, "images": []}
-[13:52:44.578] [Gemma <- PROMPT] step 12 · ReAct propose · 25 msgs
-    system(9402ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch) · ai(0ch)[run_analysis] · tool(93ch) · ai(0ch)[run_analysis] · tool(212ch) · ai(0ch)[run_analysis] · tool(280ch) · ai(0ch)[run_analysis] · tool(1076ch) · ai(0ch)[run_analysis] · tool(178ch) · ai(0ch)[run_analysis] · tool(210ch)
-[13:52:50.512] [Gemma THINKING] step 12 · 302ch
-    Wait... EVERY material has empty peaks `[]` even with a 1% prominence? This is impossible for Raman spectra of things like Polystyrene or Silicon.
-    
-    Let me check the data itself. Are the intensities actually constants? Or are there NaN values?
-    Let's print the first few intensity values of one spectrum.
-[13:52:50.512] [Gemma TOOL_CALLS] step 12 · 1개
-    1) run_analysis({"code": "import numpy as np\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nref_table = get_table(files, '2026-08-10/reference_library.csv')\nmat = \"polystyrene\"\nmat_mask = ref_table['material'] == mat\nsid = ref_table['spectrum_id'][mat_mask][0]\nsid_mask = (ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)\ny = ref_table['intensity'][sid_mask]\nprint(f\"Material: {mat}, Spectrum ID: {sid}\")\nprint(f\"First 20 intensities: {y[:20]}\")\nprint(f\"Max intensity: {np.max(y)}, Min intensity: {np.min(y)}\")\n", "file_ids": ["2026-08-10/reference_library.csv"]})
-[13:52:50.513] [Gemma STATS] prompt 27010 tok · out 318 tok · wall 5.93s · eval 5.23s (60.8 tok/s) · load 0.25s · done=stop
-[13:52:50.513] [ReAct REASONING] step 12 · 도구 1개 실행 결정 → run_analysis
-[13:52:50.513] [ReAct ACTING] step 12 · run_analysis
-    {"code": "import numpy as np\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nref_table = get_table(files, '2026-08-10/reference_library.csv')\nmat = \"polystyrene\"\nmat_mask = ref_table['material'] == mat\nsid = ref_table['spectrum_id'][mat_mask][0]\nsid_mask = (ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)\ny = ref_table['intensity'][sid_mask]\nprint(f\"Material: {mat}, Spectrum ID: {sid}\")\nprint(f\"First 20 intensities: {y[:20]}\")\nprint(f\"Max intensity: {np.max(y)}, Min intensity: {np.min(y)}\")\n", "file_ids": ["2026-08-10/reference_library.csv"]}
-[13:52:51.000] [ReAct OBSERVATION] step 12 · run_analysis · FAIL · 487 ms
-    {"ok": false, "error": "ValueError: zero-size array to reduction operation maximum which has no identity", "stdout": "Material: polystyrene, Spectrum ID: P\nFirst 20 intensities: []\n", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 396, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 16, in <module>\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\.venv\\Lib\\site-packages\\numpy\\_core\\fromnumeric.py\", line 3123, in max\n    return _wrapreduction(a, np.maximum, 'max', axis, None, out,\n                          keepdims=keepdims, initial=initial, where=where)\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\.venv\\Lib\\site-packages\\numpy\\_core\\fromnumeric.py\", line 83, in _wrapreduction\n    return ufunc.reduce(obj, axis, dtype, out, **passkwargs)\n           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: zero-size array to reduction operation maximum which has no identity\n"}
-[13:52:51.001] [Gemma <- PROMPT] step 13 · ReAct propose · 27 msgs
-    system(9402ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch) · ai(0ch)[run_analysis] · tool(93ch) · ai(0ch)[run_analysis] · tool(212ch) · ai(0ch)[run_analysis] · tool(280ch) · ai(0ch)[run_analysis] · tool(1076ch) · ai(0ch)[run_analysis] · tool(178ch) · ai(0ch)[run_analysis] · tool(210ch) · ai(0ch)[run_analysis] · tool(1141ch)
-[13:53:03.310] [Gemma THINKING] step 13 · 1137ch
-    Look at this! `Material: polystyrene, Spectrum ID: P`. The spectrum ID is just "P"? And the intensities are `[]`?
-    This means my mask `sid_mask = (ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)` is failing.
-    
-    Why would it fail? Let's look at the `inspect_file` for `reference_library.csv` again:
-    Columns: `["spectrum_id", "material", "raman_shift_cm-1", "intensity"]`.
-    Head: `[["PS_01", "polystyrene", 200.0, 0.072777], ...]`
-    
-    Wait... if I'm using the `table` (which is a dict of arrays), and I do `ref_table['spectrum_id'] == sid`, this should work.
-    BUT, in my previous run: `sid = ref_table['spectrum_id'][mat_mask][0]`. If `mat_mask` is correct, `sid` should be "PS_01".
-    But the output says `Spectrum ID: P`.
-    
-    Wait! I know what happened. The string `polystyrene` starts with 'p'. Maybe something is slicing? No... wait... `spectrum_id` is a column. If it's a numpy array of strings, `ref_table['spectrum_id'][mat_mask][0]` should be "PS_01".
-    
-    Let me print the first few rows of the table directly using `inspect_file` logic or just `print(ref_table['material'][:10])`.
-    Actually, I'll use a much simpler way to filter.
-[13:53:03.311] [Gemma TOOL_CALLS] step 13 · 1개
-    1) run_analysis({"code": "import numpy as np\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\n# Print column contents for the first 5 rows to see what's going on\nprint(\"Materials:\", ref_table['material'][:5])\nprint(\"Spectrum IDs:\", ref_table['spectrum_id'][:5])\n\n# Let's try a different way to filter\nmat = \"polystyrene\"\nindices = np.where(ref_table['material'] == mat)[0]\nprint(f\"Indices for {mat}: {len(indices)}\")\n\nif len(indices) > 0:\n    sid = ref_table['spectrum_id'][indices[0]]\n    print(f\"First sid for {mat}: {sid}\")\n    # Now find all rows with this sid\n    sid_indices = np.where(ref_table['spectrum_id'] == sid)[0]\n    print(f\"Ro
-    … <181자 생략>)
-[13:53:03.311] [Gemma STATS] prompt 27687 tok · out 700 tok · wall 12.31s · eval 11.58s (60.5 tok/s) · load 0.24s · done=stop
-[13:53:03.311] [ReAct REASONING] step 13 · 도구 1개 실행 결정 → run_analysis
-[13:53:03.311] [ReAct ACTING] step 13 · run_analysis
-    {"code": "import numpy as np\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\n# Print column contents for the first 5 rows to see what's going on\nprint(\"Materials:\", ref_table['material'][:5])\nprint(\"Spectrum IDs:\", ref_table['spectrum_id'][:5])\n\n# Let's try a different way to filter\nmat = \"polystyrene\"\nindices = np.where(ref_table['material'] == mat)[0]\nprint(f\"Indices for {mat}: {len(indices)}\")\n\nif len(indices) > 0:\n    sid = ref_table['spectrum_id'][indices[0]]\n    print(f\"First sid for {mat}: {sid}\")\n    # Now find all rows with this sid\n    sid_indices = np.where(ref_table['spectrum_id'] == sid)[0]\n    print(f\"Rows for sid {sid}: {len(sid_indices)}\")\n    y = ref_table['intensity'][sid_indices]\n    print(f\"Intensity sample: {y[:5]}\")\n", "file_ids": ["2026-08-10/reference_library.csv"]}
-[13:53:03.804] [ReAct OBSERVATION] step 13 · run_analysis · FAIL · 492 ms
-    {"ok": false, "error": "ValueError: Calling nonzero on 0d arrays is not allowed. Use np.atleast_1d(scalar).nonzero() instead. If the context of this error is of the form `arr[nonzero(cond)]`, just use `arr[cond]`.", "stdout": "Materials: ['polystyrene', 'polystyrene', 'polystyrene', 'polystyrene', 'polystyrene']\nSpectrum IDs: ['PS_01', 'PS_01', 'PS_01', 'PS_01', 'PS_01']\n", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 396, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 16, in <module>\nValueError: Calling nonzero on 0d arrays is not allowed. Use np.atleast_1d(scalar).nonzero() instead. If the context of this error is of the form `arr[nonzero(cond)]`, just use `arr[cond]`.\n"}
-[13:53:03.805] [Gemma <- PROMPT] step 14 · ReAct propose · 29 msgs
-    system(9402ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch) · ai(0ch)[run_analysis] · tool(93ch) · ai(0ch)[run_analysis] · tool(212ch) · ai(0ch)[run_analysis] · tool(280ch) · ai(0ch)[run_analysis] · tool(1076ch) · ai(0ch)[run_analysis] · tool(178ch) · ai(0ch)[run_analysis] · tool(210ch) · ai(0ch)[run_analysis] · tool(1141ch) · ai(0ch)[run_analysis] · tool(896ch)
-[13:53:22.193] [Gemma THINKING] step 14 · 300ch
-    Okay, so `ref_table['material'] == mat` should be a boolean array.
-    Wait, why did I get `ValueError: Calling nonzero on 0d arrays...`? This happens when you try to treat a scalar as an array or vice versa in some numpy operations.
-    
-    Let me just use basic boolean indexing which always works with numpy.
-[13:53:22.193] [Gemma TOOL_CALLS] step 14 · 1개
-    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef extract_peaks(x, y):\n    if len(y) == 0: return np.array([])\n    # We will use a prominence of 5% for T120 and something sensible for reference spectra.\n    # But the user says \"ratio... to reference peaks\". I'll try 5% first, then 1% fallback.\n    p = 0.05 * (np.max(y) - np.min(y))\n    pk, _ = find_peaks(y, prominence=p)\n    if len(pk) == 0:\n        p_low = 0.01 * (np.max(y) - np.min(y))\n        pk, _ = find_peaks(y, prominence=p_low)\n    return x[pk]\n\nt120_x 
-    … <1727자 생략>)
-[13:53:22.194] [Gemma STATS] prompt 28694 tok · out 1065 tok · wall 18.39s · eval 17.64s (60.4 tok/s) · load 0.25s · done=stop
-[13:53:22.194] [ReAct REASONING] step 14 · 도구 1개 실행 결정 → run_analysis
-[13:53:22.194] [ReAct ACTING] step 14 · run_analysis
-    {"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef extract_peaks(x, y):\n    if len(y) == 0: return np.array([])\n    # We will use a prominence of 5% for T120 and something sensible for reference spectra.\n    # But the user says \"ratio... to reference peaks\". I'll try 5% first, then 1% fallback.\n    p = 0.05 * (np.max(y) - np.min(y))\n    pk, _ = find_peaks(y, prominence=p)\n    if len(pk) == 0:\n        p_low = 0.01 * (np.max(y) - np.min(y))\n        pk, _ = find_peaks(y, prominence=p_low)\n    return x[pk]\n\nt120_x = t120_table['raman_shift_cm-1']\nt120_y = t120_table['intensity']\n# Strictly 5% for T120 as per prompt.\np_t120 = 0.05 * (np.max(t120_y) - np.min(t120_y))\npk_t120, _ = find_peaks(t120_y, prominence=p_t120)\nt120_peaks = t120_x[pk_t120]\n\nmaterials = np.unique(ref_table['material'])\nfinal_results = {}\n\nfor mat in materials:\n    # Use simple boolean indexing\n    mat_mask = (ref_table['mater
-    … <1327자 생략>
-[13:53:23.317] [ReAct OBSERVATION] step 14 · run_analysis · ok · 1123 ms
-    {"ok": true, "stdout": "\nBest material: PET with ratio 0.0000\n", "image_count": 0, "images": []}
-[13:53:23.318] [Gemma <- PROMPT] step 15 · ReAct propose · 31 msgs
-    system(9402ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch) · ai(0ch)[run_analysis] · tool(93ch) · ai(0ch)[run_analysis] · tool(212ch) · ai(0ch)[run_analysis] · tool(280ch) · ai(0ch)[run_analysis] · tool(1076ch) · ai(0ch)[run_analysis] · tool(178ch) · ai(0ch)[run_analysis] · tool(210ch) · ai(0ch)[run_analysis] · tool(1141ch) · ai(0ch)[run_analysis] · tool(896ch) · ai(0ch)[run_analysis] · tool(98ch)
-[13:53:31.195] [Gemma THINKING] step 15 · 657ch
-    Okay, I'm still getting zero matches and no prints for materials. This is extremely strange. Let me check the `mat_mask` length.
-    
-    Maybe the problem is that I am not printing anything because of an error? No, it says `ok: true`. But then why are there no lines like `polystyrene: peaks=..., matched=...`?
-    Wait! The `stdout` just shows `Best material: PET with ratio 0.0000`. This means the loop over materials probably didn't execute any prints, or the `final_results` was populated but nothing printed? No, I have a print inside the loop.
-    
-    If the loop is running and not printing, maybe `materials` is empty?
-    Let me check `np.unique(ref_table['material'])`.
-[13:53:31.195] [Gemma TOOL_CALLS] step 15 · 1개
-    1) run_analysis({"code": "import numpy as np\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nref_table = get_table(files, '2026-08-10/reference_library.csv')\nmats = np.unique(ref_table['material'])\nprint(f\"Materials found: {mats}\")\nprint(f\"T120 range: {np.max(get_table(files, '2026-08-10/T120.csv')['intensity'])} - {np.min(get_table(files, '2026-08-10/T120.csv')['intensity'])}\")\n", "file_ids": ["2026-08-10/T120.csv", "2026-08-10/reference_library.csv"]})
-[13:53:31.195] [Gemma STATS] prompt 29812 tok · out 409 tok · wall 7.88s · eval 6.80s (60.2 tok/s) · load 0.24s · done=stop
-[13:53:31.195] [ReAct REASONING] step 15 · 도구 1개 실행 결정 → run_analysis
-[13:53:31.196] [ReAct ACTING] step 15 · run_analysis
-    {"code": "import numpy as np\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nref_table = get_table(files, '2026-08-10/reference_library.csv')\nmats = np.unique(ref_table['material'])\nprint(f\"Materials found: {mats}\")\nprint(f\"T120 range: {np.max(get_table(files, '2026-08-10/T120.csv')['intensity'])} - {np.min(get_table(files, '2026-08-10/T120.csv')['intensity'])}\")\n", "file_ids": ["2026-08-10/T120.csv", "2026-08-10/reference_library.csv"]}
-[13:53:31.711] [ReAct OBSERVATION] step 15 · run_analysis · ok · 515 ms
-    {"ok": true, "stdout": "Materials found: ['PET' 'PMMA' 'aragonite' 'calcite' 'polystyrene' 'silicon']\nT120 range: 998.939361 - -19.597471\n", "image_count": 0, "images": []}
-[13:53:31.711] [Gemma <- PROMPT] step 16 · ReAct propose · 33 msgs
-    system(9402ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch) · ai(0ch)[run_analysis] · tool(93ch) · ai(0ch)[run_analysis] · tool(212ch) · ai(0ch)[run_analysis] · tool(280ch) · ai(0ch)[run_analysis] · tool(1076ch) · ai(0ch)[run_analysis] · tool(178ch) · ai(0ch)[run_analysis] · tool(210ch) · ai(0ch)[run_analysis] · tool(1141ch) · ai(0ch)[run_analysis] · tool(896ch) · ai(0ch)[run_analysis] · tool(98ch) · ai(0ch)[run_analysis] · tool(174ch)
-[13:53:47.183] [Gemma THINKING] step 16 · 548ch
-    So the materials are there. Why is the loop not printing?
-    Let's look at my code: `for mat in materials: ... print(f"{mat}: peaks={len(ref_peaks)}, matched={matched_count}, ratio={ratio:.4f}")`.
-    
-    Wait, I might have a logic error where the matching fails so badly that it doesn't print? No, the print is at the end of the loop.
-    Unless... an exception is being swallowed? No, `run_analysis` returns errors.
-    
-    Let me try one last time, very simply. I will extract peaks for T120 and ONLY check against ONE material (Polystyrene) to see what's happening.
-[13:53:47.184] [Gemma TOOL_CALLS] step 16 · 1개
-    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef get_peaks(x, y):\n    p = 0.05 * (np.max(y) - np.min(y))\n    pk, _ = find_peaks(y, prominence=p)\n    return x[pk]\n\nt120_peaks = get_peaks(t120_table['raman_shift_cm-1'], t120_table['intensity'])\nprint(f\"T120 peaks: {t120_peaks}\")\n\nmat = \"polystyrene\"\nmask = ref_table['material'] == mat\n# Take only the first spectrum of this material for a test\nsid = ref_table['spectrum_id'][mask][0]\nsid_mask = (ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)
-    … <975자 생략>)
-[13:53:47.185] [Gemma STATS] prompt 30315 tok · out 887 tok · wall 15.47s · eval 14.77s (60.0 tok/s) · load 0.24s · done=stop
-[13:53:47.185] [ReAct REASONING] step 16 · 도구 1개 실행 결정 → run_analysis
-[13:53:47.185] [ReAct ACTING] step 16 · run_analysis
-    {"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nt120_table = get_table(files, '2026-08-10/T120.csv')\nref_table = get_table(files, '2026-08-10/reference_library.csv')\n\ndef get_peaks(x, y):\n    p = 0.05 * (np.max(y) - np.min(y))\n    pk, _ = find_peaks(y, prominence=p)\n    return x[pk]\n\nt120_peaks = get_peaks(t120_table['raman_shift_cm-1'], t120_table['intensity'])\nprint(f\"T120 peaks: {t120_peaks}\")\n\nmat = \"polystyrene\"\nmask = ref_table['material'] == mat\n# Take only the first spectrum of this material for a test\nsid = ref_table['spectrum_id'][mask][0]\nsid_mask = (ref_table['spectrum_id'] == sid) & (ref_table['material'] == mat)\ny = ref_table['intensity'][sid_mask]\nx = ref_table['raman_shift_cm-1'][sid_mask]\n\n# Try different prominences for the reference spectrum\nfor p_perc in [0.05, 0.02, 0.01, 0.005]:\n    p_val = p_perc * (np.max(y) - np.min(y))\n    pk, _ = find_peaks(y, prominence=p_val)\n    print(f\"Prominence {p_perc*100}%: found {len(pk)} peaks\")\n    if len(pk) > 0:\n        print(f\"Peaks: {x[pk]}\")\n\n
-    … <575자 생략>
-[13:53:48.304] [ReAct OBSERVATION] step 16 · run_analysis · FAIL · 1119 ms
-    {"ok": false, "error": "ValueError: zero-size array to reduction operation maximum which has no identity", "stdout": "T120 peaks: [ 631.  702.  797.  857. 1096. 1117. 1289. 1417. 1614. 1728.]\n", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 396, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 30, in <module>\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\.venv\\Lib\\site-packages\\numpy\\_core\\fromnumeric.py\", line 3123, in max\n    return _wrapreduction(a, np.maximum, 'max', axis, None, out,\n                          keepdims=keepdims, initial=initial, where=where)\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\.venv\\Lib\\site-packages\\numpy\\_core\\fromnumeric.py\", line 83, in _wrapreduction\n    return ufunc.reduce(obj, axis, dtype, out, **passkwargs)\n           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: zero-size array to reduction operation maximum which has no identity\n"}
-[13:53:48.305] [Gemma <- PROMPT] step 17 · ReAct propose · 35 msgs
-    system(9402ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch) · ai(0ch)[run_analysis] · tool(93ch) · ai(0ch)[run_analysis] · tool(212ch) · ai(0ch)[run_analysis] · tool(280ch) · ai(0ch)[run_analysis] · tool(1076ch) · ai(0ch)[run_analysis] · tool(178ch) · ai(0ch)[run_analysis] · tool(210ch) · ai(0ch)[run_analysis] · tool(1141ch) · ai(0ch)[run_analysis] · tool(896ch) · ai(0ch)[run_analysis] · tool(98ch) · ai(0ch)[run_analysis] · tool(174ch) · ai(0ch)[run_analysis] · tool(1151ch)
-[13:53:54.344] [Gemma THINKING] step 17 · 296ch
-    Wait... I keep getting `ValueError: zero-size array` when accessing the reference library. This means my boolean mask is returning an empty result!
-    
-    BUT, the `inspect_file` said there are 21612 rows and a head showing "polystyrene".
-    
-    Let me check if `ref_table['material'] == mat` actually works.
-[13:53:54.345] [Gemma TOOL_CALLS] step 17 · 1개
-    1) run_analysis({"code": "import numpy as np\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nref_table = get_table(files, '2026-08-10/reference_library.csv')\nprint(\"Material column type:\", ref_table['material'].dtype)\nprint(\"Sample of material col:\", ref_table['material'][:5])\n\nmat = \"polystyrene\"\nmask = (ref_table['material'] == mat)\nprint(f\"Mask for {mat} sum: {np.sum(mask)}\")\nif np.sum(mask) > 0:\n    print(\"Mask worked!\")\nelse:\n    print(\"Mask failed! Maybe there are spaces in the strings?\")\n    print(\"Actual unique values:\", np.unique(ref_table['material']))\n", "file_ids": ["2026-08-10/reference_library.csv"]})
-[13:53:54.345] [Gemma STATS] prompt 31607 tok · out 315 tok · wall 6.04s · eval 5.26s (59.9 tok/s) · load 0.25s · done=stop
-[13:53:54.345] [ReAct REASONING] step 17 · 도구 1개 실행 결정 → run_analysis
-[13:53:54.345] [ReAct ACTING] step 17 · run_analysis
-    {"code": "import numpy as np\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nref_table = get_table(files, '2026-08-10/reference_library.csv')\nprint(\"Material column type:\", ref_table['material'].dtype)\nprint(\"Sample of material col:\", ref_table['material'][:5])\n\nmat = \"polystyrene\"\nmask = (ref_table['material'] == mat)\nprint(f\"Mask for {mat} sum: {np.sum(mask)}\")\nif np.sum(mask) > 0:\n    print(\"Mask worked!\")\nelse:\n    print(\"Mask failed! Maybe there are spaces in the strings?\")\n    print(\"Actual unique values:\", np.unique(ref_table['material']))\n", "file_ids": ["2026-08-10/reference_library.csv"]}
-[13:53:54.900] [ReAct OBSERVATION] step 17 · run_analysis · FAIL · 554 ms
-    {"ok": false, "error": "AttributeError: 'list' object has no attribute 'dtype'", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 396, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 9, in <module>\nAttributeError: 'list' object has no attribute 'dtype'\n"}
-[13:53:54.900] [Gemma <- PROMPT] step 18 · ReAct propose · 37 msgs
-    system(9402ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch) · ai(0ch)[run_analysis] · tool(93ch) · ai(0ch)[run_analysis] · tool(212ch) · ai(0ch)[run_analysis] · tool(280ch) · ai(0ch)[run_analysis] · tool(1076ch) · ai(0ch)[run_analysis] · tool(178ch) · ai(0ch)[run_analysis] · tool(210ch) · ai(0ch)[run_analysis] · tool(1141ch) · ai(0ch)[run_analysis] · tool(896ch) · ai(0ch)[run_analysis] · tool(98ch) · ai(0ch)[run_analysis] · tool(174ch) · ai(0ch)[run_analysis] · tool(1151ch) · ai(0ch)[run_analysis] · tool(476ch)
-[13:54:14.065] [Gemma THINKING] step 18 · 384ch
-    OH! `ref_table['material']` is a LIST, not a numpy array. That's why the boolean indexing `(ref_table['material'] == mat)` was returning a single `False` (a scalar) instead of a mask array, and then when I tried to use it as an index `y = ref_table['intensity'][mask]`, if `mask` is just `False`, numpy does something weird or fails.
-    
-    I must convert the columns to numpy arrays first!
-[13:54:14.065] [Gemma TOOL_CALLS] step 18 · 1개
-    1) run_analysis({"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nt120_raw = get_table(files, '2026-08-10/T120.csv')\nref_raw = get_table(files, '2026-08-10/reference_library.csv')\n\n# Convert to numpy arrays\nt120_x = np.array(t120_raw['raman_shift_cm-1'])\nt120_y = np.array(t120_raw['intensity'])\n\nref_mat = np.array(ref_raw['material'])\nref_sid = np.array(ref_raw['spectrum_id'])\nref_x = np.array(ref_raw['raman_shift_cm-1'])\nref_y = np.array(ref_raw['intensity'])\n\ndef get_peaks(x, y, prom_frac=0.05):\n    if len(y) == 0: return np.array([])\n    p_val = prom_frac * (np.max(y) - np.min(y))\n    pk, _ = find_peaks(y, prominence=p_val)\n    return x[pk]\n\
-    … <1727자 생략>)
-[13:54:14.066] [Gemma STATS] prompt 32086 tok · out 1102 tok · wall 19.16s · eval 18.44s (59.7 tok/s) · load 0.23s · done=stop
-[13:54:14.066] [ReAct REASONING] step 18 · 도구 1개 실행 결정 → run_analysis
-[13:54:14.066] [ReAct ACTING] step 18 · run_analysis
-    {"code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_table(files, file_id):\n    for f in files:\n        if f['file_id'] == file_id: return f['table']\n    return None\n\nt120_raw = get_table(files, '2026-08-10/T120.csv')\nref_raw = get_table(files, '2026-08-10/reference_library.csv')\n\n# Convert to numpy arrays\nt120_x = np.array(t120_raw['raman_shift_cm-1'])\nt120_y = np.array(t120_raw['intensity'])\n\nref_mat = np.array(ref_raw['material'])\nref_sid = np.array(ref_raw['spectrum_id'])\nref_x = np.array(ref_raw['raman_shift_cm-1'])\nref_y = np.array(ref_raw['intensity'])\n\ndef get_peaks(x, y, prom_frac=0.05):\n    if len(y) == 0: return np.array([])\n    p_val = prom_frac * (np.max(y) - np.min(y))\n    pk, _ = find_peaks(y, prominence=p_val)\n    return x[pk]\n\n# T120 Peaks (Strict 5%)\nt120_peaks = get_peaks(t120_x, t120_y, prom_frac=0.05)\nprint(f\"T120 peaks: {t120_peaks}\")\n\nmaterials = np.unique(ref_mat)\nfinal_results = {}\n\nfor mat in materials:\n    mat_mask = (ref_mat == mat)\n    u_ids = np.unique(ref_sid[mat_mask])\n    \n    # Average for this material\n    y_all = []\n    x_vals = None\n    for sid in u_ids:\n        sid_mask = (ref_sid 
-    … <1327자 생략>
-[13:54:15.208] [ReAct OBSERVATION] step 18 · run_analysis · ok · 1142 ms
-    {"ok": true, "stdout": "T120 peaks: [ 631.  702.  797.  857. 1096. 1117. 1289. 1417. 1614. 1728.]\nPET: ref_peaks=10, matched=10, ratio=1.0000\nPMMA: ref_peaks=7, matched=1, ratio=0.1429\naragonite: ref_peaks=4, matched=1, ratio=0.2500\ncalcite: ref_peaks=4, matched=0, ratio=0.0000\npolystyrene: ref_peaks=8, matched=1, ratio=0.1250\nsilicon: ref_peaks=1, matched=0, ratio=0.0000\n\nBest material: PET with ratio 1.0000\n", "image_count": 0, "images": []}
-[13:54:15.209] [Gemma <- PROMPT] step 19 · ReAct propose · 39 msgs
-    system(9402ch) · human(811ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file,inspect_file] · tool(867ch) · tool(1090ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(184ch) · ai(0ch)[run_analysis] · tool(1122ch) · ai(0ch)[run_analysis] · tool(93ch) · ai(0ch)[run_analysis] · tool(212ch) · ai(0ch)[run_analysis] · tool(280ch) · ai(0ch)[run_analysis] · tool(1076ch) · ai(0ch)[run_analysis] · tool(178ch) · ai(0ch)[run_analysis] · tool(210ch) · ai(0ch)[run_analysis] · tool(1141ch) · ai(0ch)[run_analysis] · tool(896ch) · ai(0ch)[run_analysis] · tool(98ch) · ai(0ch)[run_analysis] · tool(174ch) · ai(0ch)[run_analysis] · tool(1151ch) · ai(0ch)[run_analysis] · tool(476ch) · ai(0ch)[run_analysis] · tool(456ch)
-[13:54:23.696] [Gemma THINKING] step 19 · 101ch
-    Perfect! The result is now clear.
-    
-    T120 peaks match PET perfectly (ratio = 1.0).
-    The material is PET.
-[13:54:23.696] [Gemma TEXT] step 19
-    To extract the peak positions of `T120.csv` and identify the most similar material from `reference_library.csv`, I performed a spectral analysis using Python in a sandbox environment.
-    
-    **Analysis Procedure:**
-    1.  **Peak Extraction for T120**: Using the specified prominence criterion (5% of the intensity range), I identified 10 peaks in the spectrum of `T120.csv` at positions: `[631, 702, 797, 857, 1096, 1117, 1289, 1417, 1614, 1728]` cm⁻¹.
-    2.  **Reference Library Processing**: For each material in the library (PET, PMMA, aragonite, calcite, polystyrene, silicon), I averaged the available spectra and extracted their characteristic peak positions using a prominence of 5% (falling back to 1% where necessary).
-    3.  **Matching Logic**: I implemented a 1:1 nearest-neighbor pairing between the sample peaks and the reference peaks with a tolerance of $\pm 3$ cm⁻¹. The similarity was quantified as the ratio of matched peaks to total reference peaks for that material.
-    
-    **Results:**
-    - **PET**: All 10 reference peaks were matched by T120 (Ratio: 1.0000).
-    - **Aragonite**: 1 peak matched out of 4 (Ratio: 0.2500).
-    - **PMMA**: 1 peak matched out of 7 (Ratio: 0.1429).
-    - **Polystyrene**: 1 peak matched out of 8 (Ratio: 0.1250).
-    - **Calcite/Silicon**: No significant matches found.
-    
-    The spectrum of `T120.csv` is most similar to PET, showing a perfect match for its characteristic peaks.
-    
-    ```json
-    {"material": "PET"}
-    ```
-[13:54:23.696] [Gemma STATS] prompt 33445 tok · out 463 tok · wall 8.49s · eval 7.78s (59.5 tok/s) · load 0.23s · done=stop
-[13:54:23.696] [ReAct REASONING] step 19 · 도구 호출 없음 → 최종 보고서 작성으로 턴 종료
-[13:54:23.697] [FINAL] 271.25s · LLM 19회 · 도구 19회 · dose 0.00 mJ
-    To extract the peak positions of `T120.csv` and identify the most similar material from `reference_library.csv`, I performed a spectral analysis using Python in a sandbox environment.
-    
-    **Analysis Procedure:**
-    1.  **Peak Extraction for T120**: Using the specified prominence criterion (5% of the intensity range), I identified 10 peaks in the spectrum of `T120.csv` at positions: `[631, 702, 797, 857, 1096, 1117, 1289, 1417, 1614, 1728]` cm⁻¹.
-    2.  **Reference Library Processing**: For each material in the library (PET, PMMA, aragonite, calcite, polystyrene, silicon), I averaged the available spectra and extracted their characteristic peak positions using a prominence of 5% (falling back to 1% where necessary).
-    3.  **Matching Logic**: I implemented a 1:1 nearest-neighbor pairing between the sample peaks and the reference peaks with a tolerance of $\pm 3$ cm⁻¹. The similarity was quantified as the ratio of matched peaks to total reference peaks for that material.
-    
-    **Results:**
-    - **PET**: All 10 reference peaks were matched by T120 (Ratio: 1.0000).
-    - **Aragonite**: 1 peak matched out of 4 (Ratio: 0.2500).
-    - **PMMA**: 1 peak matched out of 7 (Ratio: 0.1429).
-    - **Polystyrene**: 1 peak matched out of 8 (Ratio: 0.1250).
-    - **Calcite/Silicon**: No significant matches found.
-    
-    The spectrum of `T120.csv` is most similar to PET, showing a perfect match for its characteristic peaks.
-    
-    ```json
-    {"material": "PET"}
-    ```
+    Let's write the code.
+[19:08:58.273] [Gemma TEXT] step 4 · (빈 응답 — 컨텍스트 초과 의심)
+[19:08:58.273] [Gemma STATS] prompt 17220 tok · out 5195 tok · wall 41.94s · eval 41.47s (125.3 tok/s) · load 0.23s · done=stop
+[19:08:58.273] [ERROR] 49.19s · LLM 4회 · 도구 3회
+    The model returned an empty reply (no text, no tool call). This is usually a context-window overflow - check _NUM_CTX and the Ollama host.
 ══════════════════════════════════════════════════════════════════════════════
 

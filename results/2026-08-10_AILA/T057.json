@@ -1,0 +1,167 @@
+{
+  "task": "T057",
+  "axis": "data processing",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Check whether T057.csv contains spikes (5-point moving median, 5x MAD). If it does, remove them by linear interpolation and then report the major peaks again (prominence 5% of range).",
+  "criteria": "EXACT(verdict) + SET(index EXACT, peak ±3 cm-1)",
+  "checks": [
+    {
+      "name": "peak positions",
+      "passed": true,
+      "score": 1.0,
+      "detail": "9/9 matched (submitted 9) [620.0, 796.0, 1001.0, 1031.0, 1156.0, 1183.0]... vs [620.0, 796.0, 1001.0, 1031.0, 1156.0, 1183.0]...",
+      "weight": 1.0,
+      "kind": "SET"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T057.csv"
+  ],
+  "answer_text": "The analysis of the spectrum in `T057.csv` was performed by first identifying and removing spikes using a 5-point moving median and 5x MAD threshold. This process ensured that transient noise or instrumentation artifacts were removed before peak detection. Subsequent peak identification was conducted based on a prominence requirement of 5% of the total signal range to isolate primary features.\n\n**Analysis Summary:**\n*   **Spike Detection**: A sliding window of 5 points was used to calculate local median and MAD. Points exceeding $5 \\times$ MAD relative to their neighbors were identified as spikes and replaced via linear interpolation across the original index grid.\n*   **Peak Analysis**: Following spike removal, the spectrum's peak features were analyzed. \"Major\" peaks are defined here as those exceeding a prominence of 5% of the total signal range ($\\approx$68 units based on an observed range of $\\sim$1360).\n\nThe identified major peaks (in cm$^{-1}$) after processing are provided in the JSON block below.\n\n```json\n{\"peaks\": [620.0, 796.0, 1001.0, 1031.0, 1156.0, 1183.0, 1450.0, 1583.0, 1602.0]}\n```",
+  "answer_json": {
+    "peaks": [
+      620.0,
+      796.0,
+      1001.0,
+      1031.0,
+      1156.0,
+      1183.0,
+      1450.0,
+      1583.0,
+      1602.0
+    ]
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/T057.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as1647509836\nimport numpy as np\nfrom scipy.signal import find_peaks\nfrom scipy.ndimage import median_filter\n\n# Load data from the file T057.csv\n# The report says 'raman_shift_cm-1' and 'intensity' are the columns\nx = data['T057.csv']['raman_shift_cm-1']\ny = data['T057.csv']['intensity']\n\n# 1. Spike Detection and Removal\n# We use a 5-point moving median (window size 5).\n# A spike is defined as |y - med| > 5 * MAD\n# For local calculation, we'll use the same window for both median and MAD to be consistent with \"5-point\".\n\ndef identify_spikes(y):\n    # Using a sliding window of 5. pad the edges so it doesn't shrink.\n    # Alternatively, since 1800 points is large compared to 5, we can use reflective padding or just ignore boundaries.\n    # To be precise with \"5-point moving median\", we calculate at each point.\n    \n    m = np.zeros_like(y)\n    # A simple way to implement a sliding window of size 5:\n    for i in range(len(y)):\n        start = max(0, i - 2)\n        end = min(len(y), i + 3)\n        m[i] = np.median(y[start:end])\n    \n    # For MAD (Median Absolute Deviation), we need a local calculation too?\n    # \"5-point moving median, 5x MAD\" usually implies a local check for each point.\n    # If the text doesn't specify a separate window for MAD, it's common to use the same window context.\n    # However, many systems define MAD globally or on a larger rolling basis.\n    # But given \"5-point\", I will stick to that local scope.\n    \n    spikes = np.zeros_like(y, dtype=bool)\n    for i in range(len(y)):\n        start = max(0, i - 2)\n        end = min(len(y), i + 3)\n        window = y[start:end]\n        local_med = np.median(window)\n        # MAD is median(|x - med|)\n        local_mad = np.median(np.abs(window - local_med))\n        \n        if abs(y[i] - local_med) > 5 * local_mad:\n            spikes[i] = True\n    return spikes\n\n# However, the prompt implies \"5-point moving median\" as a general tool.\n# Let's re-read: \"Determine if it contains spikes (5-point moving median, 5x MAD)\".\n# This is a standard algorithm for outlier detection in signals.\n# Usually, this means: any point where y[i] deviates from its local average/median by more than 5 times the noise floor estimate (MAD).\n\n# Let's try to implement it elegantly.\n# To find \"prominence 5% of range\", we need range = max - min.\nrange_y = np.max(y) - np.min(y)\nthreshold = 0.05 * range_y\n\ndef identify_spikes_refined(y):\n    # We'll use a local window for both median and MAD to adhere to \"5-point\" logic.\n    m = np.zeros_like(y)\n    mad = np.zeros_like(y)\n    # Using medfilt isn't quite enough because we need the raw median and median of absolute deviations separately.\n    # But since it's a 5-point window, we can just do it in chunks or with a loop.\n    for i in range(len(y)):\n        w = y[max(0, i-2):min(len(y), i+3)]\n        m[i] = np.median(w)\n        mad[i] = np.median(np.abs(w - m[i]))\n    \n    # Identify indices where difference > 5 * mad\n    is_spike = np.zeros(len(y), dtype=bool)\n    for i in range(len(y)):\n        if abs(y[i] - m[i]) > 5 * mad[i]:\n            is_spike[i] = True\n    return is_spike\n\nspikes = identify_spikes_refined(y)\nprint(f\"Number of spikes detected: {np.sum(spikes)}\")\n\n# Remove spikes by linear interpolation\n# A robust way: find the x-indices that are NOT spikes and interpolate them onto the full range.\nnon_spike_indices = np.where(~spikes)[0]\nif len(non_sigma_idx := non_spike_indices) == 0: # fallback if all are spikes (unlikely)\n    # Just use original data if everything is flagged as a spike\n    y_cleaned = y\nelse:\n    x_clean = x[non_sigma_idx]\n    y_clean = y[non_sigma_idx]\n    y_cleaned = np.interp(np.arange(len(y)), non_sigma_idx, y_clean)\n\n# Find peaks in the cleaned signal.\n# prominence 5% of range (range is max - min of the original or current?)\n# Usually, it's done on the corrected data.\ncurrent_range = np.max(y_cleaned) - np.min(y_cleaned)\npeak_threshold = 0.05 * current_range\n\npeaks, _ = find_peaks(y_cleaned, height=peak_threshol...<잘림>"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\n\n# Load the data\nx = data['T057.csv']['raman_shift_cm-1']\ny = data['T057.csv']['intensity']\n\ndef clean_and_find_peaks(x, y):\n    n = len(y)\n    med_vals = np.zeros(n)\n    mad_vals = np.zeros(n)\n    \n    # Calculate local median and MAD for each point to find spikes\n    for i in range(n):\n        # Define the window (up to 5 points, centered at i)\n        start = max(0, i - 2)\n        end = min(n, i + 3)\n        window = y[start:end]\n        \n        med_vals[i] = np.median(window)\n        # MAD is the median of absolute differences from the mean (or median). \n        # For small windows and spike detection, median of |x - med| is standard.\n        mad_vals[i] = np.median(np.abs(window - med_vals[i]))\n    \n    # Identify spikes: |y - local_med| > 5 * local_mad\n    is_spike = np.zeros(n, dtype=bool)\n    for i in range(n):\n        if mad_vals[i] > 0 and abs(y[i] - med_vals[i]) > 5 * mad_vals[i]:\n            is_spike[i] = True\n        elif mad_vals[i] == 0 and y[i] != med_vals[i]: # Handle edge case where all points in window are same\n            # If value differs from mean but variation is zero, it's a spike.\n            # Except if the whole neighborhood is identical to that value.\n            if abs(y[i] - med_vars[i]) > 0: # wait, logic check...\n                pass # let's simplify\n\n    # Correction: Just use standard thresholding based on local stats\n    # Any point where y[i] != med_vals[i] AND |y[i]-med| > 5*mad is a spike.\n    # If mad is very small, we treat it as zero or tiny for the purpose of the threshold.\n    for i in range(n):\n        if abs(y[i] - med_vals[i]) > 5 * mad_vals[i]:\n            is_spike[i] = True\n\n    # Interpolate spikes:\n    # Use a mask to find \"good\" points.\n    # Since x is usually linear, we can just use the indices of good points.\n    good_indices = np.where(~is_spike)[0]\n    \n    if len(good_indices) == 0:\n        return x[:], y[:] # Fallback\n\n    y_cleaned = np.zeros(n)\n    # Linearly interpolate the values onto the original grid of indices.\n    # This ensures we don't lose resolution or shift positions.\n    y_cleaned = np.interp(np.arange(n), good_indices, y[good_indices])\n    \n    # Identify major peaks\n    # \"prominence 5% of range\" -> Range is max - min.\n    r = np.max(y_cleaned) - np.min(y_cleaned)\n    h = 0.05 * r\n    \n    peaks, _ = signal.find_peaks(y_cleaned, prominence=h)\n    return x[peaks].tolist()\n\n# Run the logic and print results for inspection.\nresults = clean_and_find_peaks(x, y)\nprint(f\"Found {len(results)} peaks: {results}\")\n"
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy import signal\n\n# Data is accessible via files[i][\"table\"][\"column_name\"]\nfile_idx = 0\nx = files[file_idx][\"table\"][\"raman_shift_cm-1\"]\ny = files[file_idx][\"table\"][\"intensity\"]\n\ndef clean_and_find_peaks(x, y):\n    n = len(y)\n    med_vals = np.zeros(n)\n    mad_vals = np.zeros(n)\n    \n    for i in range(n):\n        # 5-point moving window centered at index i\n        start = max(0, i - 2)\n        end = min(n, i + 3)\n        window = y[start:end]\n        med_vals[i] = np.median(window)\n        mad_vals[i] = np.median(np.abs(window - med_vals[i]))\n    \n    # Identify spikes where |y_i - median| > 5 * MAD\n    is_spike = np.zeros(n, dtype=bool)\n    for i in range(n):\n        if mad_vals[i] != 0 and abs(y[i] - med_vals[i]) > 5 * mad_vals[i]:\n            is_spike[i] = True\n        elif mad_vals[i] == 0 and y[i] != med_vals[i]:\n            # If median is stable (all same) but point differs, it's a spike.\n            is_spike[i] = True\n\n    # Interpolate spikes: use the indices of valid data points to map back to original grid\n    good_indices = np.where(~is_spike)[0]\n    if len(good_indices) == 0:\n        y_cleaned = y\n    else:\n        # Use linear interpolation to fill in segments where spikes were removed\n        y_cleaned = np.interp(np.arange(n), good_indices, y[good_indices])\n    \n    # Peak Finding\n    peak_range = np.max(y_cleaned) - np.min(y_cleaned)\n    prominence_threshold = 0.05 * peak_range\n    \n    # Find peaks with the calculated prominence.\n    peaks, _ = signal.find_peaks(y_cleaned, prominence=prominence_threshold)\n    return x[peaks].tolist()\n\npeaks = clean_and_find_peaks(x, y)\nprint(f\"Peaks: {peaks}\")\n",
+        "file_ids": [
+          "2026-08-10/T057.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 15.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 15.0
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "last_requested_power_percent": 15.0,
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 3,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255,
+    "power_setpoint_pct": 15.0
+  },
+  "session_id": "bench_2026-08-10_AILA_AILA_T057_e42837",
+  "elapsed_s": 90.48,
+  "errors": [],
+  "warnings": [
+    "retried 1x after an infrastructure failure"
+  ],
+  "timed_out": false,
+  "abandoned": false
+}
