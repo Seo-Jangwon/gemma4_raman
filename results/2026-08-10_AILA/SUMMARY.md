@@ -1,20 +1,20 @@
 # Raman agent benchmark
 
-- Agent: **CoALA**
-- Run: `2026-08-10_CoALA`
-- Generated: 2026-08-10T13:45:25
+- Agent: **AILA**
+- Run: `2026-08-10_AILA`
+- Generated: 2026-08-10T14:00:21
 - Instrument: 532.021 nm, centre 1200.0 cm-1, 1024 px
 
 ## Result
 
-**Solved 2 / 3 gradable tasks (66.7%)**
+**Solved 3 / 3 gradable tasks (100.0%)**
 
 A task counts as solved only when every one of its checks passes. There is no partial credit.
 
 | | tasks |
 |---|---|
-| Solved | 2 |
-| Failed | 1 |
+| Solved | 3 |
+| Failed | 0 |
 | Not gradable - instrument limits (`blocked`) | 0 |
 | Not gradable - run failed (`error`) | 0 |
 | **Total defined** | **3** |
@@ -25,16 +25,15 @@ A task counts as solved only when every one of its checks passes. There is no pa
 
 | Axis | Solved | Gradable | Rate | Excluded |
 |---|---:|---:|---:|---:|
-| identification | 2 | 2 | 100.0% | 0 |
-| procedure | 0 | 1 | 0.0% | 0 |
+| identification | 3 | 3 | 100.0% | 0 |
 
 ## Per task
 
 | Task | Axis | Result | Checks | First failure |
 |---|---|---|---:|---|
-| T067 | procedure | **fail** | 3/4 | reported SNR difference: 925.896 (expected 10.2307, rel.err=89.5 ≤ 0.05)  [answer] |
+| T120 | identification | pass | 1/1 |  |
+| T124 | identification | pass | 1/1 |  |
 | T125 | identification | pass | 1/1 |  |
-| T128 | identification | pass | 1/1 |  |
 
 ---
 

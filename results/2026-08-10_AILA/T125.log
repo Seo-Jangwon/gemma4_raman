@@ -1,0 +1,404 @@
+══════════════════════════════════════════════════════════════════════════════
+ AILA · T125 · gemma4:31b @ http://192.168.1.15:11434
+ session : bench_2026-08-10_AILA_AILA_T125_1749dc
+ started : 2026-08-10 13:57:45
+ thinking: ON — gemma4:31b capabilities=['completion', 'vision', 'tools', 'thinking'] → thinking 지원
+══════════════════════════════════════════════════════════════════════════════
+
+[13:57:45.933] [QUESTION]
+    Report the material in reference_library.csv most similar to T125.csv, and present at least two basis peaks that distinguish it from the second-ranked candidate. 
+    
+    ---
+    When you are done, end your reply with a JSON block holding the values you were asked to
+    report, like this:
+    
+    ```json
+    {"key": value, ...}
+    ```
+    
+    The JSON block must include these keys, spelled exactly like this, with the shape described for each:
+      "material": string - one of "polystyrene", "PET", "PMMA", "calcite", "aragonite", "silicon"
+    
+    Give plain JSON numbers and strings - no units, no LaTeX, no thousands separators. If the
+    task asked you to refuse, explain, or ask a question instead of measuring, say so in plain
+    text and omit the block.
+[13:57:45.995] [Gemma <- PROMPT] step 1 · ReAct propose · 2 msgs
+    system(9236ch) · human(712ch)
+[13:57:56.337] [Gemma THINKING] step 1 · 1013ch
+    The user wants me to identify which material from `reference_library.csv` is most similar to the spectrum in `T125.csv`. I also need to find at least two basis peaks that distinguish the top candidate from the second-ranked one.
+    
+    Plan:
+    1. List uploaded files to get the `file_id` for `reference_library.csv` and `T125.csv`.
+    2. Inspect both files to understand their structure (column names, data types).
+    3. Use `run_analysis` to:
+        a. Load the target spectrum (`T125.csv`).
+        b. Load all reference spectra from `reference_library.csv`.
+        c. Compare the target spectrum to each reference material using a similarity metric (e.g., correlation or Euclidean distance of normalized intensities).
+        d. Rank the materials by similarity.
+        e. Identify the top and second-best candidates.
+        f. Find peak positions that are present in the top candidate but different or absent in the second one, or vice versa.
+    4. Report the most similar material and the distinguishing peaks.
+    
+    Let's start by listing the files.
+[13:57:56.337] [Gemma TOOL_CALLS] step 1 · 1개
+    1) list_uploaded_files({})
+[13:57:56.337] [Gemma STATS] prompt 15726 tok · out 264 tok · wall 10.34s · eval 4.21s (62.7 tok/s) · load 0.28s · done=stop
+[13:57:56.337] [ReAct REASONING] step 1 · 도구 1개 실행 결정 → list_uploaded_files
+[13:57:56.337] [ReAct ACTING] step 1 · list_uploaded_files
+    {}
+[13:57:56.339] [ReAct OBSERVATION] step 1 · list_uploaded_files · ok · 1 ms
+    {"ok": true, "count": 2, "files": [{"file_id": "2026-08-10/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829}, {"file_id": "2026-08-10/T125.csv", "filename": "T125.csv", "kind": "text", "bytes": 36672}]}
+[13:57:56.342] [Gemma <- PROMPT] step 2 · ReAct propose · 4 msgs
+    system(9236ch) · human(712ch) · ai(0ch)[list_uploaded_files] · tool(246ch)
+[13:57:58.715] [Gemma THINKING] step 2 · 183ch
+    I have the file IDs:
+    - `reference_library.csv`: `2026-08-10/reference_library.csv`
+    - `T125.csv`: `2026-08-10/T125.csv`
+    
+    Now I will inspect both files to see how the data is organized.
+[13:57:58.715] [Gemma TOOL_CALLS] step 2 · 1개
+    1) inspect_file({"file_id": "2026-08-10/reference_library.csv"})
+[13:57:58.716] [Gemma STATS] prompt 16119 tok · out 110 tok · wall 2.37s · eval 1.74s (63.0 tok/s) · load 0.25s · done=stop
+[13:57:58.716] [ReAct REASONING] step 2 · 도구 1개 실행 결정 → inspect_file
+[13:57:58.716] [ReAct ACTING] step 2 · inspect_file
+    {"file_id": "2026-08-10/reference_library.csv"}
+[13:57:58.760] [ReAct OBSERVATION] step 2 · inspect_file · ok · 44 ms
+    {"ok": true, "file_id": "2026-08-10/reference_library.csv", "filename": "reference_library.csv", "kind": "text", "bytes": 746829, "n_rows": 21612, "n_cols": 4, "columns": ["spectrum_id", "material", "raman_shift_cm-1", "intensity"], "dtypes": {"spectrum_id": "text", "material": "text", "raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 21612}, "intensity": {"min": 0.017118, "max": 1000.0, "mean": 25.348885, "n_valid": 21612}}, "head": [["PS_01", "polystyrene", 200.0, 0.072777], ["PS_01", "polystyrene", 201.0, 0.072997], ["PS_01", "polystyrene", 202.0, 0.073218], ["PS_01", "polystyrene", 203.0, 0.07344], ["PS_01", "polystyrene", 204.0, 0.073663]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/reference_library.csv']."}
+[13:57:58.761] [Gemma <- PROMPT] step 3 · ReAct propose · 6 msgs
+    system(9236ch) · human(712ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch)
+[13:58:01.243] [Gemma THINKING] step 3 · 235ch
+    `reference_library.csv` structure:
+    - `spectrum_id`: ID of the spectrum.
+    - `material`: Material name (polystyrene, PET, PMMA, etc.).
+    - `raman_shift_cm-1`: Raman shift axis.
+    - `intensity`: Intensity values.
+    
+    Now let's inspect `T125.csv`.
+[13:58:01.243] [Gemma TOOL_CALLS] step 3 · 1개
+    1) inspect_file({"file_id": "2026-08-10/T125.csv"})
+[13:58:01.243] [Gemma STATS] prompt 16711 tok · out 111 tok · wall 2.48s · eval 1.76s (63.0 tok/s) · load 0.24s · done=stop
+[13:58:01.243] [ReAct REASONING] step 3 · 도구 1개 실행 결정 → inspect_file
+[13:58:01.243] [ReAct ACTING] step 3 · inspect_file
+    {"file_id": "2026-08-10/T125.csv"}
+[13:58:01.267] [ReAct OBSERVATION] step 3 · inspect_file · ok · 23 ms
+    {"ok": true, "file_id": "2026-08-10/T125.csv", "filename": "T125.csv", "kind": "text", "bytes": 36672, "n_rows": 1801, "n_cols": 2, "columns": ["raman_shift_cm-1", "intensity"], "dtypes": {"raman_shift_cm-1": "numeric", "intensity": "numeric"}, "stats": {"raman_shift_cm-1": {"min": 200.0, "max": 2000.0, "mean": 1100.0, "n_valid": 1801}, "intensity": {"min": -17.71307, "max": 1002.955692, "mean": 39.039445, "n_valid": 1801}}, "head": [[200.0, -1.335379], [201.0, 9.535991], [202.0, -1.774465], [203.0, -2.26482], [204.0, 6.43258]], "note": "This is a structural summary only. Decide yourself what each column means (e.g. whether a numeric column is Raman shift in cm-1, intensity, wavelength, a coordinate, or unrelated metadata) - nothing here has been interpreted for you. To compute on the full data, call run_analysis with file_ids=['2026-08-10/T125.csv']."}
+[13:58:01.267] [Gemma <- PROMPT] step 4 · ReAct propose · 8 msgs
+    system(9236ch) · human(712ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[inspect_file] · tool(865ch)
+[13:58:07.361] [Gemma THINKING] step 4 · 886ch
+    `T125.csv` structure:
+    - `raman_shift_cm-1`: Raman shift axis.
+    - `intensity`: Intensity values.
+    
+    Both files use the same range (200 to 2000 cm-1) and 1 cm-1 spacing (based on head).
+    
+    Now I'll write a script in `run_analysis` to:
+    1. Load `T125.csv`.
+    2. Load `reference_library.csv`.
+    3. Group the library by material. Since multiple spectra per material might exist, I'll average them or compare each individually and take the best match. Given the file size, averaging per material is a good start if they are consistent, or just iterating through all unique spectrum IDs. Let's group by `material`.
+    4. Normalize both target and reference spectra (min-max normalization to [0, 1]).
+    5. Calculate similarity using Pearson correlation coefficient.
+    6. Identify the top two materials.
+    7. Find distinguishing peaks between them.
+    
+    I will first check how many unique materials are in the library.
+[13:58:07.362] [Gemma TOOL_CALLS] step 4 · 1개
+    1) run_analysis({"code": "import numpy as np\n\n# Load reference library to see unique materials\nref_file = files['2026-08-10/reference_library.csv']\nmaterials = np.unique(ref_file['table']['material'])\nprint(f\"Materials in library: {materials}\")\n", "file_ids": ["2026-08-10/reference_library.csv"]})
+[13:58:07.362] [Gemma STATS] prompt 17233 tok · out 338 tok · wall 6.09s · eval 5.41s (62.5 tok/s) · load 0.26s · done=stop
+[13:58:07.362] [ReAct REASONING] step 4 · 도구 1개 실행 결정 → run_analysis
+[13:58:07.362] [ReAct ACTING] step 4 · run_analysis
+    {"code": "import numpy as np\n\n# Load reference library to see unique materials\nref_file = files['2026-08-10/reference_library.csv']\nmaterials = np.unique(ref_file['table']['material'])\nprint(f\"Materials in library: {materials}\")\n", "file_ids": ["2026-08-10/reference_library.csv"]}
+[13:58:07.895] [ReAct OBSERVATION] step 4 · run_analysis · FAIL · 532 ms
+    {"ok": false, "error": "TypeError: list indices must be integers or slices, not str", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 396, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 4, in <module>\nTypeError: list indices must be integers or slices, not str\n"}
+[13:58:07.895] [Gemma <- PROMPT] step 5 · ReAct propose · 10 msgs
+    system(9236ch) · human(712ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[inspect_file] · tool(865ch) · ai(0ch)[run_analysis] · tool(486ch)
+[13:58:11.337] [Gemma THINKING] step 5 · 264ch
+    Ah, `files` is a list of dictionaries, not a dictionary. I should access it by index.
+    Wait, the prompt says "Inside the code the file is available as files[i]["table"]["<column name>"]".
+    I passed `file_ids=['2026-08-10/reference_library.csv']`, so it's `files[0]`.
+[13:58:11.338] [Gemma TOOL_CALLS] step 5 · 1개
+    1) run_analysis({"code": "import numpy as np\n\n# Load reference library to see unique materials\nref_data = files[0]['table']\nmaterials = np.unique(ref_data['material'])\nprint(f\"Materials in library: {materials}\")\n", "file_ids": ["2026-08-10/reference_library.csv"]})
+[13:58:11.338] [Gemma STATS] prompt 17735 tok · out 174 tok · wall 3.44s · eval 2.78s (62.6 tok/s) · load 0.24s · done=stop
+[13:58:11.338] [ReAct REASONING] step 5 · 도구 1개 실행 결정 → run_analysis
+[13:58:11.338] [ReAct ACTING] step 5 · run_analysis
+    {"code": "import numpy as np\n\n# Load reference library to see unique materials\nref_data = files[0]['table']\nmaterials = np.unique(ref_data['material'])\nprint(f\"Materials in library: {materials}\")\n", "file_ids": ["2026-08-10/reference_library.csv"]}
+[13:58:11.830] [ReAct OBSERVATION] step 5 · run_analysis · ok · 492 ms
+    {"ok": true, "stdout": "Materials in library: ['PET' 'PMMA' 'aragonite' 'calcite' 'polystyrene' 'silicon']\n", "image_count": 0, "images": []}
+[13:58:11.831] [Gemma <- PROMPT] step 6 · ReAct propose · 12 msgs
+    system(9236ch) · human(712ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[inspect_file] · tool(865ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(142ch)
+[13:58:30.074] [Gemma THINKING] step 6 · 976ch
+    The materials are: `['PET', 'PMMA', 'aragonite', 'calcite', 'polystyrene', 'silicon']`.
+    
+    Now I will perform the similarity analysis.
+    I'll use Pearson correlation. Since Raman spectra might have different baseline offsets or scaling, correlation is robust.
+    
+    Algorithm:
+    1. Load target spectrum $T$ from `T125.csv`.
+    2. For each unique material in the library:
+        a. Collect all intensities for that material. (They should share the same x-axis).
+        b. Average them to get a representative spectrum $R_{mat}$.
+        c. Calculate correlation between $T$ and $R_{mat}$.
+    3. Rank materials by correlation.
+    4. To find distinguishing peaks:
+        a. Find peaks in top candidate $C_1$.
+        b. Find peaks in second candidate $C_2$.
+        c. Compare them to find peaks that are strong in $C_1$ but weak/absent in $C_2$, or vice versa.
+    
+    Let's do this. I'll need `scipy` for correlation and peak finding if available, but basic numpy is enough for correlation and simple peak detection (maxima).
+[13:58:30.074] [Gemma TOOL_CALLS] step 6 · 1개
+    1) run_analysis({"code": "import numpy as np\nfrom scipy import stats\n\n# Target spectrum T125\nt_data = files[0]['table']\ntx = t_data['raman_shift_cm-1']\nty = t_data['intensity']\n\n# Reference library\nref_data = files[1]['table']\nrx = ref_data['raman_shift_cm-1']\nry = ref_data['intensity']\nrmat = ref_data['material']\n\nunique_mats = np.unique(rmat)\nresults = []\n\nfor mat in unique_mats:\n    # Filter intensities for this material\n    mask = (rmat == mat)\n    # We assume the x-axis is consistent for all entries of the same material\n    # Let's check if we can just average the spectra. \n    # Since the library has 21612 rows and 6 materials, each has ~3600 points? \n    # No, 200-2000 with step 1 is 1801 points. \n    # 21612 / 1801 = 12 spectra total in the library.\n    \n    # Group by sp
+    … <1469자 생략>)
+[13:58:30.075] [Gemma STATS] prompt 17975 tok · out 1097 tok · wall 18.24s · eval 17.60s (62.3 tok/s) · load 0.23s · done=stop
+[13:58:30.075] [ReAct REASONING] step 6 · 도구 1개 실행 결정 → run_analysis
+[13:58:30.075] [ReAct ACTING] step 6 · run_analysis
+    {"code": "import numpy as np\nfrom scipy import stats\n\n# Target spectrum T125\nt_data = files[0]['table']\ntx = t_data['raman_shift_cm-1']\nty = t_data['intensity']\n\n# Reference library\nref_data = files[1]['table']\nrx = ref_data['raman_shift_cm-1']\nry = ref_data['intensity']\nrmat = ref_data['material']\n\nunique_mats = np.unique(rmat)\nresults = []\n\nfor mat in unique_mats:\n    # Filter intensities for this material\n    mask = (rmat == mat)\n    # We assume the x-axis is consistent for all entries of the same material\n    # Let's check if we can just average the spectra. \n    # Since the library has 21612 rows and 6 materials, each has ~3600 points? \n    # No, 200-2000 with step 1 is 1801 points. \n    # 21612 / 1801 = 12 spectra total in the library.\n    \n    # Group by spectrum_id just in case, then average them?\n    # Or simply: since they all share the same x-range and likely step, \n    # we can reshape if there are multiple copies.\n    \n    mat_y = ry[mask]\n    # Determine how many spectra per material\n    n_pts = len(tx) # target has 1801 points\n    num_spectra = len(mat_y) // n_pts\n    \n    if num_spectra > 0:\n        reshaped_y = mat_y[:num_spectra
+    … <1069자 생략>
+[13:58:31.254] [ReAct OBSERVATION] step 6 · run_analysis · FAIL · 1179 ms
+    {"ok": false, "error": "IndexError: list index out of range", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 396, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 46, in <module>\nIndexError: list index out of range\n"}
+[13:58:31.255] [Gemma <- PROMPT] step 7 · ReAct propose · 14 msgs
+    system(9236ch) · human(712ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[inspect_file] · tool(865ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(142ch) · ai(0ch)[run_analysis] · tool(439ch)
+[13:58:47.626] [Gemma THINKING] step 7 · 625ch
+    I got an `IndexError`. Let's check the order of files. I passed `file_ids=['2026-08-10/T125.csv', '2026-08-10/reference_library.csv']`. In the sandbox, `files` is typically ordered by the index in `file_ids`, so `files[0]` should be T125 and `files[1]` reference library.
+    Wait, maybe they are not? I'll use a loop to find them or just check `files` content if possible.
+    Better yet: I will refer to them by index carefully after checking the length of `files`. Actually, looking at my previous successful call, it worked with `files[0]` when only one file was passed.
+    
+    Let's try to be more robust and assign based on filename.
+[13:58:47.626] [Gemma TOOL_CALLS] step 7 · 1개
+    1) run_analysis({"code": "import numpy as np\nfrom scipy import stats\n\n# Identify files by checking the metadata in each dict of the 'files' list\nt125_file = None\nref_lib_file = None\n\nfor f in files:\n    if 'T125.csv' in f['filename']:\n        t125_file = f\n    elif 'reference_library.csv' in f['filename']:\n        ref_lib_file = f\n\nif t125_file is None or ref_lib_file is None:\n    print(\"Missing files\")\n    exit()\n\n# Target spectrum T125\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\n# Reference library\nrx = ref_lib_file['table']['raman_shift_cm-1']\nry = ref_lib_file['table']['intensity']\nrmat = ref_lib_file['table']['material']\n\nunique_mats = np.unique(rmat)\nresults = []\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[ma
+    … <1284자 생략>)
+[13:58:47.626] [Gemma STATS] prompt 19229 tok · out 976 tok · wall 16.37s · eval 15.72s (62.1 tok/s) · load 0.24s · done=stop
+[13:58:47.627] [ReAct REASONING] step 7 · 도구 1개 실행 결정 → run_analysis
+[13:58:47.627] [ReAct ACTING] step 7 · run_analysis
+    {"code": "import numpy as np\nfrom scipy import stats\n\n# Identify files by checking the metadata in each dict of the 'files' list\nt125_file = None\nref_lib_file = None\n\nfor f in files:\n    if 'T125.csv' in f['filename']:\n        t125_file = f\n    elif 'reference_library.csv' in f['filename']:\n        ref_lib_file = f\n\nif t125_file is None or ref_lib_file is None:\n    print(\"Missing files\")\n    exit()\n\n# Target spectrum T125\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\n# Reference library\nrx = ref_lib_file['table']['raman_shift_cm-1']\nry = ref_lib_file['table']['intensity']\nrmat = ref_lib_file['table']['material']\n\nunique_mats = np.unique(rmat)\nresults = []\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    n_pts = len(tx) \n    num_spectra = len(mat_y) // n_pts\n    \n    if num_spectra > 0:\n        # Check if the shift axis is indeed aligned (200 to 2000)\n        # Since we assume it's sorted and identical for a material, just reshape.\n        reshaped_y = mat_y[:num_spectra * n_pts].reshape((num_spectra, n_pts))\n        avg_y = np.mean(reshaped_y, axis=0)\n        \n        corr, _ = 
+    … <884자 생략>
+[13:58:47.670] [ReAct OBSERVATION] step 7 · run_analysis · FAIL · 43 ms
+    {"ok": false, "error": "Code policy violation: Disallowed name use: 'exit'", "hint": "Analysis only with numpy/scipy/matplotlib. No hardware/file/network access."}
+[13:58:47.670] [Gemma <- PROMPT] step 8 · ReAct propose · 16 msgs
+    system(9236ch) · human(712ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[inspect_file] · tool(865ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(142ch) · ai(0ch)[run_analysis] · tool(439ch) · ai(0ch)[run_analysis] · tool(163ch)
+[13:59:00.089] [Gemma THINKING] step 8 · 75ch
+    My apologies for using `exit()`. I'll remove it and just use an `if` block.
+[13:59:00.089] [Gemma TOOL_CALLS] step 8 · 1개
+    1) run_analysis({"code": "import numpy as np\nfrom scipy import stats\n\n# Identify files by checking the metadata in each dict of the 'files' list\nt125_file = None\nref_lib_file = None\n\nfor f in files:\n    if 'T125.csv' in f['filename']:\n        t125_file = f\n    elif 'reference_library.csv' in f['filename']:\n        ref_lib_file = f\n\n# Target spectrum T125\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\n# Reference library\nrx = ref_lib_file['table']['raman_shift_cm-1']\nry = ref_lib_file['table']['intensity']\nrmat = ref_lib_file['table']['material']\n\nunique_mats = np.unique(rmat)\nresults = []\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    n_pts = len(tx) \n    num_spectra = len(mat_y) // n_pts\n    \n    if num_spectra 
+    … <980자 생략>)
+[13:59:00.090] [Gemma STATS] prompt 20262 tok · out 730 tok · wall 12.42s · eval 11.77s (62.0 tok/s) · load 0.24s · done=stop
+[13:59:00.090] [ReAct REASONING] step 8 · 도구 1개 실행 결정 → run_analysis
+[13:59:00.090] [ReAct ACTING] step 8 · run_analysis
+    {"code": "import numpy as np\nfrom scipy import stats\n\n# Identify files by checking the metadata in each dict of the 'files' list\nt125_file = None\nref_lib_file = None\n\nfor f in files:\n    if 'T125.csv' in f['filename']:\n        t125_file = f\n    elif 'reference_library.csv' in f['filename']:\n        ref_lib_file = f\n\n# Target spectrum T125\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\n# Reference library\nrx = ref_lib_file['table']['raman_shift_cm-1']\nry = ref_lib_file['table']['intensity']\nrmat = ref_lib_file['table']['material']\n\nunique_mats = np.unique(rmat)\nresults = []\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    n_pts = len(tx) \n    num_spectra = len(mat_y) // n_pts\n    \n    if num_spectra > 0:\n        reshaped_y = mat_y[:num_spectra * n_pts].reshape((num_spectra, n_pts))\n        avg_y = np.mean(reshaped_y, axis=0)\n        corr, _ = stats.pearsonr(ty, avg_y)\n        results.append((mat, corr, avg_y))\n\nresults.sort(key=lambda x: x[1], reverse=True)\n\ntop_mat, top_corr, top_y = results[0]\nsec_mat, sec_corr, sec_y = results[1]\n\nprint(f\"Top match: {top_mat} (corr={top_corr:.4
+    … <580자 생략>
+[13:59:01.264] [ReAct OBSERVATION] step 8 · run_analysis · FAIL · 1174 ms
+    {"ok": false, "error": "IndexError: list index out of range", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 396, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 40, in <module>\nIndexError: list index out of range\n"}
+[13:59:01.264] [Gemma <- PROMPT] step 9 · ReAct propose · 18 msgs
+    system(9236ch) · human(712ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[inspect_file] · tool(865ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(142ch) · ai(0ch)[run_analysis] · tool(439ch) · ai(0ch)[run_analysis] · tool(163ch) · ai(0ch)[run_analysis] · tool(439ch)
+[13:59:21.216] [Gemma THINKING] step 9 · 2487ch
+    Wait, I'm still getting `IndexError`. This is very strange. Let me print the `files` object to see what it actually contains. If I passed two file IDs, there should be two items in the list.
+    Maybe the sandbox isn't receiving my files? Or maybe they are ordered differently?
+    Wait! The error says `line 40`. Line 40 is `reshaped_y = mat_y[:num_spectra * n_pts].reshape((num_spectra, n_pts))`.
+    No, that shouldn't cause an `IndexError` unless `mat_y` is not what I think it is.
+    Wait, line 40 in the provided code snippet... let me count.
+    
+    ```python
+    1  import numpy as np
+    2  from scipy import stats
+    3  
+    4  # Identify files by checking the metadata in each dict of the 'files' list
+    5  t125_file = None
+    6  ref_lib_file = None
+    7  
+    8  for f in files:
+    9      if 'T125.csv' in f['filename']:
+    10     t125_file = f
+    11     elif 'reference_library.csv' in f['filename']:
+    12         ref_lib_file = f
+    13 
+    14 # Target spectrum T125
+    15 tx = t125_file['table']['raman_shift_cm-1']
+    16 ty = t125_file['table']['intensity']
+    17 
+    18 # Reference library
+    19 rx = ref_lib_file['table']['raman_shift_cm-1']
+    20 ry = ref_lib_file['table']['intensity']
+    21 rmat = ref_lib_file['table']['material']
+    22 
+    23 unique_mats = np.unique(rmat)
+    24 results = []
+    25 
+    26 for mat in unique_mats:
+    27     mask = (rmat == mat)
+    28     mat_y = ry[mask]
+    29     n_pts = len(tx) 
+    30     num_spectra = len(mat_y) // n_pts
+    31     
+    32     if num_spectra > 0:
+    33         reshaped_y = mat_y[:num_spectra * n_pts].reshape((num_spectra, n_pts))
+    34         avg_y = np.mean(reshaped_y, axis=0)
+    35         corr, _ = stats.pearsonr(ty, avg_y)
+    36         results.append((mat, corr, avg_y))
+    37 
+    38 results.sort(key=lambda x: x[1], reverse=True)
+    39 
+    40 top_mat, top_corr, top_y = results[0]
+    ```
+    
+    Line 40 is `top_mat, top_corr, top_y = results[0]`. This means `results` is empty!
+    Why is `results` empty? `num_spectra > 0` must be false for all materials.
+    `num_spectra = len(mat_y) // n_pts`.
+    `n_pts = len(tx)`, which I saw was 1801.
+    If `len(mat_y)` is less than 1801, then `num_spectra` will be 0.
+    Let's check the length of `mat_y` for each material.
+    
+    Actually, looking back at `inspect_file` for `reference_library.csv`:
+    `n_rows: 21612`.
+    If there are 6 materials and they share the same shift range (200-2000), then $21612 / 6 \approx 3602$.
+    $3602 / 1801 = 2$. So each material has about 2 spectra.
+    Wait, maybe some materials have fewer than 1801 points? Or the shift range is different for some?
+    
+    Let's debug by printing the length of `mat_y` and `n_pts`.
+[13:59:21.216] [Gemma TOOL_CALLS] step 9 · 1개
+    1) run_analysis({"code": "import numpy as np\n\nt125_file = next(f for f in files if 'T125.csv' in f['filename'])\nref_lib_file = next(f for f in files if 'reference_library.csv' in f['filename'])\n\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\nrmat = ref_lib_file['table']['material']\nry = ref_lib_file['table']['intensity']\n\nn_pts = len(tx)\nunique_mats = np.unique(rmat)\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    print(f\"Material {mat}: length={len(mat_y)}, required_per_spectrum={n_pts}\")\n", "file_ids": ["2026-08-10/T125.csv", "2026-08-10/reference_library.csv"]})
+[13:59:21.217] [Gemma STATS] prompt 21149 tok · out 1188 tok · wall 19.95s · eval 19.27s (61.7 tok/s) · load 0.23s · done=stop
+[13:59:21.217] [ReAct REASONING] step 9 · 도구 1개 실행 결정 → run_analysis
+[13:59:21.217] [ReAct ACTING] step 9 · run_analysis
+    {"code": "import numpy as np\n\nt125_file = next(f for f in files if 'T125.csv' in f['filename'])\nref_lib_file = next(f for f in files if 'reference_library.csv' in f['filename'])\n\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\nrmat = ref_lib_file['table']['material']\nry = ref_lib_file['table']['intensity']\n\nn_pts = len(tx)\nunique_mats = np.unique(rmat)\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    print(f\"Material {mat}: length={len(mat_y)}, required_per_spectrum={n_pts}\")\n", "file_ids": ["2026-08-10/T125.csv", "2026-08-10/reference_library.csv"]}
+[13:59:21.714] [ReAct OBSERVATION] step 9 · run_analysis · FAIL · 497 ms
+    {"ok": false, "error": "NameError: name 'next' is not defined", "stdout": "", "trace": "Traceback (most recent call last):\n  File \"C:\\Users\\user\\Desktop\\gemma4_raman\\backend\\analysis_sandbox.py\", line 396, in _main\n    exec(compile(code, \"<analysis>\", \"exec\"), ns)  # noqa: S102 (sandboxed)\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<analysis>\", line 3, in <module>\nNameError: name 'next' is not defined\n"}
+[13:59:21.715] [Gemma <- PROMPT] step 10 · ReAct propose · 20 msgs
+    system(9236ch) · human(712ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[inspect_file] · tool(865ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(142ch) · ai(0ch)[run_analysis] · tool(439ch) · ai(0ch)[run_analysis] · tool(163ch) · ai(0ch)[run_analysis] · tool(439ch) · ai(0ch)[run_analysis] · tool(442ch)
+[13:59:27.300] [Gemma THINKING] step 10 · 154ch
+    I forgot that `next` might be restricted or I should just use a simple loop. Also, the sandbox environment behaves strictly. Let me stick to basic Python.
+[13:59:27.301] [Gemma TOOL_CALLS] step 10 · 1개
+    1) run_analysis({"code": "import numpy as np\n\nt125_file = None\nref_lib_file = None\nfor f in files:\n    if 'T125.csv' in f['filename']: t125_file = f\n    if 'reference_library.csv' in f['filename']: ref_lib_file = f\n\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\nrmat = ref_lib_file['table']['material']\nry = ref_lib_file['table']['intensity']\n\nn_pts = len(tx)\nunique_mats = np.unique(rmat)\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    print(f\"Material {mat}: length={len(mat_y)}, required={n_pts}\")\n", "file_ids": ["2026-08-10/T125.csv", "2026-08-10/reference_library.csv"]})
+[13:59:27.301] [Gemma STATS] prompt 22497 tok · out 302 tok · wall 5.59s · eval 4.91s (61.5 tok/s) · load 0.25s · done=stop
+[13:59:27.301] [ReAct REASONING] step 10 · 도구 1개 실행 결정 → run_analysis
+[13:59:27.301] [ReAct ACTING] step 10 · run_analysis
+    {"code": "import numpy as np\n\nt125_file = None\nref_lib_file = None\nfor f in files:\n    if 'T125.csv' in f['filename']: t125_file = f\n    if 'reference_library.csv' in f['filename']: ref_lib_file = f\n\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\nrmat = ref_lib_file['table']['material']\nry = ref_lib_file['table']['intensity']\n\nn_pts = len(tx)\nunique_mats = np.unique(rmat)\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    print(f\"Material {mat}: length={len(mat_y)}, required={n_pts}\")\n", "file_ids": ["2026-08-10/T125.csv", "2026-08-10/reference_library.csv"]}
+[13:59:27.850] [ReAct OBSERVATION] step 10 · run_analysis · ok · 549 ms
+    {"ok": true, "stdout": "Material PET: length=0, required=1801\nMaterial PMMA: length=0, required=1801\nMaterial aragonite: length=0, required=1801\nMaterial calcite: length=0, required=1801\nMaterial polystyrene: length=0, required=1801\nMaterial silicon: length=0, required=1801\n", "image_count": 0, "images": []}
+[13:59:27.851] [Gemma <- PROMPT] step 11 · ReAct propose · 22 msgs
+    system(9236ch) · human(712ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[inspect_file] · tool(865ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(142ch) · ai(0ch)[run_analysis] · tool(439ch) · ai(0ch)[run_analysis] · tool(163ch) · ai(0ch)[run_analysis] · tool(439ch) · ai(0ch)[run_analysis] · tool(442ch) · ai(0ch)[run_analysis] · tool(315ch)
+[13:59:34.130] [Gemma THINKING] step 11 · 545ch
+    Wait. `length=0` for all materials? This is impossible. The library has 21612 rows.
+    Let me check the column names and types again from `inspect_file`.
+    Columns: `["spectrum_id", "material", "raman_shift_cm-1", "intensity"]`.
+    Dtypes: `{"spectrum_id": "text", "material": "text", "raman_shift_cm-1": "numeric", "intensity": "numeric"}`.
+    
+    Why is the mask `(rmat == mat)` resulting in zero length?
+    Is it possible that there are leading/trailing spaces in the material names? Or maybe they are not strings?
+    Let's print the first few entries of `rmat`.
+[13:59:34.130] [Gemma TOOL_CALLS] step 11 · 1개
+    1) run_analysis({"code": "import numpy as np\n\nt125_file = None\nref_lib_file = None\nfor f in files:\n    if 'T125.csv' in f['filename']: t125_file = f\n    if 'reference_library.csv' in f['filename']: ref_lib_file = f\n\nrmat = ref_lib_file['table']['material']\nprint(f\"First 10 materials: {rmat[:10]}\")\nprint(f\"Type of rmat elements: {type(rmat[0])}\")\n", "file_ids": ["2026-08-10/T125.csv", "2026-08-10/reference_library.csv"]})
+[13:59:34.131] [Gemma STATS] prompt 22928 tok · out 346 tok · wall 6.28s · eval 5.62s (61.5 tok/s) · load 0.24s · done=stop
+[13:59:34.131] [ReAct REASONING] step 11 · 도구 1개 실행 결정 → run_analysis
+[13:59:34.131] [ReAct ACTING] step 11 · run_analysis
+    {"code": "import numpy as np\n\nt125_file = None\nref_lib_file = None\nfor f in files:\n    if 'T125.csv' in f['filename']: t125_file = f\n    if 'reference_library.csv' in f['filename']: ref_lib_file = f\n\nrmat = ref_lib_file['table']['material']\nprint(f\"First 10 materials: {rmat[:10]}\")\nprint(f\"Type of rmat elements: {type(rmat[0])}\")\n", "file_ids": ["2026-08-10/T125.csv", "2026-08-10/reference_library.csv"]}
+[13:59:34.175] [ReAct OBSERVATION] step 11 · run_analysis · FAIL · 44 ms
+    {"ok": false, "error": "Code policy violation: Disallowed name use: 'type'", "hint": "Analysis only with numpy/scipy/matplotlib. No hardware/file/network access."}
+[13:59:34.176] [Gemma <- PROMPT] step 12 · ReAct propose · 24 msgs
+    system(9236ch) · human(712ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[inspect_file] · tool(865ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(142ch) · ai(0ch)[run_analysis] · tool(439ch) · ai(0ch)[run_analysis] · tool(163ch) · ai(0ch)[run_analysis] · tool(439ch) · ai(0ch)[run_analysis] · tool(442ch) · ai(0ch)[run_analysis] · tool(315ch) · ai(0ch)[run_analysis] · tool(163ch)
+[13:59:38.151] [Gemma THINKING] step 12 · 134ch
+    `type()` is disallowed? That's a very restrictive sandbox. I'll avoid it.
+    Let me try to print the first 10 and see if they look weird.
+[13:59:38.152] [Gemma TOOL_CALLS] step 12 · 1개
+    1) run_analysis({"code": "import numpy as np\n\nt125_file = None\nref_lib_file = None\nfor f in files:\n    if 'T125.csv' in f['filename']: t125_file = f\n    if 'reference_library.csv' in f['filename']: ref_lib_file = f\n\nrmat = ref_lib_file['table']['material']\nprint(f\"First 10 materials: {rmat[:10]}\")\n", "file_ids": ["2026-08-10/T125.csv", "2026-08-10/reference_library.csv"]})
+[13:59:38.152] [Gemma STATS] prompt 23331 tok · out 204 tok · wall 3.98s · eval 3.31s (61.6 tok/s) · load 0.24s · done=stop
+[13:59:38.152] [ReAct REASONING] step 12 · 도구 1개 실행 결정 → run_analysis
+[13:59:38.152] [ReAct ACTING] step 12 · run_analysis
+    {"code": "import numpy as np\n\nt125_file = None\nref_lib_file = None\nfor f in files:\n    if 'T125.csv' in f['filename']: t125_file = f\n    if 'reference_library.csv' in f['filename']: ref_lib_file = f\n\nrmat = ref_lib_file['table']['material']\nprint(f\"First 10 materials: {rmat[:10]}\")\n", "file_ids": ["2026-08-10/T125.csv", "2026-08-10/reference_library.csv"]}
+[13:59:38.688] [ReAct OBSERVATION] step 12 · run_analysis · ok · 536 ms
+    {"ok": true, "stdout": "First 10 materials: ['polystyrene', 'polystyrene', 'polystyrene', 'polystyrene', 'polystyrene', 'polystyrene', 'polystyrene', 'polystyrene', 'polystyrene', 'polystyrene']\n", "image_count": 0, "images": []}
+[13:59:38.689] [Gemma <- PROMPT] step 13 · ReAct propose · 26 msgs
+    system(9236ch) · human(712ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[inspect_file] · tool(865ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(142ch) · ai(0ch)[run_analysis] · tool(439ch) · ai(0ch)[run_analysis] · tool(163ch) · ai(0ch)[run_analysis] · tool(439ch) · ai(0ch)[run_analysis] · tool(442ch) · ai(0ch)[run_analysis] · tool(315ch) · ai(0ch)[run_analysis] · tool(163ch) · ai(0ch)[run_analysis] · tool(230ch)
+[13:59:54.737] [Gemma THINKING] step 13 · 767ch
+    They look like normal strings.
+    Wait! I might have an issue with the `np.unique` or the mask if `rmat` is a list instead of a numpy array.
+    The `inspect_file` says it's text, and in `run_analysis`, `files[i]['table']` returns a dict mapping column name to `np.ndarray`.
+    If `rmat` is a numpy array of strings, the mask should work.
+    
+    Wait... look at my previous output: `Material PET: length=0, required=1801`.
+    This happened when I used `unique_mats = np.unique(rmat)`.
+    Let's check if there's any mismatch in how I accessed the data.
+    
+    Actually, I will try to iterate through the materials list manually and use a list comprehension for the mask. Or better yet, just loop through the rows.
+    No, that's too slow. Let me try `rmat == mat` again but ensure it's a numpy array.
+[13:59:54.737] [Gemma TOOL_CALLS] step 13 · 1개
+    1) run_analysis({"code": "import numpy as np\nfrom scipy import stats\n\nt125_file = None\nref_lib_file = None\nfor f in files:\n    if 'T125.csv' in f['filename']: t125_file = f\n    if 'reference_library.csv' in f['filename']: ref_lib_file = f\n\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\n# Convert to numpy arrays explicitly\nrmat = np.array(ref_lib_file['table']['material'])\nry = np.array(ref_lib_file['table']['intensity'])\n\nunique_mats = np.unique(rmat)\nresults = []\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    n_pts = len(tx) \n    num_spectra = len(mat_y) // n_pts\n    \n    if num_spectra > 0:\n        reshaped_y = mat_y[:num_spectra * n_pts].reshape((num_spectra, n_pts))\n        avg_y = np.mean(reshaped_y, axis=0)\n  
+    … <1051자 생략>)
+[13:59:54.737] [Gemma STATS] prompt 23619 tok · out 944 tok · wall 16.05s · eval 15.40s (61.3 tok/s) · load 0.24s · done=stop
+[13:59:54.737] [ReAct REASONING] step 13 · 도구 1개 실행 결정 → run_analysis
+[13:59:54.738] [ReAct ACTING] step 13 · run_analysis
+    {"code": "import numpy as np\nfrom scipy import stats\n\nt125_file = None\nref_lib_file = None\nfor f in files:\n    if 'T125.csv' in f['filename']: t125_file = f\n    if 'reference_library.csv' in f['filename']: ref_lib_file = f\n\ntx = t125_file['table']['raman_shift_cm-1']\nty = t125_file['table']['intensity']\n\n# Convert to numpy arrays explicitly\nrmat = np.array(ref_lib_file['table']['material'])\nry = np.array(ref_lib_file['table']['intensity'])\n\nunique_mats = np.unique(rmat)\nresults = []\n\nfor mat in unique_mats:\n    mask = (rmat == mat)\n    mat_y = ry[mask]\n    n_pts = len(tx) \n    num_spectra = len(mat_y) // n_pts\n    \n    if num_spectra > 0:\n        reshaped_y = mat_y[:num_spectra * n_pts].reshape((num_spectra, n_pts))\n        avg_y = np.mean(reshaped_y, axis=0)\n        corr, _ = stats.pearsonr(ty, avg_y)\n        results.append((mat, corr, avg_y))\n\nresults.sort(key=lambda x: x[1], reverse=True)\n\nif len(results) >= 2:\n    top_mat, top_corr, top_y = results[0]\n    sec_mat, sec_corr, sec_y = results[1]\n    print(f\"Top match: {top_mat} (corr={top_corr:.4f})\")\n    print(f\"Second match: {sec_mat} (corr={sec_corr:.4f})\")\n\n    def get_peaks(y, x, thr
+    … <651자 생략>
+[13:59:55.798] [ReAct OBSERVATION] step 13 · run_analysis · ok · 1060 ms
+    {"ok": true, "stdout": "Top match: PET (corr=0.9945)\nSecond match: PMMA (corr=0.1507)\nPeaks in PET: [(np.float64(632.0), np.float64(0.2030983429587366)), (np.float64(702.0), np.float64(0.28238166245100205)), (np.float64(795.0), np.float64(0.10586935983571015)), (np.float64(857.0), np.float64(0.30202278878936056)), (np.float64(1096.0), np.float64(0.4485026207690526)), (np.float64(1117.0), np.float64(0.3936841459684307)), (np.float64(1290.0), np.float64(0.34120125621361885)), (np.float64(1416.0), np.float64(0.3019250907232837)), (np.float64(1614.0), np.float64(1.0)), (np.float64(1728.0), np.float64(0.5211715103128741))]\nPeaks in PMMA: [(np.float64(601.0), np.float64(0.24066703742620235)), (np.float64(812.0), np.float64(1.0)), (np.float64(966.0), np.float64(0.30251809766424115)), (np.float64(1122.0), np.float64(0.2856083645166187)), (np.float64(1188.0), np.float64(0.34463634363896517)), (np.float64(1450.0), np.float64(0.6002299692546814)), (np.float64(1730.0), np.float64(0.46012581453635787))]\n", "image_count": 0, "images": []}
+[13:59:55.799] [Gemma <- PROMPT] step 14 · ReAct propose · 28 msgs
+    system(9236ch) · human(712ch) · ai(0ch)[list_uploaded_files] · tool(246ch) · ai(0ch)[inspect_file] · tool(1090ch) · ai(0ch)[inspect_file] · tool(865ch) · ai(0ch)[run_analysis] · tool(486ch) · ai(0ch)[run_analysis] · tool(142ch) · ai(0ch)[run_analysis] · tool(439ch) · ai(0ch)[run_analysis] · tool(163ch) · ai(0ch)[run_analysis] · tool(439ch) · ai(0ch)[run_analysis] · tool(442ch) · ai(0ch)[run_analysis] · tool(315ch) · ai(0ch)[run_analysis] · tool(163ch) · ai(0ch)[run_analysis] · tool(230ch) · ai(0ch)[run_analysis] · tool(1044ch)
+[14:00:12.314] [Gemma THINKING] step 14 · 1862ch
+    Okay! We have a clear winner:
+    - Top match: **PET** (correlation = 0.9945)
+    - Second match: **PMMA** (correlation = 0.1507)
+    
+    Now I need to find at least two basis peaks that distinguish PET from PMMA.
+    Looking at the results:
+    Peaks in PET:
+    - 632, 702, 795, 857, 1096, 1117, 1290, 1416, **1614** (strongest), 1728.
+    
+    Peaks in PMMA:
+    - 601, **812** (strongest), 966, 1122, 1188, **1450**, 1730.
+    
+    Distinguishing peaks for PET vs PMMA:
+    1. The peak at **1614 cm-1** is very strong in PET and completely absent in PMMA (where the strongest peak is at 812).
+    2. The peak at **1096 cm-1** (or 1117) is prominent in PET but not present in PMMA's list of significant peaks.
+    3. Conversely, PMMA has a very strong peak at **812 cm-1** and **1450 cm-1** which are absent or much weaker/different in PET.
+    
+    The user asks for "at least two basis peaks that distinguish it [the most similar material] from the second-ranked candidate". This means I should list peaks characteristic of PET that differentiate it from PMMA.
+    - Peak at **1614 cm-1** (strongest peak of PET).
+    - Peak at **1096 cm-1**.
+    
+    Alternatively, if they meant "peaks in both", but usually distinguishing peaks are those present in one and not the other. I'll provide the prominent ones for PET that PMMA lacks.
+    
+    Let's double check if there is any overlap around 1730/1728?
+    PET has a peak at 1728, PMMA at 1730. These are very close (within 2 cm-1), so they might be the same vibrational mode (C=O). This is NOT a distinguishing peak.
+    
+    The most obvious distinctions:
+    - PET: **1614 cm-1** and **1096 cm-1**.
+    - PMMA lacks these, having instead peaks at 812 and 1450.
+    
+    Final check on requirements:
+    - Material: "PET" (from the list).
+    - Two basis peaks that distinguish it from PMMA.
+    
+    I'll report 1614 and 1096 as they are very characteristic of PET and absent in PMMA. Or I can use 1614 and 702. Let's go with 1614 and 1096.
+[14:00:12.315] [Gemma TEXT] step 14
+    The analysis was performed by comparing the target spectrum `T125.csv` against a reference library containing spectra for polystyrene, PET, PMMA, calcite, aragonite, and silicon.
+    
+    The spectra were normalized and compared using the Pearson correlation coefficient to determine similarity. The results are as follows:
+    - **Most similar material:** PET (correlation coefficient $\approx 0.9945$)
+    - **Second most similar material:** PMMA (correlation coefficient $\approx 0.1507$)
+    
+    To distinguish PET from PMMA, the following characteristic basis peaks of PET were identified, which are either absent or significantly different in PMMA:
+    1. **$1614\text{ cm}^{-1}$**: This is the most intense peak for PET and is entirely absent in the PMMA spectrum.
+    2. **$1096\text{ cm}^{-1}$**: A prominent peak in PET that does not appear as a significant feature in PMMA.
+    
+    While both materials show activity around $1730\text{ cm}^{-1}$, this region is not distinguishing. In contrast, the peaks at $1614$ and $1096\text{ cm}^{-1}$ provide clear evidence for the identification of PET over PMMA.
+    
+    ```json
+    {"material": "PET"}
+    ```
+[14:00:12.315] [Gemma STATS] prompt 25278 tok · out 933 tok · wall 16.52s · eval 15.33s (60.9 tok/s) · load 0.23s · done=stop
+[14:00:12.315] [ReAct REASONING] step 14 · 도구 호출 없음 → 최종 보고서 작성으로 턴 종료
+[14:00:12.315] [FINAL] 146.38s · LLM 14회 · 도구 13회 · dose 0.00 mJ
+    The analysis was performed by comparing the target spectrum `T125.csv` against a reference library containing spectra for polystyrene, PET, PMMA, calcite, aragonite, and silicon.
+    
+    The spectra were normalized and compared using the Pearson correlation coefficient to determine similarity. The results are as follows:
+    - **Most similar material:** PET (correlation coefficient $\approx 0.9945$)
+    - **Second most similar material:** PMMA (correlation coefficient $\approx 0.1507$)
+    
+    To distinguish PET from PMMA, the following characteristic basis peaks of PET were identified, which are either absent or significantly different in PMMA:
+    1. **$1614\text{ cm}^{-1}$**: This is the most intense peak for PET and is entirely absent in the PMMA spectrum.
+    2. **$1096\text{ cm}^{-1}$**: A prominent peak in PET that does not appear as a significant feature in PMMA.
+    
+    While both materials show activity around $1730\text{ cm}^{-1}$, this region is not distinguishing. In contrast, the peaks at $1614$ and $1096\text{ cm}^{-1}$ provide clear evidence for the identification of PET over PMMA.
+    
+    ```json
+    {"material": "PET"}
+    ```
+══════════════════════════════════════════════════════════════════════════════
+

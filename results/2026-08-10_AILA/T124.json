@@ -1,0 +1,231 @@
+{
+  "task": "T124",
+  "axis": "identification",
+  "mode": "live",
+  "result": "pass",
+  "reason": "",
+  "checks_passed": 1,
+  "checks_total": 1,
+  "question": "Distinguish whether T124.csv is calcite or aragonite, using reference_library.csv.",
+  "criteria": "EXACT(material)",
+  "checks": [
+    {
+      "name": "material",
+      "passed": true,
+      "score": 1.0,
+      "detail": "'aragonite' (expected 'aragonite')",
+      "weight": 2.0,
+      "kind": "EXACT"
+    }
+  ],
+  "failures": [],
+  "blocked": [],
+  "input_files": [
+    "T124.csv",
+    "reference_library.csv"
+  ],
+  "answer_text": "The analysis was performed by comparing the Raman spectrum of sample `T124.csv` with reference spectra for calcite and aragonite from `reference_library.csv`. \n\nFirst, the data in both files were loaded and converted to numpy arrays. The spectrum of T124 underwent iterative polynomial background subtraction (IPBSA) to remove fluorescence and isolate real Raman peaks. Peak detection was then applied to T124 and representative reference spectra for both materials.\n\nThe identified main peak positions ($\\text{cm}^{-1}$) are as follows:\n- **T124**: 206, 704, 1085, 1460\n- **Aragonite Reference**: 206, 704, 1085, 1462\n- **Calcite Reference**: 282, 712, 1086\n\nT124 shows a near-perfect match with the aragonite reference spectrum across all major peak positions (206, 704, 1085, and $\\sim$1460 $\\text{cm}^{-1}$), whereas it differs significantly from the calcite reference (which lacks peaks at 206, 704, and 1460 $\\text{cm}^{-1}$). Based on this spectral fingerprint, T124 is identified as aragonite.\n\n```json\n{\"material\": \"aragonite\"}\n```",
+  "answer_json": {
+    "material": "aragonite"
+  },
+  "tool_calls": [
+    {
+      "name": "list_uploaded_files",
+      "args": {},
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/T124.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "inspect_file",
+      "args": {
+        "file_id": "2026-08-10/reference_library.csv"
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# T124 data\nt124_x = files[0][\"table\"][\"raman_shift_cm-1\"]\nt124_y = files[0][\"table\"][\"intensity\"]\n\n# reference library data\nref_df = files[1][\"table\"] # Wait, the injected 'files' is a list of dicts. \n# I need to access table as a dict mapping column name -> np.ndarray\n# Since it's a long file with multiple spectra, it might be stored differently or’t a flat table?\n# Actually, inspect_file said columns are [\"spectrum_id\", \"material\", \"raman_shift_cm-1\", \"intensity\"]\n# and n_rows is 21612. This looks like long-format data (one row per point).\n\nref_ids = files[1][\"table\"][\"spectrum_id\"]\nref_mats = files[1][\"table\"][\"material\"]\nref_x = files[1][\"table\"][\"raman_shift_cm-1\"]\nref_y = files[1][\"table\"][\"intensity\"]\n\n# Filter for calcite and aragonite\ncalcite_mask = (ref_mats == 'calcite')\naragonite_mask = (ref_mats == 'aragonite')\n\n# Since there might be multiple spectra per material, I'll just take the first one of each or average them.\n# Let's see how many distinct spectrum IDs are there for each.\ncalcite_ids = np.unique(ref_ids[calcite_mask])\naragonite_ids = np.unique(ref_ids[aragonite_mask])\n\nprint(f\"Calcite spectra found: {calcite_ids}\")\nprint(f\"Aragonite spectra found: {aragonite_ids}\")\n\n# Let's take the first one of each for a quick comparison.\ndef get_spec(mat, spec_id):\n    mask = (ref_ids == spec_id)\n    return ref_x[mask], ref_y[mask]\n\nif len(calcite_ids) > 0 and len(aragonite_ids) > 0:\n    c_x, c_y = get_spec('calcite', calcite_ids[0])\n    a_x, a_y = get_spec('aragonite', aragonite_ids[0])\n\n    # Pre-process T124 (Baseline correction)\n    from scipy.signal import find_peaks\n    t124_corr, t124_bg = ipbsa(t124_y, order=5)\n    \n    plt.figure(figsize=(10, 6))\n    plt.plot(t124_x, t124_corr, label='T124 (corrected)', color='black', linewidth=2)\n    plt.plot(c_x, c_y, label=f'Calcite ({calcite_ids[0]})', alpha=0.7)\n    plt.plot(a_x, a_y, label=f'Aragonite ({aragonite_ids[0]})', alpha=0.7)\n    plt.legend()\n    plt.title('Comparison of T124 with Reference Spectra')\n    plt.xlabel('Raman Shift (cm-1)')\n    plt.ylabel('Intensity')\n    plt.show()\n\n    # Peak detection for T124\n    peaks, _ = find_peaks(t124_corr, height=50, distance=10)\n    peak_shifts = t124_x[peaks]\n    print(f\"T124 Peaks: {peak_shifts}\")\n\n    # Peak detection for Calcite and Aragonite (simple max or find_peaks)\n    c_peaks, _ = find_peaks(c_y, height=50, distance=10)\n    a_peaks, _ = find_peaks(a_y, height=50, distance=10)\n    print(f\"Calcite Peaks: {c_x[c_peaks]}\")\n    print(f\"Aragonite Peaks: {a_x[a_peaks]}\")\nelse:\n    print(\"Could not find either calcite or aragonite in reference library.\")\n",
+        "file_ids": [
+          "2026-08-10/T124.csv",
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nref_mats = files[0][\"table\"][\"material\"]\nprint(f\"Unique materials: {np.unique(ref_mats)}\")\n",
+        "file_ids": [
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Load data\nt124_x = files[0][\"table\"][\"raman_shift_cm-1\"]\nt124_y = files[0][\"table\"][\"intensity\"]\n\nref_ids = files[1][\"table\"][\"spectrum_id\"]\nref_mats = files[1][\"table\"][\"material\"]\nref_x = files[1][\"table\"][\"raman_shift_ uma-1\" if \"raman_shift_cm-1\" not in files[1][\"table\"] else \"raman_shift_cm-1\"] # Fix potential typo\n# Wait, let's just use the known name from inspect_file: raman_shift_cm-1\nref_x = files[1][\"table\"][\"raman_shift_cm-1\"]\nref_y = files[1][\"table\"][\"intensity\"]\n\ndef get_material_avg(mat):\n    mask = (ref_mats == mat)\n    ids = np.unique(ref_ids[mask])\n    if len(ids) == 0: return None, None\n    \n    # Get the shifts for the first spectrum of this material to use as axis\n    first_id = ids[0]\n    x_axis = ref_x[ref_ids == first_id]\n    \n    all_y = []\n    for sid in ids:\n        all_y.append(ref_y[ref_ids == sid])\n    \n    # Average the intensities\n    avg_y = np.mean(all_y, axis=0)\n    return x_axis, avg_y\n\nt124_corr, _ = ipbsa(t124_y, order=5)\nc_x, c_y = get_material_avg('calcite')\na_x, a_y = get_material_avg('aragonite')\n\ndef find_main_peaks(x, y):\n    # Normalize and find peaks\n    y_norm = (y - np.min(y)) / (np.max(y) - np.min(y)) if np.max(y) != np.min(y) else y\n    peaks, _ = find_peaks(y_norm, height=0.1, distance=10)\n    return sorted(x[peaks])\n\nt124_peaks = find_main_peaks(t124_x, t124_corr)\nc_peaks = find_main_peaks(c_x, c_y) if c_x is not None else []\na_peaks = find_main_peaks(a_x, a_y) if a_x is not None else []\n\nprint(f\"T124 peaks: {t124_peaks}\")\nprint(f\"Calcite reference peaks: {c_peaks}\")\nprint(f\"Aragonite reference peaks: {a_peaks}\")\n\n# Plot for visual confirmation (though I rely on numbers)\nplt.figure(figsize=(10, 6))\nplt.plot(t124_x, t124_corr / np.max(t124_corr), label='T124', color='black')\nif c_x is not None:\n    plt.plot(c_x, c_y / np.max(c_y), label='Calcite Ref', alpha=0.7)\nif a_x is not None:\n    plt.plot(a_x, a_y / np.max(a_y), label='Aragonite Ref', alpha=0.7)\nplt.legend()\nplt.show()\n",
+        "file_ids": [
+          "2026-08-10/T124.csv",
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nref_mats = files[0][\"table\"][\"material\"]\nref_ids = files[0][\"table\"][\"spectrum_id\"]\n\n# Print first 20 materials and IDs to see if there's a pattern\nfor i in range(20):\n    print(f\"Row {i}: ID={ref_ids[i]}, Mat={ref_mats[i]}\")\n",
+        "file_ids": [
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\ndef get_peaks(x, y):\n    y_norm = (y - np.min(y)) / (np.max(y) - np.min(y)) if np.max(y) != np.min(y) else y\n    p, _ = find_peaks(y_norm, height=0.1, distance=5)\n    return x[p]\n\n# T124\nt_x = files[0][\"table\"][\"raman_shift_cm-1\"]\nt_y = files[0][\"table\"][\"intensity\"]\nt_corr, _ = ipbsa(t_y, order=5)\nt_peaks = get_peaks(t_x, t_corr)\n\n# Reference\nref_mats = files[1][\"table\"][\"material\"]\nref_ids = files[1][\"table\"][\"spectrum_id\"]\nref_x = files[1][\"table\"][\"raman_shift_cm-1\"]\nref_y = files[1][\"table\"][\"intensity\"]\n\nfor mat in ['calcite', 'aragonite']:\n    mask = (ref_mats == mat)\n    ids = np.unique(ref_ids[mask])\n    if len(ids) > 0:\n        sid = ids[0]\n        s_mask = (ref_ids == sid)\n        s_x = ref_x[s_mask]\n        s_y = ref_y[s_mask]\n        s_peaks = get_peaks(s_x, s_y)\n        print(f\"{mat} ({sid}) peaks: {s_peaks}\")\n    else:\n        print(f\"No spectra for {mat}\")\n\nprint(f\"T124 peaks: {t_peaks}\")\n",
+        "file_ids": [
+          "2026-08-10/T124.csv",
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nref_mats = files[0][\"table\"][\"material\"]\nref_ids = files[0][\"table\"][\"spectrum_id\"]\n\ncalcite_indices = np.where(ref_mats == 'calcite')[0]\nprint(f\"Calcite indices start: {calcite_indices[0]} end: {calcite_indices[-1]}\")\n\naragonite_indices = np.where(ref_mats == 'aragonite')[0]\nprint(f\"Aragonite indices start: {aragonite_indices[0]} end: {aragonite_indices[-1]}\")\n",
+        "file_ids": [
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nprint(f\"Type of material column: {type(files[0]['table']['material'])}\")\nprint(f\"Shape of material column: {np.shape(files[0]['table']['material'])}\")\n",
+        "file_ids": [
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\n\nref_mats = files[0][\"table\"][\"material\"]\n# Use a flexible search for calcite and aragonite\ncalcite_mask = np.char.find(ref_mats.astype(str), 'calcite') >= 0\naragonite_mask = np.char.find(ref_mats.astype(str), 'aragonite') >= 0\n\nprint(f\"Calcite match count: {np.sum(calcite_mask)}\")\nprint(f\"Aragonite match count: {np.sum(aragonite_mask)}\")\n\nif np.sum(calcite_mask) > 0:\n    # Just get one spectrum of calcite\n    c_idx = np.where(calcite_mask)[0][0]\n    c_sid = files[0][\"table\"][\"spectrum_id\"][c_idx]\n    print(f\"Calcite sample ID: {c_sid}\")\nif np.sum(aragonite_mask) > 0:\n    a_idx = np.where(aragonite_mask)[0][0]\n    a_sid = files[0][\"table\"][\"spectrum_id\"][a_idx]\n    print(f\"Aragonite sample ID: {a_sid}\")\n",
+        "file_ids": [
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "run_analysis",
+      "args": {
+        "code": "import numpy as np\nfrom scipy.signal import find_peaks\n\n# Convert lists to numpy arrays\nt124_x = np.array(files[0][\"table\"][\"raman_shift_cm-1\"])\nt124_y = np.array(files[0][\"table\"][\"intensity\"])\n\nref_ids = np.array(files[1][\"table\"][\"spectrum_id\"])\nref_mats = np.array(files[1][\"table\"][\"material\"])\nref_x = np.array(files[1][\"table\"][\"raman_shift_cm-1\"])\nref_y = np.array(files[1][\"table\"][\"intensity\"])\n\ndef get_peaks(x, y):\n    # Normalize for peak finding\n    ymin, ymax = np.min(y), np.max(y)\n    if ymax == ymin: return []\n    y_norm = (y - ymin) / (ymax - ymin)\n    p, _ = find_peaks(y_norm, height=0.1, distance=5)\n    return x[p]\n\n# T124 process\nt124_corr, _ = ipbsa(t124_y, order=5)\nt124_peaks = get_peaks(t124_x, t124_corr)\n\n# Reference process\nresults = {}\nfor mat in ['calcite', 'aragonite']:\n    mask = (ref_mats == mat)\n    ids = np.unique(ref_ids[mask])\n    if len(ids) > 0:\n        sid = ids[0]\n        s_mask = (ref_ids == sid)\n        results[mat] = get_peaks(ref_x[s_mask], ref_y[s_mask])\n    else:\n        results[mat] = []\n\nprint(f\"T124 peaks: {t124_peaks}\")\nprint(f\"Calcite peaks: {results['calcite']}\")\nprint(f\"Aragonite peaks: {results['aragonite']}\")\n\n# Visualize just to be safe\nplt.figure(figsize=(10, 6))\n# Normalize for plotting\nt_plot = t124_corr / np.max(t124_corr) if np.max(t124_corr) != 0 else t124_corr\nplt.plot(t124_x, t_plot, label='T124', color='black', linewidth=2)\n\nfor mat in ['calcite', 'aragonite']:\n    mask = (ref_mats == mat)\n    ids = np.unique(ref_ids[mask])\n    if len(ids) > 0:\n        sid = ids[0]\n        s_y = ref_y[ref_ids == sid]\n        s_x = ref_x[ref_ids == sid]\n        plt.plot(s_x, s_y / np.max(s_y), label=f'{mat} Ref')\n\nplt.legend()\nplt.show()\n",
+        "file_ids": [
+          "2026-08-10/T124.csv",
+          "2026-08-10/reference_library.csv"
+        ]
+      },
+      "ok": true
+    }
+  ],
+  "artifacts": [
+    "/api/results/2026-08-10/bench_2026-08-10_AILA_AILA_T124_3a33c2/fig135709_154_0.png"
+  ],
+  "state_before": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255
+  },
+  "state_after": {
+    "x": 37.8759,
+    "y": 25.248,
+    "z": 0.0,
+    "is_on": false,
+    "power_armed": false,
+    "beam_if_turned_on": "guide",
+    "x_speed_mm_s": 2.0,
+    "y_speed_mm_s": 2.0,
+    "z_speed_mm_s": 0.05,
+    "exposure_time_s": 0.2,
+    "acquisition_mode": "single",
+    "read_mode": "fvb",
+    "trigger_mode": "internal",
+    "shutter_mode": "auto",
+    "num_accumulations": 1,
+    "num_kinetics": 1,
+    "temperature_C": -40,
+    "temperature_status": "STABILIZED",
+    "cooler_on": true,
+    "preamp_gain_index": 0,
+    "preamp_gains_available": [
+      1.0,
+      1.7000000476837158
+    ],
+    "vs_speeds_us": [
+      16.25,
+      32.25,
+      64.25
+    ],
+    "hs_speeds_conventional_mhz": [
+      0.1,
+      0.05,
+      0.033
+    ],
+    "detector_Nx": 1024,
+    "detector_Ny": 255
+  },
+  "session_id": "bench_2026-08-10_AILA_AILA_T124_3a33c2",
+  "elapsed_s": 168.34,
+  "errors": [],
+  "warnings": [],
+  "timed_out": false,
+  "abandoned": false
+}
