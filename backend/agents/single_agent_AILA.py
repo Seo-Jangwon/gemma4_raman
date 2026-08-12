@@ -162,14 +162,14 @@ def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
             if not ai_msg.tool_calls:
                 final_text = runtime.text_of(ai_msg).strip() or "Failed to generate a response."
                 messages.append(ai_msg)
-                rlog.reasoning(step + 1, "도구 호출 없음 → 최종 보고서 작성으로 턴 종료")
+                rlog.reasoning(step + 1, "No tool call -> writing the final report, turn ends")
                 rlog.final(final_text, ctx)
                 yield {"type": "final", "text": final_text, "ctx": ctx, "messages": messages}
                 return
 
             messages.append(ai_msg)   # tool_calls 를 담은 assistant 메시지를 그대로 추가
             rlog.reasoning(step + 1,
-                           f"도구 {len(ai_msg.tool_calls)}개 실행 결정 → "
+                           f"Decided to run {len(ai_msg.tool_calls)} tool(s) -> "
                            + ", ".join(str(tc["name"]) for tc in ai_msg.tool_calls))
 
             # ── 실행 + 관측 — ★ ReAct 의 정의: emit 된 것을 전부, 그 순서대로 ────
@@ -184,8 +184,8 @@ def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
                 rlog.observation(step + 1, name, ex["result"], ex["elapsed_ms"])
                 if ex["img_b64"]:
                     rlog.rec("ReAct OBSERVATION",
-                             f"step {step + 1} · {name} · 이미지 1장을 모델에게 주입 "
-                             f"(base64 {len(ex['img_b64'])}자, 로그에는 싣지 않음)")
+                             f"step {step + 1} · {name} · injected 1 image into the model "
+                             f"(base64 {len(ex['img_b64'])} chars, not written to this log)")
 
                 yield {"type": "tool", "name": name, "args": args, "result": ex["result"]}
 

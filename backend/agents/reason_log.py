@@ -99,7 +99,7 @@ def _show_capabilities() -> tuple[Optional[list], str]:
     caps = doc.get("capabilities")
     if not isinstance(caps, list):
         # 구버전 Ollama 는 capabilities 를 안 준다. 그 경우 판정 불가.
-        return None, "응답에 capabilities 필드가 없음(구버전 Ollama)"
+        return None, "response has no 'capabilities' field (older Ollama)"
     return caps, ""
 
 
@@ -109,33 +109,33 @@ def think_capability() -> tuple[bool, str]:
     if _think_state is not None:
         return _think_state
     if _THINK_ENV in ("0", "false", "no", "off"):
-        _think_state = (False, "RAMAN_LLM_THINK=0 — 강제 비활성")
+        _think_state = (False, "RAMAN_LLM_THINK=0 - forced off")
         return _think_state
     forced = _THINK_ENV in ("1", "true", "yes", "on")
     caps, err = _show_capabilities()
     if caps is None:
         if forced:
-            _think_state = (True, f"RAMAN_LLM_THINK=1 강제 — 능력 조회 실패({err})")
+            _think_state = (True, f"RAMAN_LLM_THINK=1 forced - capability query failed ({err})")
         else:
-            _think_state = (False, f"능력 조회 실패({err}) → think 미사용")
+            _think_state = (False, f"capability query failed ({err}) -> think not used")
     else:
-        ok = "thinking" in caps
-        if ok:
-            _think_state = (True, f"{OLLAMA_MODEL} capabilities={caps} → thinking 지원")
+        supported = "thinking" in caps
+        if supported:
+            _think_state = (True, f"{OLLAMA_MODEL} capabilities={caps} -> thinking supported")
         elif forced:
-            _think_state = (True, f"RAMAN_LLM_THINK=1 강제 — 단 capabilities={caps} 에 "
-                                  f"thinking 이 없어 Ollama 가 400 을 낼 수 있음")
+            _think_state = (True, f"RAMAN_LLM_THINK=1 forced - but capabilities={caps} has no "
+                                  f"'thinking', so Ollama may answer 400")
         else:
-            _think_state = (False, f"{OLLAMA_MODEL} capabilities={caps} → thinking 미지원. "
-                                   f"이 모델은 '생각 토큰'을 따로 내보내지 않는다 — "
-                                   f"[Gemma TEXT] 가 모델이 낸 유일한 추론 텍스트다")
+            _think_state = (False, f"{OLLAMA_MODEL} capabilities={caps} -> thinking NOT supported. "
+                                   f"This model does not emit separate thinking tokens - "
+                                   f"[Gemma TEXT] is the only reasoning text it produces")
     return _think_state
 
 
 def _disable_think(reason: str) -> None:
     """think 를 켰다가 서버가 거부하면 영구 강등한다(같은 실행을 두 번 죽이지 않게)."""
     global _think_state
-    _think_state = (False, f"런타임 강등 — {reason}")
+    _think_state = (False, f"disabled at runtime - {reason}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -198,7 +198,7 @@ def _roster(messages) -> str:
 def _clip(s: str, limit: Optional[int] = None) -> str:
     lim = _MAX_CHARS if limit is None else limit
     s = str(s or "")
-    return s if len(s) <= lim else s[:lim] + f"\n… <{len(s) - lim}자 생략>"
+    return s if len(s) <= lim else s[:lim] + f"\n… <{len(s) - lim} chars omitted>"
 
 
 def _jd(obj: Any, limit: Optional[int] = None) -> str:
@@ -259,7 +259,7 @@ class ReasonLog:
                 _OPENED.add(key)
             self._fh = open(self.path, "w" if first else "a", encoding="utf-8")
         except Exception as e:
-            print(f"[reason_log] 파일 열기 실패({self.path}): {type(e).__name__}: {e}",
+            print(f"[reason_log] failed to open {self.path}: {type(e).__name__}: {e}",
                   file=sys.stderr)
             return
         self._header(question)
@@ -320,7 +320,8 @@ class ReasonLog:
             if think_on and "think" in f"{e}".lower():
                 _disable_think(f"{type(e).__name__}: {e}")
                 self.rec("Gemma THINK-OFF",
-                         "Ollama 가 think 를 거부해 이후 호출에서 끕니다", f"{type(e).__name__}: {e}")
+                         "Ollama rejected think - disabling it for the remaining calls",
+                         f"{type(e).__name__}: {e}")
                 ai = llm.invoke(messages)
             else:
                 self.rec("Gemma ERROR", f"{head} · {time.time() - t0:.2f}s",
@@ -346,13 +347,13 @@ class ReasonLog:
         if text:
             self.rec("Gemma TEXT", pre, _clip(text, 8000))
         elif not tcs:
-            self.rec("Gemma TEXT", pre + " · (빈 응답 — 컨텍스트 초과 의심)")
+            self.rec("Gemma TEXT", pre + " · (empty reply - context overflow suspected)")
 
         if tcs:
             body = "\n".join(
                 f"{i + 1}) {c.get('name')}({_jd(c.get('args') or {}, 800)})"
                 for i, c in enumerate(tcs))
-            self.rec("Gemma TOOL_CALLS", f"{pre} · {len(tcs)}개", body)
+            self.rec("Gemma TOOL_CALLS", f"{pre} · {len(tcs)} call(s)", body)
 
         meta = getattr(ai, "response_metadata", None) or {}
         usage = getattr(ai, "usage_metadata", None) or {}
@@ -402,15 +403,15 @@ class ReasonLog:
     def final(self, text: str, ctx: Optional[dict] = None) -> None:
         ctx = ctx or {}
         self.rec("FINAL",
-                 f"{time.time() - self._t0:.2f}s · LLM {self._llm_calls}회 · "
-                 f"도구 {self._tool_calls}회 · dose {float(ctx.get('dose', 0.0)):.2f} mJ",
+                 f"{time.time() - self._t0:.2f}s · LLM {self._llm_calls} calls · "
+                 f"tools {self._tool_calls} calls · dose {float(ctx.get('dose', 0.0)):.2f} mJ",
                  _clip(text, 8000))
         self.close()
 
     def failed(self, detail: str) -> None:
         self.rec("ERROR",
-                 f"{time.time() - self._t0:.2f}s · LLM {self._llm_calls}회 · "
-                 f"도구 {self._tool_calls}회", _clip(detail, 4000))
+                 f"{time.time() - self._t0:.2f}s · LLM {self._llm_calls} calls · "
+                 f"tools {self._tool_calls} calls", _clip(detail, 4000))
         self.close()
 
     def close(self) -> None:
@@ -445,7 +446,7 @@ def open_turn(agent: str, question: str, session_id: str = ""):
     try:
         return ReasonLog(agent, sid, question)
     except Exception as e:      # noqa: BLE001 — 로깅이 실험을 깨선 안 된다
-        print(f"[reason_log] 로거 생성 실패: {type(e).__name__}: {e}", file=sys.stderr)
+        print(f"[reason_log] failed to create the logger: {type(e).__name__}: {e}", file=sys.stderr)
         return _Null()
 
 
@@ -456,22 +457,22 @@ def open_turn(agent: str, question: str, session_id: str = ""):
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
     print(f"Ollama   : {OLLAMA_HOST}")
-    print(f"모델      : {OLLAMA_MODEL}")
+    print(f"Model    : {OLLAMA_MODEL}")
     caps, err = _show_capabilities()
     if caps is None:
-        print(f"capabilities 조회 실패: {err}")
-        print("  → 장비 PC(Ollama 가 도는 곳)에서 실행해야 합니다.")
+        print(f"capabilities query failed: {err}")
+        print("  -> Run this on the instrument PC (where Ollama runs).")
     else:
         print(f"capabilities: {caps}")
         if "thinking" in caps:
-            print("  → 이 모델은 '생각 토큰'을 따로 내보냅니다. think=true 로 호출하면")
-            print("     Ollama 가 message.thinking 을 채워 주고, 로그의 [Gemma THINKING] 에 찍힙니다.")
+            print("  -> This model emits separate thinking tokens. Called with think=true,")
+            print("     Ollama fills message.thinking and it appears as [Gemma THINKING] in the log.")
         else:
-            print("  → 이 모델은 thinking 능력이 없습니다. think=true 를 보내면 Ollama 가")
-            print("     400 'does not support thinking' 을 돌려줍니다. 따라서 [Gemma THINKING]")
-            print("     줄은 나오지 않고, [Gemma TEXT](= ReAct 의 Thought)가 모델이 내놓는")
-            print("     유일한 추론 텍스트입니다. 그 밖의 내부 연산(logit·attention)은")
-            print("     Ollama HTTP API 자체에 표면이 없어 어떤 설정으로도 얻을 수 없습니다.")
+            print("  -> This model has no thinking capability. Sending think=true makes Ollama")
+            print("     answer 400 'does not support thinking'. So no [Gemma THINKING] line is")
+            print("     produced, and [Gemma TEXT] (= the Thought of ReAct) is the only reasoning")
+            print("     text the model emits. Other internals (logits, attention) have no surface")
+            print("     in the Ollama HTTP API and cannot be obtained with any setting.")
     on, why = think_capability()
-    print(f"\n이번 설정에서 think: {'ON' if on else 'OFF'} — {why}")
-    print(f"로그 위치 예시: {log_path('AILA', 'sess_abc123')}")
+    print(f"\nthink in this configuration: {'ON' if on else 'OFF'} - {why}")
+    print(f"Example log path: {log_path('AILA', 'sess_abc123')}")

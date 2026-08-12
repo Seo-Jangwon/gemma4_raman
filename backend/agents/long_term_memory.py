@@ -34,6 +34,8 @@ import time
 import uuid
 from pathlib import Path
 
+from backend.tools.result import fail, ok
+
 _MEMORY_DIR = Path(__file__).resolve().parent / "coala_memory"
 _EPISODIC_NAME = "experiences.json"
 _SEMANTIC_NAME = "insights.json"
@@ -224,9 +226,9 @@ def recall_experiences(ctx: dict, args: dict) -> dict:
     now_substrate = str(args.get("substrate", "")).strip()
     episodes = _load(_dir(ctx) / _EPISODIC_NAME)
     if not episodes:
-        return {"ok": True, "results": [],
-                "note": "No past experiments accumulated yet. After finishing this measurement, "
-                        "leave one with record_experience and it will be retrievable in future experiments."}
+        return ok(results=[],
+                  note="No past experiments accumulated yet. After finishing this measurement, "
+                       "leave one with record_experience and it will be retrievable in future experiments.")
 
     def rel(e):
         return _substrate_relation(now_substrate,
@@ -241,14 +243,14 @@ def recall_experiences(ctx: dict, args: dict) -> dict:
             s = _match_score(query, _episode_haystack(e))
             if s <= 0:
                 continue
-            ok = 1 if (e.get("execution_summary") or {}).get("is_success") else 0
-            scored.append((s, rank[rel(e)], ok, idx, e))
+            succeeded = 1 if (e.get("execution_summary") or {}).get("is_success") else 0
+            scored.append((s, rank[rel(e)], succeeded, idx, e))
         if not scored:
-            return {"ok": True, "results": [],
-                    "note": f"No past experience related to '{query}'. Decide on your own."}
+            return ok(results=[],
+                      note=f"No past experience related to '{query}'. Decide on your own.")
         picked = [t[-1] for t in sorted(scored, key=lambda x: x[:4], reverse=True)][:top_k]
 
-    return {"ok": True, "results": [_project_episode(e, rel(e)) for e in picked]}
+    return ok(results=[_project_episode(e, rel(e)) for e in picked])
 
 
 def record_experience(ctx: dict, args: dict) -> dict:
@@ -260,7 +262,7 @@ def record_experience(ctx: dict, args: dict) -> dict:
     """
     sample = str(args.get("sample", "")).strip()
     if not sample:
-        return {"ok": False, "error": "sample (sample type) is required."}
+        return fail("sample (sample type) is required.")
 
     order = [n for n in ctx.get("tool_call_order", []) if n not in _LEARNING_TOOL_NAMES]
     counts: dict = {}
@@ -300,12 +302,13 @@ def record_experience(ctx: dict, args: dict) -> dict:
     try:
         _append(_dir(ctx) / _EPISODIC_NAME, entry)
     except OSError as e:
-        return {"ok": False, "error": f"Failed to save experience: {e}"}
+        return fail(f"Failed to save experience: {e}")
     ctx["learned"] = True
-    return {"ok": True, "recorded": entry["id"], "sample": sample,
-            "auto_captured": {"tool_calls": len(order),
-                              "n_measurements": entry["system_metrics"]["n_measurements"],
-                              "dose_mj": entry["system_metrics"]["dose_mj"]}}
+    return ok(recorded=entry["id"],
+              sample=sample,
+              auto_captured={"tool_calls": len(order),
+                             "n_measurements": entry["system_metrics"]["n_measurements"],
+                             "dose_mj": entry["system_metrics"]["dose_mj"]})
 
 
 def recall_insights(ctx: dict, args: dict) -> dict:
@@ -321,9 +324,9 @@ def recall_insights(ctx: dict, args: dict) -> dict:
     top_k = max(1, min(int(args.get("top_k", 3) or 3), _RECALL_MAX_TOP_K))
     insights = _load(_dir(ctx) / _SEMANTIC_NAME)
     if not insights:
-        return {"ok": True, "results": [],
-                "note": "No generalized knowledge (insights) accumulated yet. Leave one with "
-                        "record_insight and it will be retrievable in future experiments."}
+        return ok(results=[],
+                  note="No generalized knowledge (insights) accumulated yet. Leave one with "
+                       "record_insight and it will be retrievable in future experiments.")
     if not query:
         ranked = list(reversed(insights))
     else:
@@ -333,9 +336,9 @@ def recall_insights(ctx: dict, args: dict) -> dict:
                   for idx, e in enumerate(insights)]
         ranked = [e for s, _, e in sorted(scored, key=lambda x: x[:2], reverse=True) if s > 0]
         if not ranked:
-            return {"ok": True, "results": [],
-                    "note": f"No generalized knowledge related to '{query}'. Decide on your own."}
-    return {"ok": True, "results": ranked[:top_k]}
+            return ok(results=[],
+                      note=f"No generalized knowledge related to '{query}'. Decide on your own.")
+    return ok(results=ranked[:top_k])
 
 
 def record_insight(ctx: dict, args: dict) -> dict:
@@ -346,16 +349,16 @@ def record_insight(ctx: dict, args: dict) -> dict:
     topic = str(args.get("topic", "")).strip()
     insight = str(args.get("insight", "")).strip()
     if not topic or not insight:
-        return {"ok": False, "error": "Both topic and insight are required."}
+        return fail("Both topic and insight are required.")
     entry = {"id": uuid.uuid4().hex[:12], "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
              "topic": topic, "insight": insight}
     try:
         _append(_dir(ctx) / _SEMANTIC_NAME, entry)
     except OSError as e:
-        return {"ok": False, "error": f"Failed to save insight: {e}"}
+        return fail(f"Failed to save insight: {e}")
     ctx["learned"] = True
     ctx["insight_recorded"] = True   # 엔드-오브-턴 유도가 중복 제안하지 않도록 표시
-    return {"ok": True, "recorded": entry["id"], "topic": topic}
+    return ok(recorded=entry["id"], topic=topic)
 
 
 def _blocked(name: str):
@@ -365,9 +368,8 @@ def _blocked(name: str):
     닿기 전에 여기서 막는다.
     """
     def _handler(ctx: dict, args: dict) -> dict:
-        return {"ok": False,
-                "error": f"{name} is not available in this configuration. "
-                         "Proceed without episodic memory."}
+        return fail(f"{name} is not available in this configuration. "
+                    "Proceed without episodic memory.")
     return _handler
 
 

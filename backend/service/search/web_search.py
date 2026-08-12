@@ -19,6 +19,8 @@ import re
 
 import httpx
 
+from backend.tools.result import fail, ok
+
 _UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 _TIMEOUT = 10.0
 
@@ -41,7 +43,7 @@ def _search_google(query: str, max_results: int) -> dict:
     items = r.json().get("items", []) or []
     results = [{"title": it.get("title", ""), "url": it.get("link", ""),
                 "snippet": it.get("snippet", "")} for it in items[:max_results]]
-    return {"ok": True, "provider": "google", "query": query, "results": results}
+    return ok(provider="google", query=query, results=results)
 
 
 def _search_duckduckgo(query: str, max_results: int) -> dict:
@@ -61,7 +63,7 @@ def _search_duckduckgo(query: str, max_results: int) -> dict:
             "url": url,
             "snippet": _clean(snippets[i]) if i < len(snippets) else "",
         })
-    return {"ok": True, "provider": "duckduckgo", "query": query, "results": results}
+    return ok(provider="duckduckgo", query=query, results=results)
 
 
 def web_search(query: str, max_results: int = 5) -> dict:
@@ -73,7 +75,7 @@ def web_search(query: str, max_results: int = 5) -> dict:
     """
     query = (query or "").strip()
     if not query:
-        return {"ok": False, "error": "The search query is empty."}
+        return fail("The search query is empty.")
     max_results = max(1, min(int(max_results or 5), 10))
 
     use_google = bool(os.environ.get("GOOGLE_API_KEY") and os.environ.get("GOOGLE_CSE_ID"))
@@ -81,13 +83,13 @@ def web_search(query: str, max_results: int = 5) -> dict:
         result = _search_google(query, max_results) if use_google \
             else _search_duckduckgo(query, max_results)
     except httpx.HTTPError as e:
-        return {"ok": False,
-                "error": f"Web search failed (network): {type(e).__name__}. "
-                         "Check that the instrument PC is connected to the internet. "
-                         "If offline, fall back to search_kb (local knowledge)."}
+        return fail(f"Web search failed (network): {type(e).__name__}. "
+                    "Check that the instrument PC is connected to the internet. "
+                    "If offline, fall back to search_kb (local knowledge).")
     except Exception as e:
-        return {"ok": False, "error": f"Web search failed: {e}"}
+        return fail(f"Web search failed: {e}")
 
     if not result.get("results"):
-        result["note"] = "검색 결과가 없습니다. 질의를 바꾸거나 search_kb를 시도하세요."
+        result["note"] = ("No web results. Rephrase the query, or try search_kb "
+                          "for the local knowledge base.")
     return result

@@ -286,7 +286,8 @@ def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
     """
     rlog = rlog or reason_log.NULL
     if len(candidates) == 1:
-        rlog.phase("evaluate", "후보 1개 — 평가 생략(논문 4.6: 단순 상황)", _label(candidates[0]))
+        rlog.phase("evaluate", "1 candidate - evaluation skipped (paper 4.6: simple case)",
+                   _label(candidates[0]))
         return candidates[0], {"scores": [1.0], "reason": "single execution candidate - evaluation skipped"}
 
     listing = "\n".join(f"{i}. {_label(c)}" for i, c in enumerate(candidates))
@@ -302,12 +303,14 @@ def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
         "Output only the following JSON (no explanation): "
         '{"scores": [number, ...], "reason": "one sentence on why the highest candidate was chosen"}'
     )
-    rlog.phase("evaluate", f"{len(candidates)}개 후보를 점수화 (누적 dose {dose:.1f} mJ 반영)", listing)
+    rlog.phase("evaluate",
+               f"Scoring {len(candidates)} candidates (cumulative dose {dose:.1f} mJ considered)",
+               listing)
 
     scores, reason = None, ""
     try:
         resp = rlog.invoke([HumanMessage(content=prompt)], llm=llm_plain,
-                           stage="CoALA evaluate (도구 없는 평가자 호출)")
+                           stage="CoALA evaluate (evaluator call without tools)")
         m = re.search(r"\{.*\}", runtime.text_of(resp), re.DOTALL)
         if m:
             data = json.loads(m.group(0))
@@ -317,11 +320,11 @@ def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
         scores = None
 
     if not scores or len(scores) != len(candidates):
-        rlog.phase("evaluate", "점수 JSON 파싱 실패 → 첫 후보로 폴백")
+        rlog.phase("evaluate", "Score JSON parse failed -> falling back to the first candidate")
         return candidates[0], {"scores": [], "reason": "evaluation parse failed - first candidate chosen"}
 
     best = max(range(len(candidates)), key=lambda i: scores[i])
-    rlog.phase("evaluate", "점수 " + ", ".join(
+    rlog.phase("evaluate", "Scores " + ", ".join(
         f"{_label(c)}={s:.2f}" for c, s in zip(candidates, scores)), reason)
     return candidates[best], {"scores": scores, "reason": reason}
 
@@ -351,15 +354,16 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory, propose_budget: lis
 
     for step in range(MAX_PLANNING_STEPS):
         if propose_budget[0] <= 0:
-            rlog.phase("plan", f"cycle {cycle} · propose 예산 소진 → stuck")
+            rlog.phase("plan", f"cycle {cycle} · propose budget exhausted -> stuck")
             outcome["kind"] = "stuck"
             return
 
         # 직전 조회가 그 이전에도 나왔던 것이면 반복으로 본다.
         repeated = bool(prior_sigs) and prior_sigs[-1] in prior_sigs[:-1]
         plan_note = _plan_progress_note(step + 1, len(prior_sigs), repeated)
-        rlog.phase("plan", f"cycle {cycle} · 계획 라운드 {step + 1}/{MAX_PLANNING_STEPS}"
-                           + (" · 같은 조회 반복 감지" if repeated else ""), plan_note)
+        rlog.phase("plan", f"cycle {cycle} · planning round {step + 1}/{MAX_PLANNING_STEPS}"
+                           + (" · repeated identical retrieval detected" if repeated else ""),
+                   plan_note)
         try:
             ai_msg = _propose(llm_tools, wm, plan_note, rlog=rlog,
                               stage=f"CoALA propose (cycle {cycle}, plan {step + 1})",
@@ -374,7 +378,7 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory, propose_budget: lis
 
         # ── 후보 없음 = finish. 모델이 최종 보고서를 낸 것 → 이번 턴 종료 ──────────
         if not candidates:
-            rlog.phase("plan", f"cycle {cycle} · 도구 후보 없음 → 최종 보고서로 턴 종료")
+            rlog.phase("plan", f"cycle {cycle} · no tool candidate -> final report, turn ends")
             wm.messages.append(ai_msg)
             outcome["kind"] = "finish"
             outcome["final_text"] = runtime.text_of(ai_msg).strip() or "Failed to generate a response."
@@ -384,8 +388,9 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory, propose_budget: lis
 
         # ── retrieval 이 없고 commit 후보만 있으면: planning 종료 ────────────────
         if not planning_actions:
-            rlog.phase("plan", f"cycle {cycle} · 정보수집 종료 · 실행 후보 {len(commit_actions)}건 확보 "
-                               f"→ evaluate/select 로", " / ".join(_label(c) for c in commit_actions))
+            rlog.phase("plan", f"cycle {cycle} · retrieval done · {len(commit_actions)} execution "
+                               f"candidate(s) -> evaluate/select",
+                       " / ".join(_label(c) for c in commit_actions))
             outcome["kind"] = "commit"
             outcome["commit"] = commit_actions
             outcome["commit_text"] = runtime.text_of(ai_msg)
@@ -400,12 +405,14 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory, propose_budget: lis
             for c in planning_actions)))
 
         rlog.phase("retrieval",
-                   f"cycle {cycle} · 정보수집 {len(planning_actions)}건 실행 (사이클을 닫지 않음)",
+                   f"cycle {cycle} · running {len(planning_actions)} retrieval action(s) "
+                   f"(does not close the cycle)",
                    " / ".join(_label(c) for c in planning_actions))
         if commit_actions:
             rlog.phase("retrieval",
-                       f"cycle {cycle} · 같은 응답에 섞여 나온 실행 후보 {len(commit_actions)}건은 버림 "
-                       f"(다음 propose 에서 재제안시킴)", " / ".join(_label(c) for c in commit_actions))
+                       f"cycle {cycle} · dropped {len(commit_actions)} execution candidate(s) mixed "
+                       f"into the same reply (re-proposed on the next propose)",
+                       " / ".join(_label(c) for c in commit_actions))
 
         yield {"type": "phase", "phase": "plan",
                "message": "Information gathering (retrieval): "
@@ -416,8 +423,8 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory, propose_budget: lis
             yield from _execute_and_observe(ctx, wm, tc, rlog)
         # 같은 사이클 안에서 다시 propose (planning 반복)
 
-    rlog.phase("plan", f"cycle {cycle} · 계획 라운드 {MAX_PLANNING_STEPS}회를 다 쓰고도 "
-                       f"실행/종료를 못 정함 → stuck")
+    rlog.phase("plan", f"cycle {cycle} · used all {MAX_PLANNING_STEPS} planning rounds without "
+                       f"deciding to execute or finish -> stuck")
     outcome["kind"] = "stuck"
 
 
@@ -435,8 +442,8 @@ def _execute_and_observe(ctx: dict, wm: WorkingMemory, tc: dict, rlog) -> Iterat
         tool_call_id=ex["tool_call_id"]))
     wm.absorb(name, ex["result"], action)
     if ex["img_b64"]:
-        rlog.phase("observe", f"{name} · 이미지 1장을 모델에게 주입 "
-                              f"(base64 {len(ex['img_b64'])}자, 로그에는 싣지 않음)")
+        rlog.phase("observe", f"{name} · injected 1 image into the model "
+                              f"(base64 {len(ex['img_b64'])} chars, not written to this log)")
         wm.messages.append(runtime.image_message(ex["img_b64"], ex["question"]))
 
 
@@ -477,9 +484,9 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
 
         for n in range(MAX_CYCLES):
             cycle = n + 1
-            rlog.phase("cycle", f"────── 사이클 {cycle} 시작 "
-                                f"(propose 예산 {propose_budget[0]}/{MAX_AGENT_STEPS}, "
-                                f"누적 dose {ctx['dose']:.1f} mJ) ──────")
+            rlog.phase("cycle", f"────── cycle {cycle} start "
+                                f"(propose budget {propose_budget[0]}/{MAX_AGENT_STEPS}, "
+                                f"cumulative dose {ctx['dose']:.1f} mJ) ──────")
 
             # ── 1) PLANNING ──────────────────────────────────────────────────
             outcome: dict = {}
@@ -521,9 +528,9 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
                 yield {"type": "error", "detail": detail}
                 return
 
-            rlog.phase("select", f"cycle {cycle} · 선택 → {_label(chosen)}",
+            rlog.phase("select", f"cycle {cycle} · selected -> {_label(chosen)}",
                        (meta.get("reason") or "")
-                       + (f"\n(후보 {len(labels)}개: " + " / ".join(labels) + ")"
+                       + (f"\n({len(labels)} candidates: " + " / ".join(labels) + ")"
                           if len(labels) > 1 else ""))
             # select 이벤트에 propose→evaluate→select 전 과정을 실어 벤치마크 로그가
             # 후보/점수/이유/선택을 다 담게 한다.

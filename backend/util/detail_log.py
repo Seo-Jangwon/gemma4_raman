@@ -162,7 +162,7 @@ class TurnLog:
         try:
             _append_turn(self.agent, self.session_id, self.started_at, entry)
         except Exception as e:   # noqa: BLE001 — 로깅 실패가 실험을 깨선 안 된다
-            print(f"[detail_log] 기록 실패: {type(e).__name__}: {e}", file=sys.stderr)
+            print(f"[detail_log] write failed: {type(e).__name__}: {e}", file=sys.stderr)
 
 
 def new_turn(agent: str, session_id: str, question: str) -> TurnLog:
@@ -195,7 +195,7 @@ def _append_turn(agent: str, session_id: str, started_at: str, entry: dict) -> N
             with open(path, "r", encoding="utf-8") as f:
                 doc = json.load(f)
             if not isinstance(doc, dict) or "turns" not in doc:
-                raise ValueError("형식 불일치")
+                raise ValueError("unexpected log file shape")
         except (FileNotFoundError, json.JSONDecodeError, ValueError, OSError):
             doc = {"agent": agent, "session_id": session_id,
                    "started_at": started_at, "turns": []}

@@ -58,6 +58,10 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+# sys.path 를 세운 뒤에 import 한다 — 이 파일은 자식 프로세스에서도 실행되므로
+# (python -m backend.service.analysis_sandbox), backend 패키지가 보이는 시점 뒤여야 한다.
+from backend.tools.result import fail, ok  # noqa: E402
+
 # ── 정책 ──────────────────────────────────────────────────────────────────────
 _ALLOWED_IMPORT_ROOTS = {
     "numpy", "scipy", "math", "statistics", "matplotlib", "pandas",
@@ -415,19 +419,15 @@ def _main(payload_path: str) -> None:
         plt.close("all")
 
         out, clipped = _clip_stdout(buf.getvalue())
-        result = {"ok": True, "stdout": out, "images": images,
-                  "saved_files": saved_files}
+        result = ok(stdout=out, images=images, saved_files=saved_files)
         if clipped:
             result["stdout_truncated"] = True
     except Exception as e:
         out, clipped = _clip_stdout(buf.getvalue())
-        result = {
-            "ok": False,
-            "stdout": out,
-            "error": f"{type(e).__name__}: {e}",
-            "trace": traceback.format_exc()[-1200:],
-            "saved_files": saved_files,
-        }
+        result = fail(f"{type(e).__name__}: {e}",
+                      stdout=out,
+                      trace=traceback.format_exc()[-1200:],
+                      saved_files=saved_files)
         if clipped:
             result["stdout_truncated"] = True
     # ensure_ascii 는 기본값(True) 그대로 둔다 — 비ASCII를 \uXXXX 로 이스케이프해
@@ -530,7 +530,7 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
         return [str(x).strip() for x in v if str(x).strip()]
 
     if not isinstance(code, str) or not code.strip():
-        return {"ok": False, "error": "code is empty. Provide the Python analysis code to run."}
+        return fail("code is empty. Provide the Python analysis code to run.")
     date = (date.strip() or None) if isinstance(date, str) else date
     title = (title.strip() or None) if isinstance(title, str) else title
     names = _as_list(names) or None
@@ -563,16 +563,15 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
         try:
             uploads.append(load_upload(str(fid)))
         except Exception as e:
-            return {"ok": False,
-                    "error": f"Could not load the attached file '{fid}': {type(e).__name__}: {e}",
-                    "hint": "Check the exact file_id with list_uploaded_files."}
+            return fail(f"Could not load the attached file '{fid}': {type(e).__name__}: {e}",
+                        hint="Check the exact file_id with list_uploaded_files.")
 
     # 실행 전에 문법·정책을 부모에서도 1차 검사(빠른 실패, 명확한 에러)
     try:
         validate_code(code)
     except ValueError as e:
-        return {"ok": False, "error": f"Code policy violation: {e}",
-                "hint": "Analysis only with numpy/scipy/matplotlib. No hardware/file/network access."}
+        return fail(f"Code policy violation: {e}",
+                    hint="Analysis only with numpy/scipy/matplotlib. No hardware/file/network access.")
 
     # 세션 귀속 정보를 자식에게 넘긴다 — 자식은 별도 프로세스라 run_store 의 현재
     # 세션을 못 보므로, 저장 디렉터리·상대경로 접두사·시작 순번을 부모가 계산해 준다.
@@ -625,7 +624,7 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
             cwd=str(_cwd), env=_env,
         )
     except subprocess.TimeoutExpired:
-        return {"ok": False, "error": f"Execution timed out ({timeout_sec}s) - infinite loop or too heavy a computation."}
+        return fail(f"Execution timed out ({timeout_sec}s) - infinite loop or too heavy a computation.")
     finally:
         try:
             Path(payload_path).unlink()
@@ -637,13 +636,14 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
     if marker not in out:
         # 결과 마커 없이 죽음 — 프로세스 자체 크래시(예: 세그폴트)나 정책 외 종료
         tail = (proc.stderr or out)[-800:]
-        return {"ok": False, "error": "The analysis process exited without a result.", "detail": tail}
+        return fail("The analysis process exited without a result.", detail=tail)
     payload = json.loads(out.split(marker, 1)[1])
 
     if not payload.get("ok"):
         # 실패해도 saved_files 는 실어 보낸다 — 이미 쓴 파일을 모델이 알아야 한다.
-        err = {"ok": False, "error": payload.get("error", "Analysis failed"),
-               "stdout": payload.get("stdout", ""), "trace": payload.get("trace", "")}
+        err = fail(payload.get("error", "Analysis failed"),
+                   stdout=payload.get("stdout", ""),
+                   trace=payload.get("trace", ""))
         if payload.get("saved_files"):
             err["saved_files"] = payload["saved_files"]
             # 코드가 죽기 전에 이미 쓴 파일도 manifest 에 남긴다 — 디스크에는 있는데
@@ -656,8 +656,7 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
         return err
 
     images = payload.get("images", [])
-    resp = {"ok": True, "stdout": payload.get("stdout", ""),
-            "image_count": len(images), "images": images}
+    resp = ok(stdout=payload.get("stdout", ""), image_count=len(images), images=images)
     if payload.get("stdout_truncated"):
         resp["stdout_truncated"] = True
     # save_result 로 쓴 파일 목록. 여기 경로가 곧 load_spectrum 이 읽는 경로다.

@@ -25,6 +25,8 @@ from langchain_core.messages import HumanMessage
 from backend.service.store import run_store
 from backend.util.detail_log import new_turn
 from backend.tools.file_tools import FILE_DISPATCH
+# 도구 결과 봉투의 단일 출처. normalize 가 여기(call_tool)에서만 불리는 이유는 result.py 참고.
+from backend.tools.result import fail, is_ok, normalize, ok
 from backend.service.knowledge import search_kb
 from backend.service.store.spectrum_store import spectrum_event
 from backend.llm_config import (
@@ -119,16 +121,16 @@ def search_knowledge_base(args: dict) -> dict:
     """
     query = str(args.get("query", "")).strip()
     if not query:
-        return {"ok": False, "error": "query is empty. Provide a sample/material keyword."}
+        return fail("query is empty. Provide a sample/material keyword.")
     hits = search_kb(query, top_k=3)
     if not hits:
         # 빈 결과를 에러로 만들지 않는 이유: "KB 에 없는 시편"은 정상적인 상황이고, 모델은
         # 이때 스스로 파라미터를 판단해야 한다. 에러로 주면 재시도 루프에 빠지거나 측정을
         # 포기할 수 있다.
-        return {"ok": True, "results": [],
-                "note": f"No protocol matching '{query}' in the knowledge base. "
-                        "Decide the parameters yourself and state that in the report."}
-    return {"ok": True, "results": hits}
+        return ok(results=[],
+                  note=f"No protocol matching '{query}' in the knowledge base. "
+                       "Decide the parameters yourself and state that in the report.")
+    return ok(results=hits)
 
 
 # 레이저가 시편에 조사되는 도구와, 그 도구의 조사 횟수를 args 에서 읽는 방법.
@@ -141,12 +143,25 @@ _IRRADIATING_TOOLS = {
 
 def call_tool(ctx: dict, name: str, args: dict,
               extra_handlers: Optional[dict] = None) -> dict:
-    """단일 도구 호출 관문.
+    """단일 도구 호출 관문 — **모든 도구 결과가 지나는 단 하나의 지점**.
 
-    유일한 비-LLM '판단'은 조사량 회로차단기다. 이건 판단이 아니라 물리적 회로차단기다:
-    이번 턴의 누적 조사량이 절대 상한을 넘으면 그 호출 자체를 막는다. 모델의 판단 범위
-    (무엇을 측정할지, 파워를 얼마로 할지)에는 전혀 개입하지 않는다 — 모델이 무엇을
-    요청하든 총합이 물리적으로 위험한 수준에 닿았을 때만 차단한다.
+    그래서 봉투 규약(result.py)을 여기서 강제한다. 도구가 규약을 어긴 것을 돌려주면
+    모델이 읽을 수 있는 실패로 바꾼다. 예전에는 ok 키가 빠진 dict 가 성공으로 새어
+    나가 사용자 화면(describe_tool)에도, 조사량 누계에도 조용히 잘못 반영됐다.
+
+    실제 디스패치는 _dispatch 가 한다 — 분리해 둬야 나중에 반환 경로가 하나 늘어도
+    검사를 우회할 수 없다.
+    """
+    return normalize(_dispatch(ctx, name, args, extra_handlers), name)
+
+
+def _dispatch(ctx: dict, name: str, args: dict,
+              extra_handlers: Optional[dict] = None) -> dict:
+    """도구를 골라 부른다. 유일한 비-LLM '판단'은 조사량 회로차단기뿐.
+
+    회로차단기는 판단이 아니라 물리적 차단이다: 이번 턴의 누적 조사량이 절대 상한을
+    넘으면 그 호출 자체를 막는다. 모델의 판단 범위(무엇을 측정할지, 파워를 얼마로 할지)
+    에는 전혀 개입하지 않는다 — 총합이 물리적으로 위험한 수준에 닿았을 때만 차단한다.
 
     extra_handlers 는 그 아키텍처에만 있는 내부 액션이다(CoALA 의 장기기억 4종).
     하드웨어 가드보다 먼저 처리되므로 장비 미연결 상태에서도 동작한다.
@@ -163,17 +178,17 @@ def call_tool(ctx: dict, name: str, args: dict,
 
     dispatch = ctx["dispatch"]
     if dispatch is None:
-        return {"ok": False, "error": "Hardware is not connected."}
+        return fail("Hardware is not connected.")
     fn = dispatch.get(name)
     if fn is None:
-        return {"ok": False, "error": f"Unknown tool: {name}"}
+        return fail(f"Unknown tool: {name}")
 
     shots = _IRRADIATING_TOOLS.get(name)
     if shots is None:
         try:
             return fn(dict(args))
         except Exception as e:
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            return fail(f"{type(e).__name__}: {e}")
 
     # power/exposure 를 생략하면 도구가 '현재 장비 설정을 유지'한다. 여기서는 그 값을 알 수
     # 없으므로 기본값으로 근사한다 — 누계가 실제보다 작게 잡힐 수 있지만, 도구 계층
@@ -185,15 +200,16 @@ def call_tool(ctx: dict, name: str, args: dict,
         tail = (" after this grid scan. Reduce the grid size, power, or exposure, or start a new request."
                 if name == "run_grid_scan" else
                 ". Wrap up the measurement or start again with a new request.")
-        return {"ok": False,
-                "error": (f"Safety block: this turn's cumulative dose would exceed the limit "
-                          f"({MAX_DOSE_MJ_PER_TURN} mJ){tail}")}
+        return fail(f"Safety block: this turn's cumulative dose would exceed the limit "
+                    f"({MAX_DOSE_MJ_PER_TURN} mJ){tail}")
     try:
         result = fn(dict(args))
     except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-    if isinstance(result, dict) and result.get("ok"):
-        ctx["dose"] += dose_inc      # 실패한 조사는 누계에 넣지 않는다(레이저가 안 나갔다)
+        return fail(f"{type(e).__name__}: {e}")
+    # 실패한 조사는 누계에 넣지 않는다(레이저가 안 나갔다). is_ok 는 ok=True 만 성공으로
+    # 보므로, 봉투를 어긴 결과는 여기서 성공으로 세어지지 않고 call_tool 이 실패로 바꾼다.
+    if is_ok(result):
+        ctx["dose"] += dose_inc
     return result
 
 
@@ -209,9 +225,10 @@ def execute_tool(ctx: dict, name: str, args: dict, tool_call_id: str = "",
     t0 = time.time()
     raw = call_tool(ctx, name, args, extra_handlers)
     elapsed_ms = (time.time() - t0) * 1000.0
-    result = slim(raw) if isinstance(raw, dict) else raw
-    img_b64 = result.pop("image_base64", None) if isinstance(result, dict) else None
-    question = result.pop("question", None) if isinstance(result, dict) else None
+    # call_tool 이 봉투 규약을 보장하므로 여기부터는 dict 임이 확실하다(isinstance 가드 불필요).
+    result = slim(raw)
+    img_b64 = result.pop("image_base64", None)
+    question = result.pop("question", None)
     return {"name": name, "args": args, "result": result, "img_b64": img_b64,
             "question": question, "tool_call_id": tool_call_id, "elapsed_ms": elapsed_ms}
 

@@ -44,6 +44,7 @@ plt.rcParams["font.family"] = ["Malgun Gothic", "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
 
 from backend.service.store import DATA_ROOT
+from backend.tools.result import fail, ok
 
 # data/results — web_controller/main.py 가 /api/results 로 정적 서빙한다.
 RESULTS_ROOT = DATA_ROOT / "results"
@@ -141,7 +142,7 @@ def make_title(result: dict, meta: dict | None = None) -> str:
         parts.append(f"accum×{result['num_accumulations']}")
     elif mode == "kinetic" and result.get("kinetic_count"):
         parts.append(f"kinetic×{result['kinetic_count']}")
-    return " · ".join(parts) if parts else "라만 스펙트럼"
+    return " · ".join(parts) if parts else "Raman spectrum"
 
 
 def render_png(result: dict, path: Path, title: str) -> None:
@@ -298,7 +299,7 @@ def save_spectrum(result: dict, meta: dict | None = None) -> dict:
            실패해도 측정 자체를 막지 않도록 예외를 삼키고 {ok: False, error} 를 돌려준다.
     """
     if not result or not result.get("ok"):
-        return {"ok": False, "error": "No valid measurement result to save."}
+        return fail("No valid measurement result to save.")
     try:
         now = datetime.now()
         date_dir = now.strftime("%Y-%m-%d")
@@ -336,19 +337,16 @@ def save_spectrum(result: dict, meta: dict | None = None) -> dict:
         except Exception:
             pass          # 부기 실패가 측정 저장을 깨뜨리면 안 된다
 
-        return {
-            "ok": True,
-            "title": title,
-            "timestamp": now.isoformat(),
-            "session": sess,
-            "dir": str(out_dir),
-            "files": {"png": str(png_path), "csv": str(csv_path), "json": str(json_path)},
-            "image_url": url(png_path),
-            "csv_url": url(csv_path),
-            "json_url": url(json_path),
-        }
+        return ok(title=title,
+                  timestamp=now.isoformat(),
+                  session=sess,
+                  dir=str(out_dir),
+                  files={"png": str(png_path), "csv": str(csv_path), "json": str(json_path)},
+                  image_url=url(png_path),
+                  csv_url=url(csv_path),
+                  json_url=url(json_path))
     except Exception as e:
-        return {"ok": False, "error": f"Failed to save results: {e}"}
+        return fail(f"Failed to save results: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -435,7 +433,7 @@ def combine_spectra(date: str | None = None, names: list[str] | None = None,
     저장 제목(좌표·조건 자동 생성)을 그대로 쓴다. 반환 saved.image_url 로 채팅 표시."""
     d, items = _select(date, names, scope)
     if not items:
-        return {"ok": False, "error": f"No measurement results to combine on {d}."}
+        return fail(f"No measurement results to combine on {d}.")
     n = len(items)
     cols = max(1, min(max_cols, n))
     rows = ceil(n / cols)
@@ -453,7 +451,7 @@ def combine_spectra(date: str | None = None, names: list[str] | None = None,
         ax.set_xlabel(xlabel, fontsize=6)
     for j in range(n, rows * cols):           # 남는 칸 숨김
         axes[j // cols][j % cols].axis("off")
-    fig.suptitle(f"{d} · 측정 {n}개 합본", fontsize=12)
+    fig.suptitle(f"{d} · {n} measurements combined", fontsize=12)
     fig.tight_layout()
 
     day_dir = RESULTS_ROOT / d
@@ -463,9 +461,8 @@ def combine_spectra(date: str | None = None, names: list[str] | None = None,
     png = day_dir / f"_{base}.png"
     fig.savefig(png, bbox_inches="tight")
     plt.close(fig)
-    return {"ok": True, "count": n,
-            "saved": {"title": f"Combined · {n} measurements", "image_url": _url(d, png.name)}}
-
+    return ok(count=n,
+              saved={"title": f"Combined · {n} measurements", "image_url": _url(d, png.name)})
 
 def aggregate_spectra_csv(date: str | None = None, names: list[str] | None = None,
                           out_name: str | None = None, scope: str = "session") -> dict:
@@ -473,7 +470,7 @@ def aggregate_spectra_csv(date: str | None = None, names: list[str] | None = Non
     열: 날짜/시각/제목/좌표/파워/노출/모드/최대세기/총세기/피크위치."""
     d, items = _select(date, names, scope)
     if not items:
-        return {"ok": False, "error": f"No measurement results to summarize on {d}."}
+        return fail(f"No measurement results to summarize on {d}.")
     day_dir = RESULTS_ROOT / d
     day_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%H%M%S")
@@ -498,9 +495,8 @@ def aggregate_spectra_csv(date: str | None = None, names: list[str] | None = Non
                 f"{max(inten):.1f}" if inten else "",
                 f"{sum(inten):.1f}" if inten else "", peak,
             ])
-    return {"ok": True, "count": len(items),
-            "saved": {"title": f"Summary table · {len(items)} measurements", "csv_url": _url(d, csv_path.name)}}
-
+    return ok(count=len(items),
+              saved={"title": f"Summary table · {len(items)} measurements", "csv_url": _url(d, csv_path.name)})
 
 def save_scene(image, extent: list | None = None, meta: dict | None = None) -> dict:
     """현미경(카메라) 이미지 한 장을 저장한다 — 분석 코드가 피크맵을 이 위에 오버레이한다.
@@ -528,14 +524,16 @@ def save_scene(image, extent: list | None = None, meta: dict | None = None) -> d
         fig, ax = plt.subplots(figsize=(5, 4), dpi=100)
         ax.imshow(arr, cmap="gray" if arr.ndim == 2 else None,
                   extent=(extent if extent else None))
-        ax.set_title("현미경 이미지")
+        ax.set_title("Microscope image")
         fig.tight_layout()
         fig.savefig(png_path, bbox_inches="tight")
         plt.close(fig)
-        return {"ok": True, "image_url": f"{URL_PREFIX}/{day}/{sess}/{png_path.name}",
-                "session": sess, "scene_npz": str(npz_path), "extent": extent}
+        return ok(image_url=f"{URL_PREFIX}/{day}/{sess}/{png_path.name}",
+                  session=sess,
+                  scene_npz=str(npz_path),
+                  extent=extent)
     except Exception as e:
-        return {"ok": False, "error": f"Failed to save microscope image: {e}"}
+        return fail(f"Failed to save microscope image: {e}")
 
 
 def save_preview_png(png_bytes: bytes, tag: str = "preview") -> dict:
@@ -552,9 +550,9 @@ def save_preview_png(png_bytes: bytes, tag: str = "preview") -> dict:
         safe = "".join(c for c in str(tag) if c.isalnum() or c in "-_") or "preview"
         name = f"_{safe}_{stamp}.png"
         (out_dir / name).write_bytes(png_bytes)
-        return {"ok": True, "image_url": _url(day, name)}
+        return ok(image_url=_url(day, name))
     except Exception as e:
-        return {"ok": False, "error": f"Failed to save preview image: {e}"}
+        return fail(f"Failed to save preview image: {e}")
 
 
 def latest_scene(date: str | None = None, scope: str = "session") -> str | None:
@@ -590,7 +588,7 @@ def bundle_results(date: str | None = None, names: list[str] | None = None,
     """저장된 측정 파일들을 zip 하나로 묶어 다운로드 URL 을 돌려준다(#4)."""
     d, items = _select(date, names, scope)
     if not items:
-        return {"ok": False, "error": f"No measurement results to bundle on {d}."}
+        return fail(f"No measurement results to bundle on {d}.")
     day_dir = RESULTS_ROOT / d
     day_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%H%M%S")
@@ -607,6 +605,7 @@ def bundle_results(date: str | None = None, names: list[str] | None = None,
                     arc = f"{it['session']}/{p.name}" if it.get("session") else p.name
                     z.write(p, arcname=arc)
                     n_files += 1
-    return {"ok": True, "count": len(items), "files": n_files,
-            "saved": {"title": f"Bundle (zip) · {len(items)} measurements / {n_files} files",
-                      "zip_url": _url(d, zip_name)}}
+    return ok(count=len(items),
+              files=n_files,
+              saved={"title": f"Bundle (zip) · {len(items)} measurements / {n_files} files",
+                     "zip_url": _url(d, zip_name)})

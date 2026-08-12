@@ -33,6 +33,7 @@
 """
 from __future__ import annotations
 
+from backend.tools.result import fail, ok
 from backend.service.store.upload_store import ALLOWED_SUFFIXES, inspect_upload, list_uploads
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -149,20 +150,20 @@ def _t_list_uploaded_files(args: dict) -> dict:
     try:
         items = list_uploads(date)
     except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        return fail(f"{type(e).__name__}: {e}")
     if not items:
         # 빈 목록을 에러로 만들지 않는다 — '첨부가 없다'는 정상 상태이고, 모델은 이때
         # 사용자에게 파일을 요청하거나 측정 경로로 가야 한다. 에러로 주면 재시도 루프에 빠진다.
-        return {"ok": True, "files": [],
-                "note": "No files have been attached to this chat. Ask the user to attach one, "
-                        "or proceed with instrument measurement instead."}
-    return {"ok": True, "count": len(items), "files": items}
+        return ok(files=[],
+                  note="No files have been attached to this chat. Ask the user to attach one, "
+                       "or proceed with instrument measurement instead.")
+    return ok(count=len(items), files=items)
 
 
 def _t_inspect_file(args: dict) -> dict:
     file_id = str(args.get("file_id") or "").strip()
     if not file_id:
-        return {"ok": False, "error": "file_id is empty. Get it from list_uploaded_files first."}
+        return fail("file_id is empty. Get it from list_uploaded_files first.")
     sheet = (args.get("sheet") or "").strip() or None
     try:
         max_rows = int(args.get("max_rows") or 5)
@@ -171,13 +172,11 @@ def _t_inspect_file(args: dict) -> dict:
     try:
         return inspect_upload(file_id, sheet=sheet, max_rows=max_rows)
     except FileNotFoundError as e:
-        return {"ok": False, "error": str(e),
-                "hint": "Check the exact file_id with list_uploaded_files."}
+        return fail(str(e), hint="Check the exact file_id with list_uploaded_files.")
     except ValueError as e:
-        return {"ok": False, "error": str(e),
-                "hint": f"Supported file types: {', '.join(sorted(ALLOWED_SUFFIXES))}."}
+        return fail(str(e), hint=f"Supported file types: {', '.join(sorted(ALLOWED_SUFFIXES))}.")
     except Exception as e:
-        return {"ok": False, "error": f"Failed to read the file: {type(e).__name__}: {e}"}
+        return fail(f"Failed to read the file: {type(e).__name__}: {e}")
 
 
 def _t_run_analysis(args: dict) -> dict:
@@ -200,7 +199,7 @@ def _t_run_analysis(args: dict) -> dict:
             file_ids=args.get("file_ids"),
         )
     except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        return fail(f"{type(e).__name__}: {e}")
 
 
 def _t_list_session_artifacts(args: dict) -> dict:
@@ -212,14 +211,14 @@ def _t_list_session_artifacts(args: dict) -> dict:
     try:
         arts = run_store.list_artifacts(kind)
     except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        return fail(f"{type(e).__name__}: {e}")
     if not arts:
         # 빈 목록은 에러가 아니다 — '아직 아무것도 저장하지 않았다'는 정상 상태.
-        return {"ok": True, "session": cur["label"], "artifacts": [],
-                "note": ("You have not saved anything in this session yet. "
-                         "Save computed spectra with save_result inside run_analysis.")}
-    return {"ok": True, "session": cur["label"], "session_dir": cur["rel_dir"],
-            "count": len(arts), "artifacts": arts}
+        return ok(session=cur["label"],
+                  artifacts=[],
+                  note="You have not saved anything in this session yet. "
+                       "Save computed spectra with save_result inside run_analysis.")
+    return ok(session=cur["label"], session_dir=cur["rel_dir"], count=len(arts), artifacts=arts)
 
 
 # 이름 → 실행 함수. 각 에이전트의 _call_tool 이 하드웨어 가드보다 '먼저' 이 dict 를 본다.

@@ -10,6 +10,16 @@ import json
 import csv
 from pathlib import Path
 
+from typing import Annotated, Literal, Optional
+
+from pydantic import Field
+
+# 도구 인자의 타입·범위·설명은 아래 함수 시그니처에 직접 적는다. 스키마는
+# raman_tool_schemas.py 가 그 시그니처를 읽어 만든다 — 선언이 한 곳뿐이라
+# 스키마와 함수가 어긋날 수가 없다(tools/schema.py 머리말 참고).
+from backend.tools.schema import INTERNAL
+# 도구 결과는 전부 이 봉투로 나간다: ok(**payload) / fail(error, **extra). 규약은 result.py.
+from backend.tools.result import fail, ok
 from backend.hw_tools.config import (
     STAGE_MAX_X, STAGE_MAX_Y, STAGE_MIN_Z, STAGE_MAX_Z,
     CAMERA_WIDTH, CAMERA_HEIGHT,
@@ -128,8 +138,8 @@ def instrument_guard(what: str = "hardware connect", timeout: float = None):
     if not _INSTRUMENT_LOCK.acquire(timeout=t):
         busy = _lock_holder.get("what") or "another operation"
         raise InstrumentBusy(
-            f"장비가 '{busy}' 작업 중이라 {t:.0f}초 안에 사용할 수 없습니다 — '{what}'을(를) "
-            f"수행하지 않았습니다. 진행 중인 측정이 끝난 뒤 다시 시도하세요.")
+            f"The instrument is busy with '{busy}' and did not become free within {t:.0f}s, "
+            f"so '{what}' was NOT performed. Wait for the running operation to finish and retry.")
     prev = _lock_holder.get("what")
     _lock_holder["what"] = what if prev is None else prev
     try:
@@ -150,13 +160,12 @@ def _serialized(what: str, timeout: float = _BUSY_TIMEOUT_S):
         def wrapper(*args, **kwargs):
             if not _INSTRUMENT_LOCK.acquire(timeout=timeout):
                 busy = _lock_holder.get("what") or "another operation"
-                return {"ok": False, "error": (
-                    f"The instrument is busy with '{busy}' and did not become free within "
-                    f"{timeout:.0f}s, so '{what}' was NOT performed. Only one operation may drive "
-                    f"the hardware at a time (a measurement, a stage move, or a grid scan started "
-                    f"from the parameter panel or another chat session). Nothing was changed - "
-                    f"wait for it to finish and try again."),
-                    "busy_with": busy}
+                return fail(f"The instrument is busy with '{busy}' and did not become free within "
+                            f"{timeout:.0f}s, so '{what}' was NOT performed. Only one operation may drive "
+                            f"the hardware at a time (a measurement, a stage move, or a grid scan started "
+                            f"from the parameter panel or another chat session). Nothing was changed - "
+                            f"wait for it to finish and try again.",
+                            busy_with=busy)
             prev = _lock_holder.get("what")
             _lock_holder["what"] = what if prev is None else prev   # 최상위 작업 이름을 유지
             try:
@@ -214,13 +223,12 @@ def _stage_unavailable() -> dict:
     핸들이 남아 있어서 예전 검사를 그대로 통과했고, 도구들은 죽은 DLL 로 명령을 계속 보냈다.
     """
     if _stage is None:
-        return {"ok": False, "error": "Stage is not initialized."}
+        return fail("Stage is not initialized.")
     if getattr(_stage, "dead", False):
-        return {"ok": False, "error": (
-            f"The stage session is dead and cannot be used: {getattr(_stage, 'dead_reason', 'unknown')}. "
-            f"The DLL session could not be released, so no tool can revive it - the server process must "
-            f"be restarted. Do NOT retry reconnect_hardware; continue without the stage if the task "
-            f"allows it and say so explicitly in your answer.")}
+        return fail(f"The stage session is dead and cannot be used: {getattr(_stage, 'dead_reason', 'unknown')}. "
+                    f"The DLL session could not be released, so no tool can revive it - the server process must "
+                    f"be restarted. Do NOT retry reconnect_hardware; continue without the stage if the task "
+                    f"allows it and say so explicitly in your answer.")
     return None
 
 
@@ -313,24 +321,23 @@ def _apply_laser_power(percent, settle_s: float = _ND_SETTLE_S) -> dict | None:
     무시하면 파워가 안 걸린 상태로 ok:True 를 돌려주게 되므로 반드시 확인한다.
     """
     if _laser is None:
-        return {"ok": False, "error": "Laser is not initialized."}
+        return fail("Laser is not initialized.")
     if isinstance(percent, bool) or not isinstance(percent, (int, float)):
         try:
             percent = float(percent)
         except (TypeError, ValueError):
-            return {"ok": False, "error": "power must be a number (%)."}
+            return fail("power must be a number (%).")
     lo, hi = _laser_power_range()
     if not (lo <= float(percent) <= hi):
-        return {"ok": False, "error": f"Valid power range: {lo} - {hi} (%)"}
+        return fail(f"Valid power range: {lo} - {hi} (%)")
     try:
         applied = _laser.set_power(float(percent))
     except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        return fail(f"{type(e).__name__}: {e}")
     time.sleep(settle_s)
     if applied is False:
-        return {"ok": False, "error": (
-            "The ND filter motor did not confirm the move, so the laser power was NOT applied. "
-            "The measurement beam is still un-armed. Retry, or check the laser controller link.")}
+        return fail("The ND filter motor did not confirm the move, so the laser power was NOT applied. "
+                    "The measurement beam is still un-armed. Retry, or check the laser controller link.")
     return None
 
 
@@ -364,7 +371,7 @@ def _laser_off_quiet() -> bool:
             return True
     except Exception:
         pass
-    print("[laser] SSPW 0 미확인 — ND 차단으로 대체합니다.")
+    print("[laser] SSPW 0 unconfirmed - falling back to ND blocking.")
     return _restore_guide_beam_quiet()
 
 
@@ -396,7 +403,7 @@ def _restore_guide_beam_quiet() -> None:
         _laser.set_guide_beam()
         return True
     except Exception as e:
-        print(f"[laser] 가이드빔 복귀 실패: {type(e).__name__}: {e}")
+        print(f"[laser] guide-beam restore failed: {type(e).__name__}: {e}")
         return False
 
 
@@ -410,11 +417,11 @@ def _check_stage_target(x=None, y=None, z=None) -> dict | None:
     한계값은 config.py 단일 출처(STAGE_MAX_X/Y, STAGE_MIN_Z/MAX_Z).
     """
     if x is not None and not (0 <= float(x) <= STAGE_MAX_X):
-        return {"ok": False, "error": f"X out of range: {x} (allowed: 0-{STAGE_MAX_X})"}
+        return fail(f"X out of range: {x} (allowed: 0-{STAGE_MAX_X})")
     if y is not None and not (0 <= float(y) <= STAGE_MAX_Y):
-        return {"ok": False, "error": f"Y out of range: {y} (allowed: 0-{STAGE_MAX_Y})"}
+        return fail(f"Y out of range: {y} (allowed: 0-{STAGE_MAX_Y})")
     if z is not None and not (STAGE_MIN_Z <= float(z) <= STAGE_MAX_Z):
-        return {"ok": False, "error": f"Z out of range: {z} (allowed: {STAGE_MIN_Z}-{STAGE_MAX_Z})"}
+        return fail(f"Z out of range: {z} (allowed: {STAGE_MIN_Z}-{STAGE_MAX_Z})")
     return None
 
 
@@ -439,8 +446,9 @@ def init_hardware(stage=None, laser=None, ccd=None, camera=None):
     global _stage, _laser, _ccd, _camera
     got = _INSTRUMENT_LOCK.acquire(timeout=_BUSY_TIMEOUT_S)
     if not got:
-        print(f"[WARN] raman_tools.init_hardware(): 진행 중인 '{_lock_holder.get('what')}' 때문에 "
-              f"{_BUSY_TIMEOUT_S:.0f}s 안에 장비 락을 얻지 못했습니다 — 핸들 교체를 강행합니다.")
+        print(f"[WARN] raman_tools.init_hardware(): could not take the instrument lock within "
+              f"{_BUSY_TIMEOUT_S:.0f}s because '{_lock_holder.get('what')}' is running - "
+              f"replacing the handles anyway.")
     try:
         _stage = stage
         _laser = laser
@@ -449,7 +457,8 @@ def init_hardware(stage=None, laser=None, ccd=None, camera=None):
     finally:
         if got:
             _INSTRUMENT_LOCK.release()
-    print(f"[DEBUG] raman_tools.init_hardware() 호출됨: stage={_stage}, laser={_laser}, ccd={_ccd}, camera={_camera}")
+    print(f"[DEBUG] raman_tools.init_hardware() called: stage={_stage}, laser={_laser}, "
+          f"ccd={_ccd}, camera={_camera}")
 
 
 # 해제와 재연결 사이의 대기(초). DLL 세션/COM 포트/USB 핸들은 close() 가 돌아온 뒤에도
@@ -555,9 +564,9 @@ def get_hardware_status() -> dict:
         from backend.hw_tools.hardware_manager import get_manager
         mgr = get_manager()
     except Exception as e:
-        return {"ok": False, "error": f"HardwareManager unavailable: {type(e).__name__}: {e}"}
+        return fail(f"HardwareManager unavailable: {type(e).__name__}: {e}")
 
-    out: dict = {"ok": True, "connected": {}, "notes": {}}
+    out: dict = ok(connected={}, notes={})
     for name in ("stage", "laser", "ccd", "camera"):
         obj = getattr(mgr, name, None)
         # 핸들이 있어도 '죽은' 세션은 연결로 치지 않는다 — 해제에 실패한 핸들은 고아 세션을
@@ -699,7 +708,9 @@ def sync_tool_handles(mgr) -> None:
                   ccd=getattr(mgr, "ccd", None), camera=getattr(mgr, "camera", None))
 
 
-def reconnect_hardware(component: str = "all") -> dict:
+def reconnect_hardware(
+    component: Annotated[Optional[Literal['stage', 'ccd', 'camera', 'laser', 'all']], Field(description="Which component to reconnect. Default 'all'.")] = 'all',
+) -> dict:
     """카메라/스테이지/CCD/레이저 연결을 끊었다가 재초기화한다.
 
     component: 'stage' | 'ccd' | 'camera' | 'laser' | 'all' (기본 all).
@@ -709,19 +720,19 @@ def reconnect_hardware(component: str = "all") -> dict:
     try:
         from backend.hw_tools.hardware_manager import get_manager
     except Exception as e:
-        return {"ok": False, "error": f"HardwareManager import failed: {e}"}
+        return fail(f"HardwareManager import failed: {e}")
 
     comp = str(component or "all").strip().lower()
     valid = {"stage", "ccd", "camera", "laser", "all"}
     if comp not in valid:
-        return {"ok": False, "error": f"component must be one of {sorted(valid)}"}
+        return fail(f"component must be one of {sorted(valid)}")
 
     try:
         mgr = get_manager()
     except Exception as e:
         # 여기서 예외가 나면 도구가 에러 dict 가 아니라 날것의 예외를 던진다 —
         # 에이전트는 그것을 관측으로 읽을 수 없으므로 반드시 감싼다.
-        return {"ok": False, "error": f"HardwareManager unavailable: {type(e).__name__}: {e}"}
+        return fail(f"HardwareManager unavailable: {type(e).__name__}: {e}")
 
     targets = ["stage", "ccd", "camera", "laser"] if comp == "all" else [comp]
     done, errors, detail = [], {}, {}
@@ -740,10 +751,11 @@ def reconnect_hardware(component: str = "all") -> dict:
         _guard = instrument_guard(f"reconnect_hardware({comp})")
         _guard.__enter__()
     except InstrumentBusy as e:
-        return {"ok": False, "error": str(e), "reconnected": [],
-                "detail": {"skipped": "instrument busy"},
-                "hint": ("A measurement or scan is still running. Nothing was changed - "
-                         "wait for it to finish (check get_hardware_status()) and retry.")}
+        return fail(str(e),
+                    reconnected=[],
+                    detail={"skipped": "instrument busy"},
+                    hint="A measurement or scan is still running. Nothing was changed - "
+                         "wait for it to finish (check get_hardware_status()) and retry.")
 
     try:
         return _reconnect_locked(mgr, targets, done, errors, detail)
@@ -843,20 +855,22 @@ def get_stage_speed() -> dict:
         # 조회는 _INSTRUMENT_LOCK 을 잡지 않으므로 재연결과 겹칠 수 있다 → _stage_read.
         vel = _stage_read(lambda: _stage.get_velocity())
         if vel is _STAGE_BUSY:
-            return {"ok": False, "error": (
-                "The stage is being connected or released right now, so its speed was not read. "
-                "Nothing was changed - try again in a few seconds.")}
+            return fail("The stage is being connected or released right now, so its speed was not read. "
+                        "Nothing was changed - try again in a few seconds.")
         if not (isinstance(vel, dict) and vel.get("ok")):
-            return {"ok": False, "error": vel.get("error", "Failed to read velocity") if isinstance(vel, dict) else "Unexpected velocity type"}
-        return {"ok": True,
-                "x_speed_mm_s": vel["x_speed_mm_s"],
-                "y_speed_mm_s": vel["y_speed_mm_s"],
-                "z_speed_mm_s": vel["z_speed_mm_s"]}
+            return fail(vel.get("error", "Failed to read velocity") if isinstance(vel, dict) else "Unexpected velocity type")
+        return ok(x_speed_mm_s=vel["x_speed_mm_s"],
+                  y_speed_mm_s=vel["y_speed_mm_s"],
+                  z_speed_mm_s=vel["z_speed_mm_s"])
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 @_serialized("set_stage_speed")
-def set_stage_speed(x_speed_mm_s: float = None, y_speed_mm_s: float = None, z_speed_mm_s: float = None) -> dict:
+def set_stage_speed(
+    x_speed_mm_s: Annotated[Optional[float], Field(description='X-axis movement speed (mm/s, max 5.0). Optional.')] = None,
+    y_speed_mm_s: Annotated[Optional[float], Field(description='Y-axis movement speed (mm/s, max 5.0). Optional.')] = None,
+    z_speed_mm_s: Annotated[Optional[float], Field(description='Z-axis movement speed (mm/s, max 0.1). Optional.')] = None,
+) -> dict:
     """스테이지 이동 속도를 설정한다. 전달되지 않은 축의 속도는 기존 값을 유지한다.
 
     축별 상한(USE_stage_test.MAX_SPEED_XY / MAX_SPEED_Z)을 넘는 값은 드라이버가 클리핑한다.
@@ -873,7 +887,7 @@ def set_stage_speed(x_speed_mm_s: float = None, y_speed_mm_s: float = None, z_sp
         current_vel = _stage.get_velocity()
 
         if not current_vel.get("ok"):
-            return {"ok": False, "error": current_vel.get("error", "Failed to read current velocity")}
+            return fail(current_vel.get("error", "Failed to read current velocity"))
 
         # 2. 값이 안 들어왔으면(None) 기존 속도를 그대로 사용합니다.
         req = {
@@ -898,11 +912,10 @@ def set_stage_speed(x_speed_mm_s: float = None, y_speed_mm_s: float = None, z_sp
         applied = _stage.set_velocity(eff["x_speed_mm_s"], eff["y_speed_mm_s"],
                                      eff["z_speed_mm_s"], 0.0)
         if applied is False:
-            return {"ok": False, "error": (
-                "The controller rejected the velocity command, so the stage speed was NOT changed. "
-                "Check the stage connection and retry.")}
+            return fail("The controller rejected the velocity command, so the stage speed was NOT changed. "
+                        "Check the stage connection and retry.")
 
-        out = {"ok": True, **eff}
+        out = ok(**eff)
         if clipped:
             out["clipped"] = clipped
             out["note"] = ("Some axes were clipped to the hardware speed limit "
@@ -911,10 +924,14 @@ def set_stage_speed(x_speed_mm_s: float = None, y_speed_mm_s: float = None, z_sp
         return out
 
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 @_serialized("move_stage")
-def move_stage(x: float, y: float, z: float = None) -> dict:
+def move_stage(
+    x: Annotated[float, Field(ge=0, le=STAGE_MAX_X, description=f'X-axis position (mm, 0-{STAGE_MAX_X})')],
+    y: Annotated[float, Field(ge=0, le=STAGE_MAX_Y, description=f'Y-axis position (mm, 0-{STAGE_MAX_Y})')],
+    z: Annotated[Optional[float], Field(ge=STAGE_MIN_Z, le=STAGE_MAX_Z, description=f'Z-axis position (mm, {STAGE_MIN_Z}-{STAGE_MAX_Z}). Optional - omit to keep the current Z.')] = None,
+) -> dict:
     """스테이지를 절대 좌표(mm)로 이동."""
     # 이동 경로는 _serialized(=_INSTRUMENT_LOCK)가 reconnect_hardware 와 이미 배타적이라
     # component_lock 을 따로 잡지 않아도 DLL 동시 호출이 생기지 않는다.
@@ -934,9 +951,9 @@ def move_stage(x: float, y: float, z: float = None) -> dict:
             kw["z"] = _stage.get_position()[2]  # 현재 Z 유지
         _stage.move_absolute(**kw)
         pos = _stage.get_position()
-        return {"ok": True, "position": {"x": pos[0], "y": pos[1], "z": pos[2]}}
+        return ok(position={"x": pos[0], "y": pos[1], "z": pos[2]})
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 def get_stage_position() -> dict:
@@ -947,18 +964,21 @@ def get_stage_position() -> dict:
     try:
         pos = _stage_read(lambda: _stage.get_position())
         if pos is _STAGE_BUSY:
-            return {"ok": False, "error": (
-                "The stage is being connected or released right now, so its position was not read. "
-                "Nothing was changed - try again in a few seconds.")}
+            return fail("The stage is being connected or released right now, so its position was not read. "
+                        "Nothing was changed - try again in a few seconds.")
         if pos is None:
-            return {"ok": False, "error": "Failed to query stage position"}
-        return {"ok": True, "x": pos[0], "y": pos[1], "z": pos[2]}
+            return fail("Failed to query stage position")
+        return ok(x=pos[0], y=pos[1], z=pos[2])
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 @_serialized("move_stage_relative")
-def move_stage_relative(dx: float = 0.0, dy: float = 0.0, dz: float = 0.0) -> dict:
+def move_stage_relative(
+    dx: Annotated[Optional[float], Field(description='Displacement in X (mm)')] = 0.0,
+    dy: Annotated[Optional[float], Field(description='Displacement in Y (mm)')] = 0.0,
+    dz: Annotated[Optional[float], Field(description='Displacement in Z (mm)')] = 0.0,
+) -> dict:
     """스테이지를 현재 위치 기준 상대 이동(mm).
 
     move_stage 와 **같은 범위 한계**가 적용된다 — 현재 위치에 변위를 더한 목표를 먼저
@@ -971,7 +991,7 @@ def move_stage_relative(dx: float = 0.0, dy: float = 0.0, dz: float = 0.0) -> di
     try:
         pos = _stage.get_position()
         if pos is None:
-            return {"ok": False, "error": "Failed to query stage position"}
+            return fail("Failed to query stage position")
         err = _check_stage_target(float(pos[0]) + float(dx),
                                   float(pos[1]) + float(dy),
                                   float(pos[2]) + float(dz))
@@ -981,9 +1001,9 @@ def move_stage_relative(dx: float = 0.0, dy: float = 0.0, dz: float = 0.0) -> di
             return err
         _stage.move_relative(dx, dy, dz, 0)
         pos = _stage.get_position()
-        return {"ok": True, "position": {"x": pos[0], "y": pos[1], "z": pos[2]}}
+        return ok(position={"x": pos[0], "y": pos[1], "z": pos[2]})
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 # ──────────────────────────────────────────
@@ -994,7 +1014,7 @@ def move_stage_relative(dx: float = 0.0, dy: float = 0.0, dz: float = 0.0) -> di
 def laser_on() -> dict:
     """레이저를 켠다. 어떤 빔이 나가는지(측정빔/가이드빔)를 함께 보고한다."""
     if _laser is None:
-        return {"ok": False, "error": "Laser is not initialized."}
+        return fail("Laser is not initialized.")
     # 드라이버는 파워가 적용되지 않은 상태(_power_set=False, 예: 가이드빔 모드나
     # 오토포커스 직후)에서 SSPW 1 을 받으면 측정빔이 아니라 가이드빔을 낸다.
     # 두 경우를 "Laser ON" 한 마디로 뭉개면 호출자는 신호가 왜 0인지 알 수 없다.
@@ -1003,8 +1023,8 @@ def laser_on() -> dict:
     try:
         _laser.laser_on()
     except Exception as e:
-        return {"ok": False, "error": str(e)}
-    out = {"ok": True, "status": f"Laser ON ({beam} beam)", "beam": beam}
+        return fail(str(e))
+    out = ok(status=f"Laser ON ({beam} beam)", beam=beam)
     if armed:
         out["power_percent"] = st["power_percent"]
     else:
@@ -1020,7 +1040,7 @@ def laser_on() -> dict:
 def laser_off() -> dict:
     """레이저를 끈다(발진 정지). 파워 설정과 광학계 위치는 그대로 유지된다."""
     if _laser is None:
-        return {"ok": False, "error": "Laser is not initialized."}
+        return fail("Laser is not initialized.")
     try:
         confirmed = _laser.laser_off()
         st = _beam_state()
@@ -1029,26 +1049,24 @@ def laser_off() -> dict:
             # 모든 안전 판단이 쌓인다 — 벤치 채점도 여기를 근거로 만점을 준다.
             # 차단은 ND 로 한 번 더 시도하되(가이드빔 위치), 결과는 실패로 올린다.
             blocked = _restore_guide_beam_quiet()
-            return {"ok": False,
-                    "error": ("레이저 정지(SSPW 0)가 확인되지 않았습니다 — 빔이 아직 나가고 "
-                              "있을 수 있습니다. " +
-                              ("ND 를 차단 위치로 옮겨 두었습니다. " if blocked else
-                               "ND 차단도 확인되지 않았습니다. ") +
-                              "레이저 컨트롤러 연결을 확인하세요."),
-                    "laser_off_unconfirmed": True,
-                    "nd_blocked": bool(blocked),
-                    "power_armed": st["power_armed"]}
-        return {"ok": True, "status": "Laser OFF",
-                # 끄더라도 ND 위치(=파워 설정)는 남는다 — 다시 켜면 같은 파워의
-                # 측정빔이 나간다. 예전처럼 가이드빔으로 되돌아가지 않는다.
-                "power_armed": st["power_armed"],
-                "power_percent": st["power_percent"]}
+            return fail("Laser stop (SSPW 0) was NOT confirmed - the beam may still be on. " +
+                        ("The ND filter has been moved to the blocking position. " if blocked else
+                         "ND blocking could not be confirmed either. ") +
+                        "Check the laser controller link.",
+                        laser_off_unconfirmed=True,
+                        nd_blocked=bool(blocked),
+                        power_armed=st["power_armed"])
+        return ok(status="Laser OFF",
+                  power_armed=st["power_armed"],
+                  power_percent=st["power_percent"])
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 @_serialized("set_laser_power")
-def set_laser_power(percent: float) -> dict:
+def set_laser_power(
+    percent: Annotated[float, Field(description='Laser power as ND filter transmission in percent (0.004-100).')],
+) -> dict:
     """레이저 출력 설정. percent: ND 필터 투과율 0.004~100 (실수 허용).
 
     측정 직전에 파워를 정할 거라면 acquire_spectrum(power=...) 을 쓰는 편이 낫다 —
@@ -1059,7 +1077,7 @@ def set_laser_power(percent: float) -> dict:
     err = _apply_laser_power(percent)       # 검증·적용·정착 대기(공용)
     if err:
         return err
-    return {"ok": True, **_beam_state()}
+    return ok(**_beam_state())
 
 
 def get_laser_status() -> dict:
@@ -1070,17 +1088,14 @@ def get_laser_status() -> dict:
     오판하게 된다(실제로는 ND 가 차단 위치라 가이드빔만 나간다).
     """
     if _laser is None:
-        return {"ok": False, "error": "Laser is not initialized."}
+        return fail("Laser is not initialized.")
     try:
         st = _beam_state()                  # 판정은 _beam_state 단일 출처
         armed, last = st["power_armed"], st["power_percent"]
-        out = {
-            "ok": True,
-            "is_on": bool(getattr(_laser, "is_on", False)),
-            "power_armed": armed,
-            "power_percent": last if armed else None,
-            "beam_if_turned_on": st["beam"],
-        }
+        out = ok(is_on=bool(getattr(_laser, "is_on", False)),
+                 power_armed=armed,
+                 power_percent=last if armed else None,
+                 beam_if_turned_on=st["beam"])
         if not armed:
             out["last_requested_power_percent"] = last
             out["note"] = (
@@ -1089,7 +1104,7 @@ def get_laser_status() -> dict:
                 "Call set_laser_power(percent) to arm the measurement beam.")
         return out
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1101,6 +1116,84 @@ def get_laser_status() -> dict:
 # 동작이 어긋났다(예: set_ccd_trigger_mode 에만 external_fvb_em 이 빠져 있었고,
 # read_mode 적용 코드는 두 곳에 거의 글자 단위로 복사돼 있었다). 이제 두 경로 모두
 # 아래 _apply_* 를 통과하므로, 허용값·순서·부작용이 구조적으로 같다.
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 다른 계층에 구현이 있는 도구 — 얇은 어댑터
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# 아래 여섯은 실제 계산/저장을 service 계층이 한다. 그런데 **모델에게 보여줄 인자 설명은
+# 도구 계층의 것**이라 service 함수 시그니처에 넣을 수 없다(spectrum_store 는 우리 코드도
+# 부르는 순수 유틸이고, 거기에 프롬프트 문장이 섞이면 계층이 무너진다).
+# 그래서 여기 어댑터를 두고 선언은 이쪽에, 구현은 저쪽에 남긴다.
+#
+# 인자를 넘길 때 None 을 걸러내는 이유: 이 툴셋의 규약이 '생략하면 현재 설정 유지'라
+# 모델이 안 보낸 인자는 아예 전달하지 않아야 service 쪽 기본값이 살아난다.
+
+
+def list_results(
+    date: Annotated[Optional[str], Field(description="Date to query 'YYYY-MM-DD'. If omitted, today.")] = None,
+    scope: Annotated[Optional[Literal['session', 'all']], Field(description="Which measurements to consider. 'session' (default) = only the ones measured in THIS session, which is almost always what you want. 'all' = every session saved that day; use it only when the request is explicitly about combining work from earlier, separate sessions.")] = None,
+) -> dict:
+    """구현은 _store_list_results — 위 머리말 참고."""
+    given = {k: v for k, v in locals().items() if v is not None}
+    return _store_list_results(**given)
+
+
+def combine_spectra(
+    date: Annotated[Optional[str], Field(description="Target date 'YYYY-MM-DD'. If omitted, today.")] = None,
+    names: Annotated[Optional[list[str]], Field(description='List of measurement bases to combine (check with list_results). If omitted, the whole date.')] = None,
+    max_cols: Annotated[Optional[int], Field(ge=1, description='Number of grid columns. Default 4.')] = None,
+    scope: Annotated[Optional[Literal['session', 'all']], Field(description="Which measurements to consider. 'session' (default) = only the ones measured in THIS session, which is almost always what you want. 'all' = every session saved that day; use it only when the request is explicitly about combining work from earlier, separate sessions.")] = None,
+    out_name: Annotated[Optional[str], Field(json_schema_extra=INTERNAL, description='Internal: output file stem. Defaults to combined_<HHMMSS>.')] = None,
+) -> dict:
+    """구현은 _store_combine_spectra — 위 머리말 참고."""
+    given = {k: v for k, v in locals().items() if v is not None}
+    return _store_combine_spectra(**given)
+
+
+def aggregate_spectra_csv(
+    date: Annotated[Optional[str], Field(description="Target date 'YYYY-MM-DD'. If omitted, today.")] = None,
+    names: Annotated[Optional[list[str]], Field(description='List of measurement bases to organize. If omitted, all of yours from that date.')] = None,
+    scope: Annotated[Optional[Literal['session', 'all']], Field(description="Which measurements to consider. 'session' (default) = only the ones measured in THIS session, which is almost always what you want. 'all' = every session saved that day; use it only when the request is explicitly about combining work from earlier, separate sessions.")] = None,
+    out_name: Annotated[Optional[str], Field(json_schema_extra=INTERNAL, description='Internal: output file stem. Defaults to summary_<HHMMSS>.')] = None,
+) -> dict:
+    """구현은 _store_aggregate_csv — 위 머리말 참고."""
+    given = {k: v for k, v in locals().items() if v is not None}
+    return _store_aggregate_csv(**given)
+
+
+def web_search(
+    query: Annotated[str, Field(description="Search query. e.g. 'raman baseline correction asymmetric least squares'")],
+    max_results: Annotated[Optional[int], Field(ge=1, le=10, description='Number of results to fetch (1-10). Default 5.')] = None,
+) -> dict:
+    """구현은 _web_search — 위 머리말 참고."""
+    given = {k: v for k, v in locals().items() if v is not None}
+    return _web_search(**given)
+
+
+def run_analysis(
+    code: Annotated[str, Field(description="Python analysis code to run. Use spectra, np, plt directly. e.g. compute each spectrum's peak intensity and draw a peak map as an (x,y) scatter. If the task asks you to save a computed spectrum, call save_result('name', corrected_intensity, raman_shift=x) at the end of this code rather than printing the array. KEEP EACH CALL SHORT - aim for 40 lines or fewer. This code travels to the sandbox as a single JSON string, and a long block (many escaped quotes and newlines) is the most common way for a call to be lost in transit: the call silently never arrives and the task ends with no answer. Do not write one large end-to-end script. Split the work and call this tool several times - e.g. (1) load the data and print its shape and column names, (2) do one computation step and print a short summary, (3) produce the final numbers. Nothing carries over between calls: every call runs in a fresh process, so each one must rebuild what it needs from spectra/files, or read back an intermediate you wrote earlier with save_result (load_spectrum accepts the path it returned).")],
+    date: Annotated[Optional[str], Field(description="Measurement date to analyze 'YYYY-MM-DD'. If omitted, today.")] = None,
+    names: Annotated[Optional[list[str]], Field(description='List of measurement bases to analyze (check with list_results). If omitted, the whole date.')] = None,
+    file_ids: Annotated[Optional[list[str]], Field(description='file_ids of attached files to load into the `files` variable (get them from list_uploaded_files). If omitted, no attached file is loaded.')] = None,
+    title: Annotated[Optional[str], Field(description='Title to attach to the result figure.')] = None,
+    timeout_sec: Annotated[Optional[int], Field(json_schema_extra=INTERNAL, description='Internal: sandbox wall-clock limit (s). Deliberately not model-settable - a runaway script must not be able to raise its own timeout.')] = None,
+) -> dict:
+    """구현은 _run_analysis — 위 머리말 참고."""
+    given = {k: v for k, v in locals().items() if v is not None}
+    return _run_analysis(**given)
+
+
+def bundle_results(
+    date: Annotated[Optional[str], Field(description="Target date 'YYYY-MM-DD'. If omitted, today.")] = None,
+    names: Annotated[Optional[list[str]], Field(description='List of measurement bases to bundle. If omitted, all of yours from that date.')] = None,
+    scope: Annotated[Optional[Literal['session', 'all']], Field(description="Which measurements to bundle. 'session' (default) = only the ones measured in THIS session. 'all' = every session saved that day; use it only when the request is explicitly about earlier, separate sessions.")] = None,
+    include: Annotated[Optional[list[str]], Field(json_schema_extra=INTERNAL, description='Internal: which file kinds to bundle. Defaults to png+csv+json.')] = None,
+) -> dict:
+    """구현은 _store_bundle_results — 위 머리말 참고."""
+    given = {k: v for k, v in locals().items() if v is not None}
+    return _store_bundle_results(**given)
+
 # ══════════════════════════════════════════════════════════════════════════════
 
 _ACQ_MODES      = ('single', 'accumulate', 'kinetic', 'run_till_abort')
@@ -1122,7 +1215,7 @@ _CCD_NOT_READY = ("The spectrometer (CCD) is not ready yet - it is cooling (stab
 def _ccd_ready() -> dict | None:
     """CCD 사용 가능 여부. 통과면 None, 아니면 error dict.
     (같은 안내 문구가 13개 함수에 복사돼 있던 것을 한 곳으로 모았다.)"""
-    return None if _ccd is not None else {"ok": False, "error": _CCD_NOT_READY}
+    return None if _ccd is not None else fail(_CCD_NOT_READY)
 
 
 def _current_read_mode() -> str:
@@ -1150,18 +1243,16 @@ def _check_ccd_positive(name: str, value, integer: bool = False) -> dict | None:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return {"ok": False, "error": f"{name} must be a number, got {value!r}."}
+        return fail(f"{name} must be a number, got {value!r}.")
     if integer:
         if int(value) != value:
-            return {"ok": False, "error": f"{name} must be a whole number, got {value!r}."}
+            return fail(f"{name} must be a whole number, got {value!r}.")
         if int(value) < 1:
-            return {"ok": False, "error": (
-                f"{name} must be at least 1, got {value!r}. Omit the parameter to keep the "
-                f"instrument's current setting - it is not a way to switch the feature off.")}
+            return fail(f"{name} must be at least 1, got {value!r}. Omit the parameter to keep the "
+                        f"instrument's current setting - it is not a way to switch the feature off.")
     elif float(value) <= 0:
-        return {"ok": False, "error": (
-            f"{name} must be greater than 0, got {value!r}. Omit the parameter to keep the "
-            f"instrument's current setting.")}
+        return fail(f"{name} must be greater than 0, got {value!r}. Omit the parameter to keep the "
+                    f"instrument's current setting.")
     return None
 
 
@@ -1174,7 +1265,7 @@ def _apply_acq_mode(mode: str, exposure=None, num_accumulations=None,
     가 aq_mode 에 의존하므로 순서가 뒤바뀌면 버퍼 모양이 어긋난다.
     """
     if mode not in _ACQ_MODES:
-        return {"ok": False, "error": f"acquisition mode must be one of {list(_ACQ_MODES)}."}
+        return fail(f"acquisition mode must be one of {list(_ACQ_MODES)}.")
     # 수치 검증도 이 공용 경로에서 한다 — acquire_spectrum 은 발사 전에 이미 같은 검사를
     # 끝내지만(아래 사전검증 블록), set_ccd_acquisition_mode 는 여기로만 들어온다.
     # 한쪽에만 두면 같은 값이 한 도구에서는 깔끔한 에러, 다른 도구에서는 날것의 SDK
@@ -1232,7 +1323,7 @@ def _apply_read_mode(mode: str, hbin=None, single_track_center=None,
     None 인 파라미터는 현재 설정값을 그대로 재사용한다.
     """
     if mode not in _READ_MODES:
-        return {"ok": False, "error": f"read mode must be one of {list(_READ_MODES)}."}
+        return fail(f"read mode must be one of {list(_READ_MODES)}.")
     for _n, _v in (("hbin", hbin), ("single_track_center", single_track_center),
                    ("single_track_width", single_track_width)):
         err = _check_ccd_positive(_n, _v, integer=True)
@@ -1245,8 +1336,7 @@ def _apply_read_mode(mode: str, hbin=None, single_track_center=None,
         center = (single_track_center if single_track_center is not None
                   else getattr(_ccd, 'ro_single_track_center', None))
         if center is None:
-            return {"ok": False,
-                    "error": "single_track mode requires the single_track_center parameter."}
+            return fail("single_track mode requires the single_track_center parameter.")
         _ccd.set_ro_single_track(
             center=center,
             width=(single_track_width if single_track_width is not None
@@ -1261,7 +1351,7 @@ def _apply_read_mode(mode: str, hbin=None, single_track_center=None,
 def _apply_trigger_mode(mode: str) -> dict | None:
     """트리거 모드 적용. 통과면 None, 실패면 error dict."""
     if mode not in _TRIGGER_MODES:
-        return {"ok": False, "error": f"trigger mode must be one of {list(_TRIGGER_MODES)}."}
+        return fail(f"trigger mode must be one of {list(_TRIGGER_MODES)}.")
     _ccd.set_trigger_mode(mode)
     return None
 
@@ -1275,7 +1365,7 @@ def _apply_shutter(mode: str, explicit: bool = False) -> dict | None:
     초기화되는데, 객체에 달아 두면 플래그가 자동으로 함께 리셋된다.
     """
     if mode not in _SHUTTER_MODES:
-        return {"ok": False, "error": f"shutter must be one of {list(_SHUTTER_MODES)}."}
+        return fail(f"shutter must be one of {list(_SHUTTER_MODES)}.")
     if mode == 'auto':
         _ccd.set_shutter_auto()
     elif mode == 'open':
@@ -1341,20 +1431,20 @@ def _persist_spectrum(result: dict, tag: str = "") -> dict:
 
 @_serialized("acquire_spectrum")
 def acquire_spectrum(
-    exposure: float = None,
-    power: float = None,
-    stabilize_sec: float = 0.5,
-    acq_mode: str = None,
-    num_accumulations: int = None,
-    kinetic_count: int = None,
-    kinetic_cycle_time: float = None,
-    read_mode: str = None,
-    hbin: int = None,
-    single_track_center: int = None,
-    single_track_width: int = None,
-    trigger_mode: str = None,
-    shutter: str = None,
-    restore_guide_beam: bool = True,
+    exposure: Annotated[Optional[float], Field(description="CCD exposure time (seconds). Omit to keep the CCD's current exposure (e.g. one set earlier by set_ccd_exposure).")] = None,
+    power: Annotated[Optional[float], Field(ge=0.004, le=100, description="Laser power (transmittance %), a real value in 0.004-100. Omit ONLY to reuse a power you already set earlier in this session - if none has ever been set the call is REFUSED rather than defaulted, because choosing a dose for an unknown sample is your decision, not the tool's. Higher power gives more signal but photobleaches or burns fragile samples; when the sample's tolerance is unknown, start low and raise it after looking at the result.")] = None,
+    stabilize_sec: Annotated[Optional[float], Field(description='Wait time for power stabilization after laser ON (seconds). Default 0.5')] = 0.5,
+    acq_mode: Annotated[Optional[Literal['single', 'accumulate', 'kinetic']], Field(description="CCD acquisition mode. Omit to keep the CCD's current mode. 'single': single shot. 'accumulate': sum num_accumulations shots -> high-SNR spectrum. 'kinetic': acquire kinetic_count frames continuously -> time-series analysis.")] = None,
+    num_accumulations: Annotated[Optional[int], Field(ge=1, description='Accumulations per frame in accumulate/kinetic mode. Omit to keep the current value.')] = None,
+    kinetic_count: Annotated[Optional[int], Field(ge=1, description='Total number of frames to acquire in kinetic mode. Omit to keep the current value.')] = None,
+    kinetic_cycle_time: Annotated[Optional[float], Field(description='Frame interval in kinetic mode (seconds). If omitted, the SDK auto-computes the minimum.')] = None,
+    read_mode: Annotated[Optional[Literal['fvb', 'single_track']], Field(description="CCD readout mode. Omit to keep the CCD's current read mode. 'fvb': Full Vertical Binning - sum all rows, 1D spectrum. 'single_track': read only a specific track - single_track_center required.")] = None,
+    hbin: Annotated[Optional[int], Field(ge=1, description='Horizontal binning pixel count. Omit to keep the current value.')] = None,
+    single_track_center: Annotated[Optional[int], Field(description="Center pixel row number when read_mode='single_track'. Omit to reuse the currently configured track.")] = None,
+    single_track_width: Annotated[Optional[int], Field(ge=1, description="Track width (pixels) when read_mode='single_track'. Omit to keep the current value.")] = None,
+    trigger_mode: Annotated[Optional[Literal['internal', 'external', 'external_start', 'external_exposure', 'external_fvb_em', 'software']], Field(description="CCD trigger mode. Omit to keep the CCD's current trigger mode.")] = None,
+    shutter: Annotated[Optional[Literal['auto', 'open', 'close']], Field(description="Shutter mode for this acquisition. Omit to KEEP the current setting - including one you set earlier with set_ccd_shutter. If nobody has ever set it, it opens to 'auto' (the CCD boots closed, so keeping that would silently hand you a dark frame). Use 'close' to acquire a DARK / background frame with no light reaching the detector - that is the supported way to measure a dark reference.")] = None,
+    restore_guide_beam: Annotated[Optional[bool], Field(json_schema_extra=INTERNAL, description='Internal: restore the guide beam after acquisition. Consecutive callers (run_grid_scan) pass False to avoid toggling it on every point.')] = True,
 ) -> dict:
     """
     라만 스펙트럼 수집 (Single / Accumulate / Kinetic 모드 지원).
@@ -1430,7 +1520,7 @@ def acquire_spectrum(
     if err:
         return err
     if _laser is None:
-        return {"ok": False, "error": "Laser is not initialized."}
+        return fail("Laser is not initialized.")
 
     # ── 파라미터 해석 (하드웨어를 만지기 전에 전부 검증한다) ──
     # 레이저 파워만은 None이어도 반드시 하드웨어에 적용한다. laser_on()이 측정빔을 쏘려면
@@ -1445,34 +1535,31 @@ def acquire_spectrum(
         # power_pct 는 남아 있으므로 '다시 무장'이 되어 의도대로 동작한다.
         last = getattr(_laser, "power_pct", None)
         if last is None:
-            return {"ok": False, "error": (
-                "No laser power has been set in this session, so there is nothing to 'keep' and this "
-                "tool will not pick one for you - firing an unknown sample at an arbitrary power can "
-                "photobleach or burn it. Decide the power yourself and pass acquire_spectrum(power=...), "
-                "or set it once with set_laser_power(percent) and then measure. If you do not know the "
-                "sample's tolerance, start low (a few percent), look at the signal, and raise it.")}
+            return fail("No laser power has been set in this session, so there is nothing to 'keep' and this "
+                        "tool will not pick one for you - firing an unknown sample at an arbitrary power can "
+                        "photobleach or burn it. Decide the power yourself and pass acquire_spectrum(power=...), "
+                        "or set it once with set_laser_power(percent) and then measure. If you do not know the "
+                        "sample's tolerance, start low (a few percent), look at the signal, and raise it.")
         eff_power = float(last)
     else:
         eff_power = power                   # 검증은 _apply_laser_power 가 한다(단일 정책)
 
     eff_acq = acq_mode or getattr(_ccd, 'aq_mode', None) or 'single'
     if eff_acq not in _ACQ_MODES_1D:
-        return {"ok": False, "error": (
-            f"acquire_spectrum supports {list(_ACQ_MODES_1D)}, but the CCD is "
-            f"currently in '{eff_acq}' mode. Pass acq_mode explicitly, or call "
-            f"set_ccd_acquisition_mode first.")}
+        return fail(f"acquire_spectrum supports {list(_ACQ_MODES_1D)}, but the CCD is "
+                    f"currently in '{eff_acq}' mode. Pass acq_mode explicitly, or call "
+                    f"set_ccd_acquisition_mode first.")
 
     # 현재 읽기 모드(드라이버 표기) → 이 함수의 인자 표기로 환산.
     eff_read = read_mode or _current_read_mode()
     if eff_read not in _READ_MODES_1D:
-        return {"ok": False, "error": (
-            f"acquire_spectrum assembles a 1D spectrum, but the CCD read mode is '{eff_read}'. "
-            f"Pass read_mode='fvb' (or 'single_track'), or call set_ccd_read_mode first.")}
+        return fail(f"acquire_spectrum assembles a 1D spectrum, but the CCD read mode is '{eff_read}'. "
+                    f"Pass read_mode='fvb' (or 'single_track'), or call set_ccd_read_mode first.")
 
     eff_center = (single_track_center if single_track_center is not None
                   else getattr(_ccd, 'ro_single_track_center', None))
     if eff_read == 'single_track' and eff_center is None:
-        return {"ok": False, "error": "single_track_center is required when read_mode='single_track'"}
+        return fail("single_track_center is required when read_mode='single_track'")
 
     # ── 수치 파라미터도 레이저를 쏘기 전에 검증한다 — 2026-08-05 ──────────────
     # 이 값들이 실제로 SDK 로 들어가는 곳은 아래 try 블록의 _apply_acq_mode /
@@ -1496,12 +1583,12 @@ def acquire_spectrum(
     # 조사만 낭비되고 시료에는 이미 빔이 들어간 뒤다.
     eff_shutter = _effective_shutter(shutter)      # 규약은 _effective_shutter 단일 출처
     if eff_shutter not in _SHUTTER_MODES:
-        return {"ok": False, "error": f"shutter must be one of {list(_SHUTTER_MODES)}."}
+        return fail(f"shutter must be one of {list(_SHUTTER_MODES)}.")
 
     # 트리거를 생략하면 드라이버가 기억하는 현재 모드를 그대로 쓴다(SDK엔 getter가 없다).
     eff_trigger = trigger_mode or getattr(_ccd, 'trigger_mode', None) or 'internal'
     if eff_trigger not in _TRIGGER_MODES:
-        return {"ok": False, "error": f"trigger_mode must be one of {list(_TRIGGER_MODES)}."}
+        return fail(f"trigger_mode must be one of {list(_TRIGGER_MODES)}.")
 
     # 파워 검증도 발사 전에 끝낸다(_apply_laser_power 가 실제 적용까지 한다).
     err = _apply_laser_power(eff_power, settle_s=stabilize_sec)
@@ -1593,23 +1680,15 @@ def acquire_spectrum(
             )
 
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
     finally:
-        # 5. 레이저 OFF (성공/실패 무관 — 안전 보장). 위의 이른 return 들도 이 블록을
-        #    거치므로, 검증 실패로 빠져나가도 레이저가 켜진 채 남지 않는다.
         _laser_off_quiet()
-        # 6. 광학계를 카메라(가이드빔) 위치로 복귀. laser_on() 이 축04 를 측정 위치로
-        #    옮겨 놓았으므로, 이걸 하지 않으면 측정이 끝나도 카메라 화면이 캄캄한 채로
-        #    남는다(2026-07-31 회귀). 실패해도 조용히 넘어간다 — 여기서 예외를 던지면
-        #    이미 취득한 스펙트럼까지 잃는다.
-        #    격자 스캔처럼 연속 측정하는 호출자는 restore_guide_beam=False 로 끄고,
-        #    루프가 끝난 뒤 한 번만 복귀시킨다(점마다 ND 모터를 왕복시키지 않기 위해).
         if restore_guide_beam:
             _restore_guide_beam_quiet()
 
     if raw is None:
-        return {"ok": False, "error": "CCD data acquisition failed"}
+        return fail("CCD data acquisition failed")
 
     # ── 결과 조립 ──
     # 보고하는 exposure_time / laser_power_pct / num_* 는 모두 '장비에 실제로 걸린 값'이다.
@@ -1636,37 +1715,31 @@ def acquire_spectrum(
                     "laser_nm":         float(cal.laser_nm),
                 })
             frames.append(frame)
-        return _persist_spectrum({
-            "ok": True,
-            "mode": "kinetic",
-            "num_frames": len(frames),
-            "kinetic_count": eff_num_kin,
-            "num_accumulations": eff_num_acc,
-            "exposure_time": eff_exposure,
-            "laser_power_pct": eff_power,
-            "trigger_mode": eff_trigger,
-            "shutter": eff_shutter,
-            "frames": frames,
-        })
+        return _persist_spectrum(ok(mode="kinetic",
+                                    num_frames=len(frames),
+                                    kinetic_count=eff_num_kin,
+                                    num_accumulations=eff_num_acc,
+                                    exposure_time=eff_exposure,
+                                    laser_power_pct=eff_power,
+                                    trigger_mode=eff_trigger,
+                                    shutter=eff_shutter,
+                                    frames=frames))
     else:
         # Single / Accumulate: start_acquisition_cycle()이 calibration dict 반환
         data = raw
         if data.get("error"):
-            return {"ok": False, "error": data["error"]}
+            return fail(data["error"])
         intensity = data["intensity"]
-        result = {
-            "ok": True,
-            "mode": eff_acq,
-            "length": len(intensity),
-            "max_intensity": float(max(intensity)) if intensity else 0.0,
-            "sum_intensity": float(sum(intensity)) if intensity else 0.0,
-            "data": intensity,
-            "calibrated": data.get("calibrated", False),
-            "exposure_time": eff_exposure,
-            "laser_power_pct": eff_power,
-            "trigger_mode": eff_trigger,
-            "shutter": eff_shutter,
-        }
+        result = ok(mode=eff_acq,
+                    length=len(intensity),
+                    max_intensity=float(max(intensity)) if intensity else 0.0,
+                    sum_intensity=float(sum(intensity)) if intensity else 0.0,
+                    data=intensity,
+                    calibrated=data.get("calibrated", False),
+                    exposure_time=eff_exposure,
+                    laser_power_pct=eff_power,
+                    trigger_mode=eff_trigger,
+                    shutter=eff_shutter)
         if eff_acq == 'accumulate':
             result["num_accumulations"] = eff_num_acc
         if data.get("calibrated"):
@@ -1689,7 +1762,7 @@ def get_ccd_info() -> dict:
         temp_status = _ccd.get_temperature_status()
         cam_status  = _ccd.get_status()
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
     def _attr(name):
         return getattr(_ccd, name, None)
@@ -1698,76 +1771,54 @@ def get_ccd_info() -> dict:
     if hasattr(_ccd, 'HSSpeeds_Conventional') and _ccd.HSSpeeds_Conventional:
         hs_conv = _ccd.HSSpeeds_Conventional[0]
 
-    return {
-        "ok":                      True,
-        "camera_status":           cam_status,
-        "temperature_C":           t,
-        "temperature_status":      temp_status,
-        "cooler_on":               _attr('cooler_on'),
-        "exposure_time_s":         _attr('exposure_time'),
-        "acquisition_mode":        _attr('aq_mode'),
-        # 도구 인자와 같은 표기로 돌려준다('fvb' / 'single_track' / 'image').
-        # 드라이버 내부 표기는 'FULL_VERTICAL_BINNING' 인데, 그대로 내보내면
-        # set_ccd_read_mode(mode='fvb') 로 설정한 뒤 get_ccd_info 로 확인했을 때
-        # 값이 달라 보여 모델도 채점기도 '안 바뀌었다'고 오판한다. 원문은 따로 싣는다.
-        "read_mode":               _current_read_mode(),
-        "read_mode_driver":        _attr('ro_mode'),
-        # 트리거/셔터도 함께 보고한다 — acquire_spectrum 이 이 값들을 생략 시 '유지'하므로,
-        # 지금 무엇이 걸려 있는지 볼 수 없으면 다음 측정 조건을 예측할 수 없다.
-        "trigger_mode":            _attr('trigger_mode'),
-        "shutter_mode":            _attr('shutter_mode'),
-        "num_accumulations":       _attr('num_acc'),
-        "num_kinetics":            _attr('num_kin'),
-        "em_mode":                 _attr('em_mode'),
-        "em_gain":                 _attr('em_gain'),
-        "output_amp":              _attr('output_amp'),
-        "preamp_gain_index":       _attr('preamp_gain_i'),
-        "preamp_gains_available":  _attr('preamp_gains'),
-        "vs_speeds_us":            _attr('VSSpeeds'),
-        "hs_speeds_conventional_mhz": hs_conv,
-        "readout_pixels_Nx":       _attr('Nx_ro'),
-        "readout_pixels_Ny":       _attr('Ny_ro'),
-        "detector_Nx":             _attr('Nx'),
-        "detector_Ny":             _attr('Ny'),
-    }
+    return ok(camera_status=cam_status,
+              temperature_C=t,
+              temperature_status=temp_status,
+              cooler_on=_attr('cooler_on'),
+              exposure_time_s=_attr('exposure_time'),
+              acquisition_mode=_attr('aq_mode'),
+              read_mode=_current_read_mode(),
+              read_mode_driver=_attr('ro_mode'),
+              trigger_mode=_attr('trigger_mode'),
+              shutter_mode=_attr('shutter_mode'),
+              num_accumulations=_attr('num_acc'),
+              num_kinetics=_attr('num_kin'),
+              em_mode=_attr('em_mode'),
+              em_gain=_attr('em_gain'),
+              output_amp=_attr('output_amp'),
+              preamp_gain_index=_attr('preamp_gain_i'),
+              preamp_gains_available=_attr('preamp_gains'),
+              vs_speeds_us=_attr('VSSpeeds'),
+              hs_speeds_conventional_mhz=hs_conv,
+              readout_pixels_Nx=_attr('Nx_ro'),
+              readout_pixels_Ny=_attr('Ny_ro'),
+              detector_Nx=_attr('Nx'),
+              detector_Ny=_attr('Ny'))
 
 
 @_serialized("set_ccd_exposure")
-def set_ccd_exposure(exposure_time: float) -> dict:
+def set_ccd_exposure(
+    exposure_time: Annotated[float, Field(description='Exposure time [seconds]. e.g. 0.1, 0.5, 1.0')],
+) -> dict:
     """CCD 노출 시간(초)을 설정한다."""
     err = _ccd_ready()
     if err:
         return err
     if exposure_time <= 0:
-        return {"ok": False, "error": "Exposure time must be greater than 0."}
+        return fail("Exposure time must be greater than 0.")
     try:
         actual = _ccd.set_exposure_time(exposure_time)
-        return {"ok": True, "exposure_time_s": actual}
+        return ok(exposure_time_s=actual)
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 @_serialized("set_ccd_acquisition_mode")
 def set_ccd_acquisition_mode(
-    mode: str,
-    num_accumulations: int = None,
-    num_kinetics: int = None,
+    mode: Annotated[Literal['single', 'accumulate', 'kinetic', 'run_till_abort'], Field(description='Acquisition mode')],
+    num_accumulations: Annotated[Optional[int], Field(ge=1, description='Number of accumulations (used in accumulate/kinetic mode). Omit to keep the value already on the CCD - 0 is not a way to switch accumulation off and is rejected. Note that accumulate mode with 1 accumulation is just a single shot - set this deliberately when you want averaging.')] = None,
+    num_kinetics: Annotated[Optional[int], Field(ge=1, description='Total number of frames to acquire (used in kinetic mode). Omit to keep the value already on the CCD.')] = None,
 ) -> dict:
-    """
-    CCD 취득 모드를 설정한다(측정과 분리해서 미리 걸어 두고 싶을 때).
-
-    mode: 'single' | 'accumulate' | 'kinetic' | 'run_till_abort'
-    num_accumulations: accumulate/kinetic 모드에서 누적 횟수
-    num_kinetics: kinetic 모드에서 총 프레임 수
-
-    acquire_spectrum(acq_mode=..., num_accumulations=..., kinetic_count=...) 로도
-    같은 설정을 걸 수 있고, 내부적으로 같은 코드를 지난다. 측정 직전에 정할 값이면
-    acquire_spectrum 쪽 인자를 쓰는 편이 왕복이 하나 줄어든다.
-
-    주의: 'run_till_abort' 는 이 도구로만 걸 수 있다. acquire_spectrum 은 1D 스펙트럼
-    한 벌을 조립해 돌려주는 도구라 무한 연속 취득 모드를 다루지 못하고, 이 모드로 둔 채
-    측정을 시도하면 acq_mode 를 명시하라는 에러를 받는다.
-    """
     err = _ccd_ready()
     if err:
         return err
@@ -1784,25 +1835,22 @@ def set_ccd_acquisition_mode(
                               kinetic_count=num_kinetics)
         if err:
             return err
-        out = {
-            "ok":                True,
-            "acquisition_mode":  mode,
-            # 요청값이 아니라 장비에 실제로 걸린 값을 보고한다 — None 을 넘겨 '유지'한
-            # 경우에도 현재 값을 알 수 있어야 다음 측정 조건을 예측할 수 있다.
-            "num_accumulations": getattr(_ccd, 'num_acc', None),
-            "num_kinetics":      getattr(_ccd, 'num_kin', None),
-        }
+        out = ok(acquisition_mode=mode,
+                 num_accumulations=getattr(_ccd, 'num_acc', None),
+                 num_kinetics=getattr(_ccd, 'num_kin', None))
         if mode == 'run_till_abort':
             out["note"] = ("acquire_spectrum cannot run in 'run_till_abort'. Switch back with "
                            "set_ccd_acquisition_mode('single') before measuring, or pass "
                            "acq_mode explicitly to acquire_spectrum.")
         return out
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 @_serialized("set_ccd_trigger_mode")
-def set_ccd_trigger_mode(mode: str) -> dict:
+def set_ccd_trigger_mode(
+    mode: Annotated[Literal['internal', 'external', 'external_start', 'external_exposure', 'external_fvb_em', 'software'], Field(description='Trigger mode')],
+) -> dict:
     """
     CCD 트리거 모드를 설정한다.
 
@@ -1819,17 +1867,17 @@ def set_ccd_trigger_mode(mode: str) -> dict:
         err = _apply_trigger_mode(mode)
         if err:
             return err
-        return {"ok": True, "trigger_mode": mode}
+        return ok(trigger_mode=mode)
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 @_serialized("set_ccd_read_mode")
 def set_ccd_read_mode(
-    mode: str,
-    hbin: int = None,
-    single_track_center: int = None,
-    single_track_width: int = None,
+    mode: Annotated[Literal['fvb', 'single_track', 'image'], Field(description='Readout mode')],
+    hbin: Annotated[Optional[int], Field(description='Horizontal binning factor. Omit to keep the current value.')] = None,
+    single_track_center: Annotated[Optional[int], Field(description='Center row number to read in single_track mode (1-based), e.g. 256. Required the first time you use single_track; omit to reuse the configured track.')] = None,
+    single_track_width: Annotated[Optional[int], Field(description='Number of rows to read in single_track mode. Omit to keep the current value.')] = None,
 ) -> dict:
     """
     CCD 읽기 모드(readout mode)를 설정한다.
@@ -1855,23 +1903,19 @@ def set_ccd_read_mode(
                                single_track_width=single_track_width)
         if err:
             return err
-        out = {
-            "ok":          True,
-            "read_mode":   mode,
-            "hbin":        _ccd.get_current_hbin(),      # 실제 적용값
-            "Nx_ro":       _ccd.Nx_ro,
-            "Ny_ro":       _ccd.Ny_ro,
-        }
+        out = ok(read_mode=mode, hbin=_ccd.get_current_hbin(), Nx_ro=_ccd.Nx_ro, Ny_ro=_ccd.Ny_ro)
         if mode == 'image':
             out["note"] = ("acquire_spectrum cannot assemble a 1D spectrum in 'image' mode. "
                            "Call set_ccd_read_mode('fvb') before measuring.")
         return out
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 @_serialized("set_ccd_preamp_gain")
-def set_ccd_preamp_gain(index: int) -> dict:
+def set_ccd_preamp_gain(
+    index: Annotated[int, Field(description='Pre-amplifier gain index (0-based). Typically in the range 0-2')],
+) -> dict:
     """
     프리앰프(PreAmp) 이득 인덱스를 설정한다.
     사용 가능한 이득 목록은 get_ccd_info()의 preamp_gains_available 참조.
@@ -1882,9 +1926,9 @@ def set_ccd_preamp_gain(index: int) -> dict:
     try:
         _ccd.set_preamp_gain(index)
         gain_val = _ccd.preamp_gains[index] if _ccd.preamp_gains else None
-        return {"ok": True, "preamp_gain_index": index, "gain_value": gain_val}
+        return ok(preamp_gain_index=index, gain_value=gain_val)
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 # [제거됨 — 이 장비가 지원하지 않는 이득 도구들]
@@ -1911,7 +1955,10 @@ def set_ccd_preamp_gain(index: int) -> dict:
 
 
 @_serialized("set_ccd_shift_speeds")
-def set_ccd_shift_speeds(vs_index: int = None, hs_index: int = None) -> dict:
+def set_ccd_shift_speeds(
+    vs_index: Annotated[Optional[int], Field(description='Vertical shift speed index')] = None,
+    hs_index: Annotated[Optional[int], Field(description='Horizontal shift speed index')] = None,
+) -> dict:
     """
     수직(VS) 및 수평(HS) 시프트 속도 인덱스를 설정한다.
     사용 가능한 속도 목록은 get_ccd_info()의 vs_speeds_us / hs_speeds_conventional_mhz 참조.
@@ -1920,7 +1967,7 @@ def set_ccd_shift_speeds(vs_index: int = None, hs_index: int = None) -> dict:
     err = _ccd_ready()
     if err:
         return err
-    result = {"ok": True}
+    result = ok()
     try:
         if vs_index is not None:
             _ccd.set_vs_speed(vs_index)
@@ -1931,12 +1978,14 @@ def set_ccd_shift_speeds(vs_index: int = None, hs_index: int = None) -> dict:
             _ccd.set_hs_speed_conventional(hs_index)
             result["hs_speed_index"] = hs_index
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
     return result
 
 
 @_serialized("set_ccd_temperature")
-def set_ccd_temperature(temp: int) -> dict:
+def set_ccd_temperature(
+    temp: Annotated[int, Field(description='Target temperature [°C]. e.g. -40, -60, -80')],
+) -> dict:
     """
     CCD 냉각 목표 온도(°C)를 설정한다.
     실제 안정화는 시간이 걸리며, 상태는 get_ccd_info()로 확인한다.
@@ -1947,26 +1996,30 @@ def set_ccd_temperature(temp: int) -> dict:
         return err
     try:
         _ccd.set_temperature(temp)
-        return {"ok": True, "target_temperature_C": temp}
+        return ok(target_temperature_C=temp)
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 @_serialized("set_ccd_cooler")
-def set_ccd_cooler(on: bool) -> dict:
+def set_ccd_cooler(
+    on: Annotated[bool, Field(description='true = cooler ON, false = cooler OFF')],
+) -> dict:
     """CCD 냉각기를 켜거나(True) 끈다(False)."""
     err = _ccd_ready()
     if err:
         return err
     try:
         _ccd.set_cooler(on)
-        return {"ok": True, "cooler": "ON" if on else "OFF"}
+        return ok(cooler="ON" if on else "OFF")
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 @_serialized("set_ccd_shutter")
-def set_ccd_shutter(mode: str) -> dict:
+def set_ccd_shutter(
+    mode: Annotated[Literal['auto', 'open', 'close'], Field(description='Shutter mode')],
+) -> dict:
     """
     셔터 모드를 설정한다.
     'auto'  — 취득 시 자동 열고 닫음 (기본)
@@ -1991,16 +2044,19 @@ def set_ccd_shutter(mode: str) -> dict:
         err = _apply_shutter(mode, explicit=True)
         if err:
             return err
-        return {"ok": True, "shutter": mode,
-                "note": ("This setting persists: later acquire_spectrum calls keep it unless you "
-                         "pass their own shutter argument. Use 'close' for dark/background frames "
-                         "and set it back to 'auto' before normal measurements.")}
+        return ok(shutter=mode,
+                  note="This setting persists: later acquire_spectrum calls keep it unless you "
+                       "pass their own shutter argument. Use 'close' for dark/background frames "
+                       "and set it back to 'auto' before normal measurements.")
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 @_serialized("set_ccd_image_flip")
-def set_ccd_image_flip(hflip: bool, vflip: bool) -> dict:
+def set_ccd_image_flip(
+    hflip: Annotated[bool, Field(description='true = flip horizontally (left-right)')],
+    vflip: Annotated[bool, Field(description='true = flip vertically (up-down)')],
+) -> dict:
     """
     이미지 반전을 설정한다. read_mode='image' 에서만 허용한다.
     hflip: 수평 좌우 반전 여부
@@ -2020,17 +2076,16 @@ def set_ccd_image_flip(hflip: bool, vflip: bool) -> dict:
         return err
     ro = getattr(_ccd, 'ro_mode', None)
     if ro != 'IMG':
-        return {"ok": False, "error": (
-            f"Image flip is only allowed in the 'image' read mode (the CCD is currently in "
-            f"'{ro}'). In 1D spectrum modes (fvb / single_track) flipping would silently "
-            f"misalign the intensity array against the calibrated raman_shift_cm-1 / "
-            f"wavelength_nm axes, and the factory orientation is already set at startup. "
-            f"Call set_ccd_read_mode(mode='image') first if you really need a flipped 2D image.")}
+        return fail(f"Image flip is only allowed in the 'image' read mode (the CCD is currently in "
+                    f"'{ro}'). In 1D spectrum modes (fvb / single_track) flipping would silently "
+                    f"misalign the intensity array against the calibrated raman_shift_cm-1 / "
+                    f"wavelength_nm axes, and the factory orientation is already set at startup. "
+                    f"Call set_ccd_read_mode(mode='image') first if you really need a flipped 2D image.")
     try:
         _ccd.set_image_flip(hflip=hflip, vflip=vflip)
-        return {"ok": True, "hflip": hflip, "vflip": vflip, "read_mode": "image"}
+        return ok(hflip=hflip, vflip=vflip, read_mode="image")
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 @_serialized("start_camera_stream")
@@ -2044,20 +2099,18 @@ def start_camera_stream() -> dict:
     스트림을 내가 끄면 그쪽 화면이 죽는다. already_streaming=True면 끄지 말 것.
     """
     if _camera is None:
-        return {"ok": False, "error": "Camera is not initialized."}
+        return fail("Camera is not initialized.")
 
     try:
         # 이미 스트리밍 중인지 확인 (StreamingTUCam 내부 속성 활용)
         if getattr(_camera, 'is_streaming', False):
-            return {"ok": True, "already_streaming": True,
-                    "status": "Camera is already streaming."}
+            return ok(already_streaming=True, status="Camera is already streaming.")
 
         _camera.start_stream()
-        return {"ok": True, "already_streaming": False,
-                "status": "Camera streaming started successfully."}
+        return ok(already_streaming=False, status="Camera streaming started successfully.")
 
     except Exception as e:
-        return {"ok": False, "error": f"Failed to start streaming: {str(e)}"}
+        return fail(f"Failed to start streaming: {str(e)}")
 
 @_serialized("stop_camera_stream")
 def stop_camera_stream() -> dict:
@@ -2066,38 +2119,42 @@ def stop_camera_stream() -> dict:
     USE_camera_stream.py의 StreamingTUCam.stop_stream()을 호출합니다.
     """
     if _camera is None:
-        return {"ok": False, "error": "Camera is not initialized."}
+        return fail("Camera is not initialized.")
 
     try:
         if not getattr(_camera, 'is_streaming', False):
-            return {"ok": True, "status": "Camera is not currently streaming."}
+            return ok(status="Camera is not currently streaming.")
 
         _camera.stop_stream()
-        return {"ok": True, "status": "Camera streaming stopped successfully."}
+        return ok(status="Camera streaming stopped successfully.")
 
     except Exception as e:
-        return {"ok": False, "error": f"Failed to stop streaming: {str(e)}"}
+        return fail(f"Failed to stop streaming: {str(e)}")
 
 
 @_serialized("set_camera_exposure")
-def set_camera_exposure(ms: float) -> dict:
+def set_camera_exposure(
+    ms: Annotated[float, Field(description='Exposure time [ms]. e.g. 10.0, 50.0, 100.0')],
+) -> dict:
     """카메라(TUCam) 노출 시간(ms)을 설정한다."""
     if _camera is None:
-        return {"ok": False, "error": "Camera is not initialized."}
+        return fail("Camera is not initialized.")
     if ms <= 0:
-        return {"ok": False, "error": "Exposure time must be greater than 0."}
+        return fail("Exposure time must be greater than 0.")
     try:
         _camera.set_exposure(ms)
-        return {"ok": True, "exposure_ms": ms}
+        return ok(exposure_ms=ms)
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 @_serialized("set_camera_auto_exposure")
-def set_camera_auto_exposure(enabled: bool) -> dict:
+def set_camera_auto_exposure(
+    enabled: Annotated[bool, Field(description='true = auto exposure ON, false = manual exposure')],
+) -> dict:
     """카메라 자동 노출을 활성화(True) 또는 비활성화(False)한다."""
     if _camera is None:
-        return {"ok": False, "error": "Camera is not initialized."}
+        return fail("Camera is not initialized.")
     try:
         from backend.hw_tools.SDKs.TuCam.TUCam import TUCAM_Capa_SetValue, TUCAM_IDCAPA
         TUCAM_Capa_SetValue(
@@ -2105,9 +2162,9 @@ def set_camera_auto_exposure(enabled: bool) -> dict:
             TUCAM_IDCAPA.TUIDC_ATEXPOSURE.value,
             1 if enabled else 0,
         )
-        return {"ok": True, "auto_exposure": enabled}
+        return ok(auto_exposure=enabled)
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 # [제거됨 — capture_camera_frame, 2026-07-30]
@@ -2135,12 +2192,12 @@ def set_guide_beam_mode() -> dict:
     측정 레이저 미사용 시 시편 정렬·초점 확인에 활용한다.
     """
     if _laser is None:
-        return {"ok": False, "error": "Laser is not initialized."}
+        return fail("Laser is not initialized.")
     try:
         _laser.set_guide_beam()
-        return {"ok": True, "status": "Switched to guide-beam mode"}
+        return ok(status="Switched to guide-beam mode")
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 # ──────────────────────────────────────────
@@ -2154,10 +2211,10 @@ _AF_UNMEASURED_ABORT = 3
 
 @_serialized("run_autofocus")
 def run_autofocus(
-    initial_z: float = None,
-    step_size: float = 0.030,
-    min_step: float = 0.001,
-    max_steps: int = 100,
+    initial_z: Annotated[Optional[float], Field(description='Starting Z position for the search (mm). If omitted, keep the current Z')] = None,
+    step_size: Annotated[Optional[float], Field(description='Initial Z step size (mm). Default 0.030 (30 um)')] = 0.03,
+    min_step: Annotated[Optional[float], Field(description='Minimum step size (mm) - the search ends below this. Default 0.001 (1 um)')] = 0.001,
+    max_steps: Annotated[Optional[int], Field(description='Maximum number of steps - forced stop when exceeded. Default 100')] = 100,
 ) -> dict:
     """
     가이드빔 레이저 스팟 면적 최소화 기반 힐클라이밍 오토포커스.
@@ -2190,9 +2247,9 @@ def run_autofocus(
     if stage_err:
         return stage_err
     if _camera is None:
-        return {"ok": False, "error": "Camera is not initialized."}
+        return fail("Camera is not initialized.")
     if _laser is None:
-        return {"ok": False, "error": "Laser is not initialized."}
+        return fail("Laser is not initialized.")
     if initial_z is not None:
         err = _check_stage_target(z=initial_z)
         if err:
@@ -2256,13 +2313,13 @@ def run_autofocus(
                 if n_unmeasured >= _AF_UNMEASURED_ABORT:
                     _goto_z(cur_z)          # 탐색 시작 Z 로 되돌린다(아래 문구가 사실이 되도록)
                     _laser_off_quiet()
-                    return {"ok": False, "error": (
-                        f"Autofocus could not measure the guide-beam spot at all - the camera returned "
-                        f"no frames {n_unmeasured} times in a row. Focus was NOT adjusted and the stage "
-                        f"is back where it started. This is not something a retry fixes: check that the "
-                        f"camera is streaming (start_camera_stream) and that the guide beam is actually "
-                        f"emitting (get_laser_status / set_guide_beam_mode)."),
-                        "z_scores": z_scores, "unmeasured_samples": n_unmeasured}
+                    return fail(f"Autofocus could not measure the guide-beam spot at all - the camera returned "
+                                f"no frames {n_unmeasured} times in a row. Focus was NOT adjusted and the stage "
+                                f"is back where it started. This is not something a retry fixes: check that the "
+                                f"camera is streaming (start_camera_stream) and that the guide beam is actually "
+                                f"emitting (get_laser_status / set_guide_beam_mode).",
+                                z_scores=z_scores,
+                                unmeasured_samples=n_unmeasured)
                 # 아직 한도 전이면 한 칸 움직여 다시 시도한다.
                 _goto_z(z_now + direction * step_size)
                 continue
@@ -2298,27 +2355,24 @@ def run_autofocus(
         if global_best_area == float('inf'):
             _goto_z(cur_z)
             _laser_off_quiet()
-            return {"ok": False, "error": (
-                "Autofocus finished without ever detecting a guide-beam spot - every sample came back "
-                "with zero spot area, so there was nothing to minimise and no focus was found. The Z "
-                "position is unchanged. Check that the guide beam is actually emitting "
-                "(set_guide_beam_mode, then look with analyze_microscope_image) and that a sample is "
-                "actually under the objective."),
-                "z_scores": z_scores, "unmeasured_samples": n_unmeasured}
+            return fail("Autofocus finished without ever detecting a guide-beam spot - every sample came back "
+                        "with zero spot area, so there was nothing to minimise and no focus was found. The Z "
+                        "position is unchanged. Check that the guide beam is actually emitting "
+                        "(set_guide_beam_mode, then look with analyze_microscope_image) and that a sample is "
+                        "actually under the objective.",
+                        z_scores=z_scores,
+                        unmeasured_samples=n_unmeasured)
 
         # 역대 최솟값 위치로 최종 귀환
         _goto_z(global_best_z)
         time.sleep(0.2)
         _laser_off_quiet()
 
-        out = {
-            "ok": True,
-            "optimal_z": global_best_z,
-            "best_area_px": global_best_area,
-            "step_count": step_count,
-            "z_scores": z_scores,
-            "current_position": {"x": cur_x, "y": cur_y, "z": global_best_z},
-        }
+        out = ok(optimal_z=global_best_z,
+                 best_area_px=global_best_area,
+                 step_count=step_count,
+                 z_scores=z_scores,
+                 current_position={"x": cur_x, "y": cur_y, "z": global_best_z})
         if n_clamped:
             out["z_limit_hits"] = n_clamped
             out["note"] = (
@@ -2329,7 +2383,7 @@ def run_autofocus(
         return out
     except Exception as e:
         _laser_off_quiet()
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 # ──────────────────────────────────────────
@@ -2399,44 +2453,38 @@ def _ipbsa(intensity, poly_order=5, max_iterations=100, threshold=0.001):
 
 
 def apply_background_subtraction(
-    poly_order: int,
-    max_iterations: int = 100,
-    threshold: float = 0.001,
-    source: str = "last",
-    version_label: str = "default",
-    save_result: bool = False,
+    poly_order: Annotated[int, Field(ge=2, le=10, description="Polynomial order (2-10) - REQUIRED, decide it yourself from the shape of this spectrum's background. A low order (2-3) fits only a gentle slope and will leave a curved background behind; a high order (8-10) can bend enough to follow the peaks and subtract away real signal. Mid orders (4-6) suit the moderate fluorescence curvature that is typical, but confirm it against the data rather than assuming.")],
+    max_iterations: Annotated[Optional[int], Field(ge=10, le=500, description='Maximum number of iterations (10-500). Default 100.')] = 100,
+    threshold: Annotated[Optional[float], Field(ge=0.001, le=1.0, description='Convergence criterion - relative L2 change of the background curve between iterations (0.001-1.0). Default 0.001. Smaller means stricter convergence.')] = 0.001,
+    source: Annotated[Optional[str], Field(description="Source spectrum to background-subtract. 'last': use the most recent acquire_spectrum() result (default). Otherwise: a file (JSON or CSV) given as a path relative to data/, an absolute path, or a file_id from list_uploaded_files (e.g. '2026-08-07/N05.csv') to work directly on an uploaded input file. TWO LIMITS ON 'last'. (1) It only works on Single/Accumulate spectra - a Kinetic measurement has no single intensity array and is REJECTED. (2) run_grid_scan acquires internally at every point, so right after a grid scan 'last' means ONLY the final point of that grid, not the grid. To baseline-correct a whole grid, pass file paths one at a time (get them from list_results), or write the loop yourself in run_analysis.")] = 'last',
+    version_label: Annotated[Optional[str], Field(description="Version name to attach to this result. e.g. 'v1_poly5', 'v2_poly7'. Calling again with the same name overwrites it. Default 'default'.")] = 'default',
+    save_result: Annotated[Optional[bool], Field(description="If True, also write the corrected spectrum to this session's folder as a CSV (standard format: pixel_index, raman_shift_cm-1, intensity, background_intensity) and return its data/-relative path in saved_path, which load_spectrum accepts. Default false - without it the result exists only in memory for this conversation. SET IT TO TRUE IF YOU WILL PLOT OR ANALYSE THE RESULT: run_analysis reads files, not this conversation's memory, so an unsaved version is invisible to it and there is no way to hand the arrays over afterwards. Leave it false only when you are just comparing poly_order settings via list_bg_versions.")] = False,
 ) -> dict:
     """IPBSA(반복 다항식 배경 제거)를 수행하고 결과를 이 세션의 버전 목록에 저장한다."""
     _st = _sstate()
     _last_spectrum = _st["last_spectrum"]
 
     if not (2 <= poly_order <= 10):
-        return {"ok": False, "error": f"poly_order must be 2-10 (got: {poly_order})"}
+        return fail(f"poly_order must be 2-10 (got: {poly_order})")
     if not (10 <= max_iterations <= 500):
-        return {"ok": False, "error": f"max_iterations must be 10-500 (got: {max_iterations})"}
+        return fail(f"max_iterations must be 10-500 (got: {max_iterations})")
     if not (0.001 <= threshold <= 1.0):
-        return {"ok": False, "error": f"threshold must be 0.001-1.0 (got: {threshold})"}
+        return fail(f"threshold must be 0.001-1.0 (got: {threshold})")
 
     intensity: list = []
     raman_shift = None
 
     if source == "last":
         if _last_spectrum is None:
-            return {
-                "ok": False,
-                "error": "No saved spectrum. Call acquire_spectrum() first.",
-            }
+            return fail("No saved spectrum. Call acquire_spectrum() first.")
         if "data" not in _last_spectrum:
-            return {
-                "ok": False,
-                "error": "The last spectrum is in Kinetic mode. This applies only to Single/Accumulate spectra.",
-            }
+            return fail("The last spectrum is in Kinetic mode. This applies only to Single/Accumulate spectra.")
         intensity = _last_spectrum["data"]
         raman_shift = _last_spectrum.get("raman_shift_cm-1")
     else:
         filepath, why = _resolve_data_path(source)
         if filepath is None:
-            return {"ok": False, "error": why}
+            return fail(why)
         try:
             if filepath.suffix.lower() == ".json":
                 with open(filepath, "r", encoding="utf-8") as f:
@@ -2446,7 +2494,7 @@ def apply_background_subtraction(
                 elif "corrected_data" in loaded:
                     intensity = loaded["corrected_data"]
                 else:
-                    return {"ok": False, "error": "The JSON file has no 'data' or 'corrected_data' key."}
+                    return fail("The JSON file has no 'data' or 'corrected_data' key.")
                 raman_shift = loaded.get("raman_shift_cm-1")
             elif filepath.suffix.lower() == ".csv":
                 # CSV 읽기는 load_spectrum 에 위임한다 — 여기서 csv.DictReader 를 직접
@@ -2455,24 +2503,19 @@ def apply_background_subtraction(
                 # "intensity 열이 없다"로 실패했다(BOM 도 처리하지 않았다).
                 loaded = load_spectrum(str(filepath))
                 if not loaded.get("ok"):
-                    return {"ok": False, "error": f"File load error: {loaded.get('error')}"}
+                    return fail(f"File load error: {loaded.get('error')}")
                 intensity = loaded["intensity"]
                 raman_shift = loaded.get("raman_shift_cm-1")
             else:
-                return {"ok": False, "error": "Unsupported file format (only JSON or CSV allowed)."}
+                return fail("Unsupported file format (only JSON or CSV allowed).")
         except Exception as e:
-            return {"ok": False, "error": f"File load error: {e}"}
+            return fail(f"File load error: {e}")
 
     if not intensity:
-        return {"ok": False, "error": "The spectrum intensity array is empty."}
+        return fail("The spectrum intensity array is empty.")
     if len(intensity) < poly_order + 1:
-        return {
-            "ok": False,
-            "error": (
-                f"Spectrum length ({len(intensity)}) is smaller than poly_order+1 ({poly_order + 1}). "
-                "Lower the polynomial order."
-            ),
-        }
+        return fail(f"Spectrum length ({len(intensity)}) is smaller than poly_order+1 ({poly_order + 1}). "
+                    "Lower the polynomial order.")
 
     try:
         corrected, background, iterations_run, converged = _ipbsa(
@@ -2482,7 +2525,7 @@ def apply_background_subtraction(
             threshold=threshold,
         )
     except Exception as e:
-        return {"ok": False, "error": f"IPBSA algorithm error: {e}"}
+        return fail(f"IPBSA algorithm error: {e}")
 
     saved_path = None
     if save_result:
@@ -2511,19 +2554,16 @@ def apply_background_subtraction(
         except Exception:
             pass
 
-    result = {
-        "ok": True,
-        "version_label": version_label,
-        "poly_order": poly_order,
-        "max_iterations": max_iterations,
-        "threshold": threshold,
-        "iterations_run": iterations_run,
-        "converged": converged,
-        "max_corrected_intensity": float(max(corrected)) if corrected else 0.0,
-        "max_background_intensity": float(max(background)) if background else 0.0,
-        "corrected_data": corrected,
-        "background_data": background,
-    }
+    result = ok(version_label=version_label,
+                poly_order=poly_order,
+                max_iterations=max_iterations,
+                threshold=threshold,
+                iterations_run=iterations_run,
+                converged=converged,
+                max_corrected_intensity=float(max(corrected)) if corrected else 0.0,
+                max_background_intensity=float(max(background)) if background else 0.0,
+                corrected_data=corrected,
+                background_data=background)
     if raman_shift is not None:
         result["raman_shift_cm-1"] = raman_shift
     if saved_path is not None:
@@ -2537,12 +2577,9 @@ def list_bg_versions() -> dict:
     """저장된 모든 배경 제거 결과 버전의 목록과 주요 통계를 반환한다."""
     _bg_versions = _sstate()["bg_versions"]
     if not _bg_versions:
-        return {
-            "ok": True,
-            "count": 0,
-            "versions": [],
-            "message": "No saved versions. Call apply_background_subtraction() first.",
-        }
+        return ok(count=0,
+                  versions=[],
+                  message="No saved versions. Call apply_background_subtraction() first.")
     summaries = []
     for label, v in _bg_versions.items():
         summaries.append({
@@ -2557,19 +2594,18 @@ def list_bg_versions() -> dict:
             "has_raman_shift":          "raman_shift_cm-1" in v,
             "data_length":              len(v.get("corrected_data", [])),
         })
-    return {"ok": True, "count": len(summaries), "versions": summaries}
+    return ok(count=len(summaries), versions=summaries)
 
 
-def get_bg_version(version_label: str) -> dict:
+def get_bg_version(
+    version_label: Annotated[str, Field(description="Version name to query. e.g. 'v1_poly5'")],
+) -> dict:
     """특정 버전의 배경 제거 결과 전체 데이터를 반환한다."""
     _bg_versions = _sstate()["bg_versions"]
     if version_label not in _bg_versions:
-        return {
-            "ok": False,
-            "error": f"Version '{version_label}' not found.",
-            "available_versions": list(_bg_versions.keys()),
-        }
-    return {"ok": True, **_bg_versions[version_label]}
+        return fail(f"Version '{version_label}' not found.",
+                    available_versions=list(_bg_versions.keys()))
+    return ok(**_bg_versions[version_label])
 
 
 # [제거됨 — save_spectrum 툴, 2026-07-30]
@@ -2588,7 +2624,9 @@ def get_bg_version(version_label: str) -> dict:
 #       다시 읽기 → load_spectrum(path) / 측정점 묶기 → save_measurement_point(...)
 
 
-def load_spectrum(filename: str) -> dict:
+def load_spectrum(
+    filename: Annotated[str, Field(description="File name or path. Three forms are accepted: a session artifact path relative to data/ (e.g. 'runs/<session>/spectra/01_corrected.csv'), an absolute path, or a file_id from list_uploaded_files (e.g. '2026-08-07/N05.csv') to load an uploaded input file.")],
+) -> dict:
     """
     저장된 스펙트럼 CSV 파일 또는 업로드된 입력 파일을 로드한다.
     받는 형태는 세 가지다 — 절대 경로, data/ 기준 상대 경로,
@@ -2609,7 +2647,7 @@ def load_spectrum(filename: str) -> dict:
             filename += ".csv"
         filepath, why = _resolve_data_path(filename)
         if filepath is None:
-            return {"ok": False, "error": why}
+            return fail(why)
 
         comments: dict = {}
         with open(filepath, "r", encoding="utf-8-sig", newline="") as f:
@@ -2633,29 +2671,24 @@ def load_spectrum(filename: str) -> dict:
         # 길이 N×픽셀 짜리 배열이 나온다. 조용히 틀린 데이터를 주는 쪽이 실패보다 나쁘다.
         if "frame_index" in headers:
             n_frames = len({r.get("frame_index") for r in rows})
-            return {"ok": False, "error": (
-                f"{filepath.name} is a Kinetic measurement ({n_frames} frames stored as "
-                f"frame_index,pixel_index,intensity). load_spectrum only reads 1D spectra "
-                f"(Single/Accumulate) and would concatenate the frames into one wrong array. "
-                f"Analyse it with run_analysis instead: kinetic measurements arrive there as "
-                f"spectra[i]['frames'], a (n_frames, n_pixels) array.")}
+            return fail(f"{filepath.name} is a Kinetic measurement ({n_frames} frames stored as "
+                        f"frame_index,pixel_index,intensity). load_spectrum only reads 1D spectra "
+                        f"(Single/Accumulate) and would concatenate the frames into one wrong array. "
+                        f"Analyse it with run_analysis instead: kinetic measurements arrive there as "
+                        f"spectra[i]['frames'], a (n_frames, n_pixels) array.")
         # 세기 열은 'intensity' 로 통일돼 있다. 'corrected_intensity' 는 포맷 통일
         # 이전에 배경 제거 툴이 쓰던 이름이라 옛 파일을 위해서만 남긴다.
         col = next((c for c in ("intensity", "corrected_intensity") if c in headers), None)
         if col is None:
-            return {"ok": False,
-                    "error": (f"No 'intensity' (or 'corrected_intensity') column in "
-                              f"{filepath.name}. Columns: {headers}")}
+            return fail(f"No 'intensity' (or 'corrected_intensity') column in "
+                        f"{filepath.name}. Columns: {headers}")
 
         intensity = [float(r[col]) for r in rows]
-        result: dict = {
-            "ok": True,
-            "filename": str(filepath),
-            "num_points": len(intensity),
-            "headers": headers,
-            "intensity_column": col,
-            "intensity": intensity,
-        }
+        result: dict = ok(filename=str(filepath),
+                          num_points=len(intensity),
+                          headers=headers,
+                          intensity_column=col,
+                          intensity=intensity)
         if comments:
             result["metadata"] = comments        # laser_power_pct / exposure_time / mode 등
         if "raman_shift_cm-1" in headers:
@@ -2666,7 +2699,7 @@ def load_spectrum(filename: str) -> dict:
             result["background_intensity"] = [float(r["background_intensity"]) for r in rows]
         return result
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 # ──────────────────────────────────────────
@@ -2686,7 +2719,10 @@ def load_spectrum(filename: str) -> dict:
 # '직전 측정 + 직전 캡처 + 현재 좌표'를 하나의 레코드로 묶어 run_store 세션에 남긴다.
 
 
-def save_measurement_point(point_id: str, note: str = None) -> dict:
+def save_measurement_point(
+    point_id: Annotated[str, Field(description="Short identifier for this point, e.g. 'P001'. Used in the filename.")],
+    note: Annotated[Optional[str], Field(description='Optional note about this point (sample region, what you observed).')] = None,
+) -> dict:
     """이 지점의 측정 결과를 '측정점 기록' 1건으로 묶어 저장한다.
 
     직전 acquire_spectrum 의 저장물과 직전 capture_scene 의 이미지, 그리고 현재 스테이지
@@ -2709,11 +2745,11 @@ def save_measurement_point(point_id: str, note: str = None) -> dict:
     try:
         from backend.service.store import run_store
     except Exception as e:
-        return {"ok": False, "error": f"run_store unavailable: {type(e).__name__}: {e}"}
+        return fail(f"run_store unavailable: {type(e).__name__}: {e}")
 
     pid = str(point_id or "").strip()
     if not pid:
-        return {"ok": False, "error": "point_id is required (e.g. 'P001')."}
+        return fail("point_id is required (e.g. 'P001').")
 
     # ── 현재 좌표 ──
     position = None
@@ -2767,10 +2803,9 @@ def save_measurement_point(point_id: str, note: str = None) -> dict:
         run_store.record(run_store.KIND_POINT, rel, point_id=pid,
                          has_spectrum=spectrum is not None, has_image=image is not None)
     except Exception as e:
-        return {"ok": False, "error": f"Failed to write the point record: {type(e).__name__}: {e}"}
+        return fail(f"Failed to write the point record: {type(e).__name__}: {e}")
 
-    out = {"ok": True, "point_id": pid, "path": rel, "position": position,
-           "spectrum": spectrum, "image": image}
+    out = ok(point_id=pid, path=rel, position=position, spectrum=spectrum, image=image)
     if missing:
         out["missing"] = missing
         out["note_to_caller"] = (
@@ -2798,11 +2833,11 @@ def capture_scene() -> dict:
        이제 vision.to_view_bgr 로 뷰 해상도에 맞춘다 — 세 캡처 도구의 좌표계가 같다.
     """
     if _camera is None:
-        return {"ok": False, "error": "Camera is not initialized."}
+        return fail("Camera is not initialized.")
     import cv2
     frame = _camera.get_latest_frame()
     if frame is None:
-        return {"ok": False, "error": "No camera frame. Start streaming first."}
+        return fail("No camera frame. Start streaming first.")
     # 뷰 해상도로 정규화(도구 좌표계) 후 matplotlib 표시 기준인 RGB 로.
     img = cv2.cvtColor(_vis.to_view_bgr(frame), cv2.COLOR_BGR2RGB)
 
@@ -2835,16 +2870,18 @@ def capture_scene() -> dict:
         pass
     _sstate()["last_scene"] = _last_scene
 
-    return {"ok": True, "image_url": saved["image_url"], "extent": extent,
-            "shape": list(img.shape),
-            # saved 를 실으면 spectrum_event 배선을 타 캡처한 화면이 채팅에 바로 표시된다.
-            "saved": {"title": "Microscope view capture", "image_url": saved["image_url"]},
-            "note": "Usable later in run_analysis via microscope_image / image_extent, "
-                    "and referenced automatically by save_measurement_point."}
+    return ok(image_url=saved["image_url"],
+              extent=extent,
+              shape=list(img.shape),
+              saved={"title": "Microscope view capture", "image_url": saved["image_url"]},
+              note="Usable later in run_analysis via microscope_image / image_extent, "
+                   "and referenced automatically by save_measurement_point.")
 
 
 @_serialized("analyze_microscope_image")
-def analyze_microscope_image(question: str = "Find a specific object in the sample (e.g. a cell) and report its center-point pixel coordinates.") -> dict:
+def analyze_microscope_image(
+    question: Annotated[Optional[str], Field(description="What you want to check in the image (optional). e.g. 'Describe the sample position and brightness'")] = 'Find a specific object in the sample (e.g. a cell) and report its center-point pixel coordinates.',
+) -> dict:
     """
     TuCam 현미경 카메라 화면을 PNG (Base64)로 캡처하여 반환.
 
@@ -2866,13 +2903,13 @@ def analyze_microscope_image(question: str = "Find a specific object in the samp
        상한 이하라 다운스케일이 없어 좌표가 보낸 그대로 유지된다.
     """
     if _camera is None:
-        return {"ok": False, "error": "Camera is not initialized."}
+        return fail("Camera is not initialized.")
     try:
         import base64
         import cv2
         frame = _camera.get_latest_frame()
         if frame is None:
-            return {"ok": False, "error": "Failed to acquire frame (check whether streaming is active)"}
+            return fail("Failed to acquire frame (check whether streaming is active)")
 
         # 뷰 기준 해상도로 정규화 — 위 docstring의 (1)(2). capture_scene /
         # preview_grid_scan 과 같은 vision.to_view_bgr 를 쓰므로 좌표계가 동일하다.
@@ -2882,32 +2919,30 @@ def analyze_microscope_image(question: str = "Find a specific object in the samp
         enhanced_question = f"{question}\n\n[The attached image has an original resolution of {width}px wide by {height}px tall. When returning pixel coordinates, give exact pixel values based on this resolution.][Note: you return pixel coordinates, which are NOT stage coordinates. To move the stage to that location, you must use the move_to_pixel(pixel_x, pixel_y) function.]"
 
         if not ret:
-            return {"ok": False, "error": "PNG encoding failed"}
+            return fail("PNG encoding failed")
         img_b64 = base64.b64encode(buf).decode('utf-8')
 
         # 밝기 통계와 선명도 — 예전 capture_camera_frame 이 주던 값들을 여기로 합쳤다.
         # 리사이즈·8bit 정규화를 거친 '위에서 실제로 보낸 그 이미지'에서 계산하므로,
         # 모델이 보는 화면과 숫자가 일치한다(옛 툴은 uint16 원본을 그대로 재서 어긋났다).
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-        return {
-            "ok": True,
-            "image_base64": img_b64,
-            "question": enhanced_question,
-            "width": width,
-            "height": height,
-            "min_intensity": float(gray.min()),
-            "max_intensity": float(gray.max()),
-            "mean_intensity": float(gray.mean()),
-            # 상대 비교용 지표다. run_autofocus 는 '가이드빔 스팟 면적'을 쓰므로 이 값과
-            # 직접 비교하거나 이걸로 초점을 잡으려 하면 안 된다(다른 Z 에 수렴한다).
-            "sharpness_score": _vis.sharpness_score(gray),
-        }
+        return ok(image_base64=img_b64,
+                  question=enhanced_question,
+                  width=width,
+                  height=height,
+                  min_intensity=float(gray.min()),
+                  max_intensity=float(gray.max()),
+                  mean_intensity=float(gray.mean()),
+                  sharpness_score=_vis.sharpness_score(gray))
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 @_serialized("move_to_pixel")
-def move_to_pixel(pixel_x: int, pixel_y: int) -> dict:
+def move_to_pixel(
+    pixel_x: Annotated[int, Field(description=f'Image X pixel coordinate (0 - {CAMERA_WIDTH})')],
+    pixel_y: Annotated[int, Field(description=f'Image Y pixel coordinate (0 - {CAMERA_HEIGHT})')],
+) -> dict:
     """
     카메라 이미지의 픽셀 좌표를 스테이지 mm 좌표로 변환해 이동한다.
     이미지 중심(CAMERA_WIDTH/2, CAMERA_HEIGHT/2)이 현재 스테이지 위치에 대응한다.
@@ -2923,11 +2958,11 @@ def move_to_pixel(pixel_x: int, pixel_y: int) -> dict:
     try:
         pos = _stage.get_position()
         if pos is None:
-            return {"ok": False, "error": "Failed to query stage position"}
+            return fail("Failed to query stage position")
         tx, ty = _om.pixel_to_stage(pixel_x, pixel_y, float(pos[0]), float(pos[1]))
         return move_stage(x=round(tx, 4), y=round(ty, 4))
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 # ─────────────────────────────────────────
@@ -3055,18 +3090,15 @@ def _grid_gate_check(geom: dict):
         return None
     state = _gate()["state"]
     if state == "none" or _gate()["geom"] is None:
-        return {"ok": False, "error": (
-            "Human approval required: no approved grid preview is on record. Call preview_grid_scan "
-            "first, show the user the preview, end your turn, and run only after the user approves.")}
+        return fail("Human approval required: no approved grid preview is on record. Call preview_grid_scan "
+                    "first, show the user the preview, end your turn, and run only after the user approves.")
     if state == "pending":
-        return {"ok": False, "error": (
-            "Human approval required: the grid preview has NOT been approved yet. Do not run in the "
-            "same turn as the preview - end your turn now, let the user see the preview, and call "
-            "run_grid_scan only after the user explicitly approves it in a new message.")}
+        return fail("Human approval required: the grid preview has NOT been approved yet. Do not run in the "
+                    "same turn as the preview - end your turn now, let the user see the preview, and call "
+                    "run_grid_scan only after the user explicitly approves it in a new message.")
     if geom != _gate()["geom"]:
-        return {"ok": False, "error": (
-            f"Approval mismatch: the user approved grid {_gate()['geom']} but this run requests "
-            f"{geom}. Preview the exact grid again and get the user's approval before running.")}
+        return fail(f"Approval mismatch: the user approved grid {_gate()['geom']} but this run requests "
+                    f"{geom}. Preview the exact grid again and get the user's approval before running.")
     return None
 
 
@@ -3112,14 +3144,14 @@ def _grid_stage_coords(center_x: float, center_y: float,
 def _validate_grid_args(rows, cols, spacing_mm):
     """preview/run 공통 인자 검증 — 실패 시 error dict, 통과 시 None."""
     if not isinstance(rows, int) or not isinstance(cols, int) or rows < 1 or cols < 1:
-        return {"ok": False, "error": "rows and cols must be integers >= 1."}
+        return fail("rows and cols must be integers >= 1.")
     if rows * cols > _GRID_MAX_POINTS:
-        return {"ok": False, "error": f"Too many points ({rows*cols}); max {_GRID_MAX_POINTS}."}
+        return fail(f"Too many points ({rows*cols}); max {_GRID_MAX_POINTS}.")
     try:
         if float(spacing_mm) <= 0:
             raise ValueError
     except (TypeError, ValueError):
-        return {"ok": False, "error": "spacing_mm must be a number > 0."}
+        return fail("spacing_mm must be a number > 0.")
     return None
 
 
@@ -3135,15 +3167,19 @@ def _validate_grid_range(pts):
     """
     for idx, i, j, sx, sy in pts:
         if not (0 <= sx <= STAGE_MAX_X and 0 <= sy <= STAGE_MAX_Y):
-            return {"ok": False, "error": (
-                f"Point {idx} (row {i}, col {j}) at X={sx}, Y={sy} mm is outside the stage range "
-                f"(0..{STAGE_MAX_X} x 0..{STAGE_MAX_Y}). Adjust center/spacing/size.")}
+            return fail(f"Point {idx} (row {i}, col {j}) at X={sx}, Y={sy} mm is outside the stage range "
+                        f"(0..{STAGE_MAX_X} x 0..{STAGE_MAX_Y}). Adjust center/spacing/size.")
     return None
 
 
 @_serialized("preview_grid_scan")
-def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
-                      center_x: float = None, center_y: float = None) -> dict:
+def preview_grid_scan(
+    rows: Annotated[int, Field(description='Number of grid points stacked VERTICALLY = grid HEIGHT (stage Y axis), integer >= 1. e.g. rows=3 -> 3 points tall.')],
+    cols: Annotated[int, Field(description='Number of grid points side-by-side HORIZONTALLY = grid WIDTH (stage X axis), integer >= 1. e.g. cols=2 -> 2 points wide.')],
+    spacing_mm: Annotated[float, Field(description='Distance between adjacent points (mm), > 0')],
+    center_x: Annotated[Optional[float], Field(description='Grid center X (mm). Optional; defaults to current stage X')] = None,
+    center_y: Annotated[Optional[float], Field(description='Grid center Y (mm). Optional; defaults to current stage Y')] = None,
+) -> dict:
     """격자 스캔 '미리보기'. 스테이지 이동·레이저 조사 없이, rows×cols 격자 위치를 현재
     카메라 화면에 원으로 오버레이한 이미지를 반환한다(에이전트가 보고 승인/수정하도록).
 
@@ -3158,7 +3194,7 @@ def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
     if stage_err:
         return stage_err
     if _camera is None:
-        return {"ok": False, "error": "Camera is not initialized."}
+        return fail("Camera is not initialized.")
     try:
         import base64
         import cv2
@@ -3166,14 +3202,14 @@ def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
         spacing_mm = float(spacing_mm)
         pos = _stage.get_position()
         if pos is None:
-            return {"ok": False, "error": "Failed to query stage position"}
+            return fail("Failed to query stage position")
         cur_x, cur_y = float(pos[0]), float(pos[1])          # 화면 중심 = 현재 위치
         cx = cur_x if center_x is None else float(center_x)  # 격자 중심
         cy = cur_y if center_y is None else float(center_y)
 
         frame = _camera.get_latest_frame()
         if frame is None:
-            return {"ok": False, "error": "Failed to acquire frame (check whether streaming is active)"}
+            return fail("Failed to acquire frame (check whether streaming is active)")
         frame_bgr = _vis.to_view_bgr(frame)     # 좌표계 정규화(다른 캡처 도구와 동일)
 
         pts = _grid_stage_coords(cx, cy, rows, cols, spacing_mm)
@@ -3196,7 +3232,7 @@ def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
 
         ret, buf = cv2.imencode('.png', frame_bgr)
         if not ret:
-            return {"ok": False, "error": "PNG encoding failed"}
+            return fail("PNG encoding failed")
         img_b64 = base64.b64encode(buf).decode('utf-8')
         # 같은 오버레이를 파일로도 저장해 image_url을 실으면, spectrum_event 배선을 타고
         # 이 미리보기가 채팅창에 그대로 인라인 표시된다(프론트 수정 불필요). 에이전트는 위의
@@ -3219,15 +3255,15 @@ def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
             f"with these SAME parameters. If the layout is wrong, call preview_grid_scan again with adjusted "
             f"rows/cols/spacing_mm/center."
         )
-        out = {
-            "ok": True,
-            "rows": rows, "cols": cols, "spacing_mm": spacing_mm,
-            "center": {"x": round(cx, 4), "y": round(cy, 4)},
-            "n_points": rows * cols, "n_in_view": n_in_view,
-            "fov_mm": {"x": round(fov_x, 4), "y": round(fov_y, 4)},
-            "image_base64": img_b64,
-            "question": question,
-        }
+        out = ok(rows=rows,
+                 cols=cols,
+                 spacing_mm=spacing_mm,
+                 center={"x": round(cx, 4), "y": round(cy, 4)},
+                 n_points=rows * cols,
+                 n_in_view=n_in_view,
+                 fov_mm={"x": round(fov_x, 4), "y": round(fov_y, 4)},
+                 image_base64=img_b64,
+                 question=question)
         if saved_img.get("ok"):
             out["saved"] = {"title": f"Grid preview {rows}x{cols} @ {spacing_mm}mm",
                             "image_url": saved_img["image_url"]}
@@ -3239,13 +3275,20 @@ def preview_grid_scan(rows: int, cols: int, spacing_mm: float,
                               (cx, cy))
         return out
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
 
 
 @_serialized("run_grid_scan")
-def run_grid_scan(rows: int, cols: int, spacing_mm: float,
-                  exposure: float, power: float, autofocus: str,
-                  center_x: float = None, center_y: float = None) -> dict:
+def run_grid_scan(
+    rows: Annotated[int, Field(description='Number of grid points stacked VERTICALLY = grid HEIGHT (stage Y axis), integer >= 1. e.g. rows=3 -> 3 points tall. Must match the approved preview.')],
+    cols: Annotated[int, Field(description='Number of grid points side-by-side HORIZONTALLY = grid WIDTH (stage X axis), integer >= 1. e.g. cols=2 -> 2 points wide. Must match the approved preview.')],
+    spacing_mm: Annotated[float, Field(description='Distance between adjacent points (mm), > 0')],
+    exposure: Annotated[float, Field(description='Exposure time per point (s) - REQUIRED. Together with power this sets how much light each point receives, so choose it for THIS sample rather than reusing a number: too short buries the peaks in read noise, too long saturates the detector and multiplies the total run time by the point count.')],
+    power: Annotated[float, Field(description="Laser power (%) per point - REQUIRED. This is the dose decision, and it is applied at EVERY point, so the sample sees it rows*cols times. Higher power raises signal but photobleaches or burns fragile samples (biological, polymer, thin film); if you are unsure of the sample's tolerance, start low and check one point before committing the whole grid. The cumulative dose is estimated up front and the scan is refused outright if it exceeds the limit.")],
+    autofocus: Annotated[Literal['each', 'center', 'none'], Field(description="Autofocus strategy. 'each' = autofocus at every point (most accurate, slowest); 'center' = autofocus once at the grid center then reuse that Z (fast, for flat samples); 'none' = no autofocus, keep current Z. REQUIRED - this is a real trade-off, not a formality: 'each' costs an extra Z sweep (and guide-beam exposure) at every point, which on a large grid dominates the run time, while 'center' or 'none' will drift out of focus on a tilted or uneven sample and quietly return weak spectra. Decide from what you know about the sample's flatness.")],
+    center_x: Annotated[Optional[float], Field(description='Grid center X (mm). Optional; defaults to current stage X')] = None,
+    center_y: Annotated[Optional[float], Field(description='Grid center Y (mm). Optional; defaults to current stage Y')] = None,
+) -> dict:
     """격자 스캔 '실행'. rows×cols 격자를 내부 루프로 순회하며 각 점에서
     이동→(오토포커스)→스펙트럼 측정·자동저장하고, 압축 요약 1개만 반환한다.
 
@@ -3265,7 +3308,7 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
     if err:
         return err
     if autofocus not in ("each", "center", "none"):
-        return {"ok": False, "error": "autofocus must be one of: each, center, none."}
+        return fail("autofocus must be one of: each, center, none.")
     # 사람-승인 게이트(하드 인터록) — 하드웨어를 만지기 전에 먼저 막는다. 승인된 미리보기
     # 없이 레이저 격자 스캔을 실행하지 않는다. 실제 소비는 발사 직전(_grid_gate_consume).
     gate_err = _grid_gate_check(_grid_gate_geom(rows, cols, spacing_mm, center_x, center_y))
@@ -3278,12 +3321,12 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
     if stage_err:
         return stage_err
     if _ccd is None:
-        return {"ok": False, "error": "CCD is not initialized (cooling or not connected)."}
+        return fail("CCD is not initialized (cooling or not connected).")
     if _laser is None:
-        return {"ok": False, "error": "Laser is not initialized."}
+        return fail("Laser is not initialized.")
     if autofocus != "none" and _camera is None:
-        return {"ok": False, "error": "Camera is not initialized (required for autofocus). "
-                                      "Use autofocus='none' to skip."}
+        return fail("Camera is not initialized (required for autofocus). "
+                    "Use autofocus='none' to skip.")
 
     spacing_mm = float(spacing_mm)
     exposure, power = float(exposure), float(power)
@@ -3292,9 +3335,8 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
     # 두 한계값이 같은 의미를 갖는다.
     dose_total = estimate_dose_mj(power, exposure, n)
     if dose_total > _GRID_MAX_DOSE_MJ:
-        return {"ok": False, "error": (
-            f"Safety block: estimated cumulative dose {dose_total:.1f} mJ exceeds the grid limit "
-            f"({_GRID_MAX_DOSE_MJ} mJ). Reduce point count, power, or exposure.")}
+        return fail(f"Safety block: estimated cumulative dose {dose_total:.1f} mJ exceeds the grid limit "
+                    f"({_GRID_MAX_DOSE_MJ} mJ). Reduce point count, power, or exposure.")
 
     # 점마다 광학계를 왕복시키면 ND/빔스플리터 모터 이동만 2n 번 늘어난다. 스캔 도중에는
     # 카메라를 볼 사람도 없으므로, 복귀는 아래 finally 에서 '실제로 쏜 경우 한 번만' 한다.
@@ -3304,7 +3346,7 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
     try:
         pos = _stage.get_position()
         if pos is None:
-            return {"ok": False, "error": "Failed to query stage position"}
+            return fail("Failed to query stage position")
         # 생략된 center 는 '승인된 미리보기가 그린 자리' → 없으면 현재 위치 순으로 푼다.
         fallback_x, fallback_y = (approved_center if approved_center
                                   else (float(pos[0]), float(pos[1])))
@@ -3321,10 +3363,10 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
         if autofocus == "center":
             mv = move_stage(x=cx, y=cy)
             if not mv.get("ok"):
-                return {"ok": False, "error": f"Failed to move to grid center: {mv.get('error')}"}
+                return fail(f"Failed to move to grid center: {mv.get('error')}")
             af = run_autofocus()
             if not af.get("ok"):
-                return {"ok": False, "error": f"Autofocus at grid center failed: {af.get('error')}"}
+                return fail(f"Autofocus at grid center failed: {af.get('error')}")
 
         # 모든 사전검증(범위/None/오토포커스) 통과 — 이제 레이저를 쏜다. 승인을 여기서
         # 소비한다(1회용). 이 지점 이후 재실행하려면 다시 미리보기·승인이 필요하다.
@@ -3337,8 +3379,7 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
         for idx, i, j, sx, sy in pts:
             mv = move_stage(x=sx, y=sy)
             if not mv.get("ok"):
-                results.append({"i": idx, "row": i, "col": j, "x": sx, "y": sy,
-                                "ok": False, "error": mv.get("error")})
+                results.append(fail(mv.get("error"), i=idx, row=i, col=j, x=sx, y=sy))
                 continue
 
             # ── 오토포커스 결과를 '읽는다' — 2026-07-31 ────────────────────────
@@ -3387,8 +3428,7 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
                     rec["autofocus_failed"] = True
                 results.append(rec)
             else:
-                results.append({"i": idx, "row": i, "col": j, "x": sx, "y": sy,
-                                "ok": False, "error": res.get("error")})
+                results.append(fail(res.get("error"), i=idx, row=i, col=j, x=sx, y=sy))
 
         # 압축 반환 — 큰 격자에서 per-point 리스트가 에이전트 _slim(길이>32 리스트 폐기)에
         # 통째로 걸리지 않도록, 집계 통계는 항상 싣고 per-point는 32점 이하일 때만 인라인.
@@ -3436,7 +3476,7 @@ def run_grid_scan(rows: int, cols: int, spacing_mm: float,
             out["points"] = oks
         return out
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return fail(str(e))
     finally:
         # 스캔이 어떻게 끝나든(완주 / 중단 / 예외) 광학계를 카메라 위치로 되돌린다 —
         # 마지막 점의 acquire_spectrum 이 restore_guide_beam=False 로 돌았기 때문에
@@ -3500,17 +3540,16 @@ TOOL_DISPATCH = {
     #  save_measurement_point 가 담당한다.)
     "load_spectrum":            lambda a: load_spectrum(**a),
     # ── 측정 결과 정리(자동 저장분 대상) ─────────────────────────────────────
-    "list_results":             lambda a: {"ok": True, "items": [
-                                    {k: it[k] for k in
-                                     ("base", "session", "date", "title", "timestamp", "meta")}
-                                    for it in _store_list_results(**a)]},
-    "combine_spectra":          lambda a: _store_combine_spectra(**a),
-    "aggregate_spectra_csv":    lambda a: _store_aggregate_csv(**a),
-    "bundle_results":           lambda a: _store_bundle_results(**a),
+    "list_results":             lambda a: ok(items=[
+        {k: it[k] for k in ("base", "session", "date", "title", "timestamp", "meta")}
+        for it in list_results(**a)]),
+    "combine_spectra":          lambda a: combine_spectra(**a),
+    "aggregate_spectra_csv":    lambda a: aggregate_spectra_csv(**a),
+    "bundle_results":           lambda a: bundle_results(**a),
     # ── 분석 전용 코드 샌드박스(하드웨어 미접근) ─────────────────────────────
-    "run_analysis":             lambda a: _run_analysis(**a),
+    "run_analysis":             lambda a: run_analysis(**a),
     # ── 외부 웹 검색(내부 지식에 없을 때) ────────────────────────────────────
-    "web_search":               lambda a: _web_search(**a),
+    "web_search":               lambda a: web_search(**a),
     # ── 측정점 기록 ──────────────────────────────────────────────────────────
     "save_measurement_point":   lambda a: save_measurement_point(**a),
     # ── 배경 제거 (IPBSA) ────────────────────────────────────────────────────

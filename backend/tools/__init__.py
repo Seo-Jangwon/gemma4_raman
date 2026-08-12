@@ -5,7 +5,12 @@ service/ 와의 차이는 '무엇을 하는가'가 아니라 '누가 부르는�
 service/ 는 우리 코드가 부르는 함수고, 여기 있는 것은 **모델이 이름으로 골라 부르는** 것이다.
 그래서 여기 있는 파일은 전부 OpenAI function 스키마와 이름→핸들러 dict 를 짝으로 갖는다.
 
+    schema.py       인자 계약 — 함수 시그니처 → OpenAI function 스키마
+    result.py       결과 계약 — {"ok": ...} 봉투(ok/fail/normalize)
     file_tools.py   list_uploaded_files · inspect_file · run_analysis · list_session_artifacts
+
+앞의 둘은 도구가 아니라 **도구의 계약**이라 아무것도 import 하지 않는다. 덕분에 장비
+계층(hw_tools)이든 서비스 계층이든 어디서 불러도 순환이 생기지 않는다.
 
 [장비 도구가 여기 없는 이유]
 raman_tools.TOOL_DISPATCH(측정·스테이지·레이저)와 raman_tool_schemas.RAMAN_TOOLS 도

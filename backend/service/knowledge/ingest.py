@@ -241,12 +241,14 @@ def _caption_page(page: Any, fname: str, pno: int) -> str:
         print(f"    [캡션 실패] {fname} p.{pno} 렌더: {e}", file=sys.stderr)
         return ""
 
+    # 캡션은 KB 문서가 되어 search_kb 로 **모델 컨텍스트에 그대로 실린다**. 따라서
+    # 지시도 출력도 영어여야 한다 — 여기서 한국어를 요구하면 KB 전체가 한국어가 된다.
     prompt = (
-        "이것은 라만 분광기(MantaRay) 사용 설명서의 한 페이지입니다. "
-        "이 페이지가 설명하는 기능과 조작 절차를 한국어로 요약하세요. "
-        "표가 있으면 각 항목과 그 설명을 짝지어 정확히 옮기세요. "
-        "화면에 보이는 버튼/입력란 이름은 원문 그대로 유지하세요. "
-        "페이지에 내용이 없으면 '내용 없음'이라고만 답하세요."
+        "This is one page of the user manual of a Raman spectrometer (MantaRay). "
+        "Summarize in English the feature and the operating procedure this page describes. "
+        "If there is a table, transcribe each entry paired with its description, accurately. "
+        "Keep button and input-field names exactly as they appear on screen. "
+        "If the page has no content, answer only with 'NO CONTENT'."
     )
     # 캡션 모델은 에이전트가 쓰는 것과 같은 모델이다(backend.llm_config 단일 출처).
     # 예전에는 여기만 "gemma4:31b" 로 박혀 있어, 모델을 바꿔도 KB 캡션은 옛 모델을
@@ -270,9 +272,9 @@ def _caption_page(page: Any, fname: str, pno: int) -> str:
         print(f"    [캡션 실패] {fname} p.{pno}: {e}", file=sys.stderr)
         return ""
 
-    if "내용 없음" in out[:20]:
+    if "NO CONTENT" in out[:24].upper():
         return ""
-    print(f"    캡션 {fname} p.{pno}: {len(out)}자")
+    print(f"    caption {fname} p.{pno}: {len(out)} chars")
     return out
 
 
@@ -410,22 +412,23 @@ def _header_summary(header: dict, path: Path, n_points: int) -> str:
     """
     # 세션 폴더명이 보통 날짜다(예: 260508-2 → 2026-05-08 2번째 세션).
     session = path.parent.name
-    bits = [f"과거 라만 측정 기록 (세션 {session}, 파일 {path.name})."]
+    # 이 문장은 raman_docs 에 색인돼 검색되면 모델 컨텍스트로 들어간다 — 영어여야 한다.
+    bits = [f"Past Raman measurement record (session {session}, file {path.name})."]
 
     def add(label: str, key: str) -> None:
         if header.get(key):
             bits.append(f"{label} {header[key]}")
 
-    add("장비", "Type")
-    add("단위", "Unit")
-    add("레일리 파장", "Rayleigh")
-    add("그레이팅", "Grating")
-    add("획득 모드", "Acquisition Mode")
-    add("노출 시간", "Exposure Time")
-    add("레이저 필터", "Laser Filter")
-    add("ND 필터", "ND Filter")
-    add("렌즈 배율", "Lens Magnification")
-    bits.append(f"데이터 포인트 {n_points}개.")
+    add("Instrument", "Type")
+    add("Unit", "Unit")
+    add("Rayleigh wavelength", "Rayleigh")
+    add("Grating", "Grating")
+    add("Acquisition mode", "Acquisition Mode")
+    add("Exposure time", "Exposure Time")
+    add("Laser filter", "Laser Filter")
+    add("ND filter", "ND Filter")
+    add("Lens magnification", "Lens Magnification")
+    bits.append(f"{n_points} data points.")
     return " ".join(bits)
 
 
