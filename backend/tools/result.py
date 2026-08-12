@@ -70,6 +70,17 @@ def normalize(result: Any, tool: str) -> dict:
 
     call_tool 이 유일한 호출자다(모든 도구 결과가 지나는 지점). 위 머리말의 두 구멍을
     여기 한 곳에서 닫는다: 규약 위반이 조용히 성공으로 흘러가는 대신 바로 드러난다.
+
+    [사유 없는 실패는 **덧붙이고**, 갈아치우지 않는다 — 2026-08-12]
+    앞의 두 경우는 돌려줄 페이로드가 없다(dict 도 아니거나, 성공/실패조차 모른다).
+    세 번째는 다르다. 도구가 '실패했다'까지는 정확히 말했고 빠뜨린 건 사유 한 줄뿐인데,
+    그 dict 안에 대개 가장 값진 것이 들어 있다.
+
+    실제 사고: reconnect_hardware 가 사유를 error(단수)가 아니라 errors(복수)에 담았다.
+    옛 코드는 fail() 로 **새 봉투를 만들어** 돌려줬고, 그래서 어느 장비가 왜 죽었는지,
+    나머지 셋은 붙었는지가 통째로 사라졌다. 모델은 그 사실을 알아채고("This doesn't
+    explicitly say...") 추측으로 답을 지었고, DetailLog 에도 155초짜리 작업의 기록이
+    이 한 줄만 남았다. 관문이 증거를 없애면 관문이 아니라 손실이다.
     """
     if not isinstance(result, dict):
         return fail(f"{tool} returned {type(result).__name__}, expected a dict: "
@@ -77,8 +88,14 @@ def normalize(result: Any, tool: str) -> dict:
     if not isinstance(result.get("ok"), bool):
         return fail(f"{tool} returned a malformed result (no boolean 'ok' field): "
                     f"{repr(result)[:_REPR_LIMIT]}")
-    if not result["ok"] and not str(result.get("error", "")).strip():
-        return fail(f"{tool} failed without an error message.")
+    # None 을 str() 에 넣으면 "None" 이라는 **네 글자짜리 가짜 사유**가 되어 이 검사를
+    # 통과한다. 그러면 모델은 error: null 을 받고 아무것도 못 한다. fail() 은 같은 이유로
+    # 이미 None 을 막고 있는데(위), 리터럴 dict 로 답하는 도구는 그 문을 지나지 않는다.
+    err = result.get("error")
+    if not result["ok"] and (err is None or not str(err).strip()):
+        return {**result,
+                "error": f"{tool} reported failure without an error message. "
+                         f"Look at the other fields of this result for the reason."}
     return result
 
 
@@ -104,7 +121,7 @@ if __name__ == "__main__":
     bad = fail("boom")
     assert normalize(bad, "t") is bad
 
-    # 규약 위반 3종 — 전부 모델이 읽을 수 있는 실패가 된다.
+    # 규약 위반 7종 — 전부 모델이 읽을 수 있는 실패가 된다.
     for broken in (None, "done", 42, ["a"], {"count": 3}, {"ok": 1}, {"ok": False}):
         r = normalize(broken, "move_stage")
         assert r["ok"] is False and "move_stage" in r["error"], (broken, r)
@@ -112,4 +129,21 @@ if __name__ == "__main__":
     # ok 키가 빠진 dict 가 성공으로 새어 나가면 조사량 누계에서 빠진다(레이저는 나갔는데).
     assert not is_ok(normalize({"position": {"x": 1}}, "acquire_spectrum"))
 
-    print("통과: ok/fail 봉투 · is_ok 엄격 판정 · normalize 규약 위반 7종 차단")
+    # 사유 없는 실패: 사유를 '덧붙이되' 나머지는 한 필드도 잃지 않는다.
+    # (reconnect_hardware 가 errors 복수형에 진단을 담아 이 자리를 지나간다.)
+    partial = {"ok": False, "reconnected": ["stage", "camera"],
+               "errors": {"ccd": "re-initialization failed"},
+               "now_connected": {"ccd": False}}
+    r = normalize(partial, "reconnect_hardware")
+    assert r["reconnected"] == ["stage", "camera"], r
+    assert r["errors"] == {"ccd": "re-initialization failed"}, r
+    assert r["now_connected"] == {"ccd": False}, r
+    assert "reconnect_hardware" in r["error"], r
+    assert partial is not r and "error" not in partial, "원본을 건드리면 안 된다"
+
+    # error 가 None/공백이어도 같은 처리 — 가짜 사유("None")를 만들지 않는다.
+    for blank in (None, "", "   "):
+        r = normalize({"ok": False, "error": blank, "kept": 1}, "t")
+        assert r["kept"] == 1 and r["error"].startswith("t reported failure"), (blank, r)
+
+    print("통과: ok/fail 봉투 · is_ok 엄격 판정 · normalize 규약 위반 7종 차단 · 페이로드 보존")

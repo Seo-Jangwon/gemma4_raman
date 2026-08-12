@@ -160,7 +160,7 @@ def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
 
             # ── 도구 호출이 없으면 = 모델이 할 말을 다 했다 = 이번 턴 종료 ──────
             if not ai_msg.tool_calls:
-                final_text = runtime.text_of(ai_msg).strip() or "Failed to generate a response."
+                final_text = runtime.text_of(ai_msg).strip() or runtime.EMPTY_REPLY
                 messages.append(ai_msg)
                 rlog.reasoning(step + 1, "No tool call -> writing the final report, turn ends")
                 rlog.final(final_text, ctx)

@@ -216,6 +216,50 @@ def _ns(v) -> float:
         return 0.0
 
 
+def _empty_reply_dump(ai) -> str:
+    """텍스트도 툴콜도 없는 응답의 **원문**을 남긴다 — 원인을 나중에 가려낼 수 있도록.
+
+    [왜 필요한가 — 2026-08-12]
+    예전에는 이 자리에 "(empty reply - context overflow suspected)" 라는 문장을 찍었다.
+    측정한 값이 아니라 로거에 박아 둔 추측이었고, 실제로는 틀렸다: 그 호출의 프롬프트는
+    20,466 토큰인데 num_ctx 는 100,000 이었다(20%). 틀린 진단이 로그에 남으면 다음 사람이
+    그걸 읽고 엉뚱한 곳부터 판다 — 실제로 그랬다.
+
+    그래서 추측 대신 판별에 필요한 네 가지를 그대로 남긴다:
+
+      invalid_tool_calls  ★ 가장 결정적. LangChain 이 **파싱에 실패한 툴콜**을 여기 담는다.
+                            비어 있지 않으면 "모델은 도구를 부르려 했는데 JSON 이 깨졌다"가
+                            확정된다(여러 줄 파이썬 코드를 넘기는 run_analysis 가 후보다).
+      content 원문        _text() 는 type=="text"/"image_url" 두 블록만 안다. 모델이 다른
+                            블록 타입으로 답하면 조용히 ""가 되어 '빈 응답'으로 보인다.
+                            repr 을 남기면 그 경우가 즉시 드러난다.
+      additional_kwargs   내용이 예상 밖의 자리로 갔는지(reasoning_content 등).
+      response_metadata   done_reason / eval_count — 잘렸는지 자연 종료인지.
+
+    정상 경로에는 비용이 0 이다 — 응답이 빈 경우에만 불린다.
+    """
+    lines = []
+    inv = list(getattr(ai, "invalid_tool_calls", None) or [])
+    if inv:
+        lines.append(f"invalid_tool_calls: {len(inv)} - the model tried to call a tool but the "
+                     f"arguments failed to parse")
+        for i, c in enumerate(inv):
+            lines.append(f"  {i + 1}) {_jd(c, 1500)}")
+    else:
+        lines.append("invalid_tool_calls: (none)")
+
+    content = getattr(ai, "content", None)
+    lines.append(f"content: {type(content).__name__} {_clip(repr(content), 2000)}")
+    if isinstance(content, list):
+        lines.append("  block types: " + ", ".join(
+            (b.get("type", "?") if isinstance(b, dict) else type(b).__name__) for b in content))
+
+    ak = getattr(ai, "additional_kwargs", None) or {}
+    lines.append("additional_kwargs keys: " + (", ".join(map(str, ak)) or "(none)"))
+    lines.append(f"response_metadata: {_jd(getattr(ai, 'response_metadata', None) or {}, 1200)}")
+    return "\n".join(lines)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 로거
 # ══════════════════════════════════════════════════════════════════════════════
@@ -347,7 +391,7 @@ class ReasonLog:
         if text:
             self.rec("Gemma TEXT", pre, _clip(text, 8000))
         elif not tcs:
-            self.rec("Gemma TEXT", pre + " · (empty reply - context overflow suspected)")
+            self.rec("Gemma EMPTY-REPLY", pre, _empty_reply_dump(ai))
 
         if tcs:
             body = "\n".join(

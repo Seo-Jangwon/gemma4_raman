@@ -130,15 +130,51 @@ _LIST_SESSION_ARTIFACTS_SCHEMA = {
     },
 }
 
+_VIEW_IMAGE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "view_image",
+        "description": (
+            "Look at an image that was captured earlier in this session again. "
+            "Pass the `image_file` value that analyze_microscope_image or preview_grid_scan "
+            "returned; the picture is shown to you and you can read pixel coordinates off it "
+            "exactly as you did the first time. "
+            "Use it when you need a view from an earlier turn - the picture itself is dropped "
+            "from the conversation once the turn ends, but the file stays. "
+            "This does NOT take a new picture: it shows the sample exactly as it was at capture "
+            "time, so if the stage has moved since then, call analyze_microscope_image instead. "
+            "It touches no hardware and has no side effects."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_id": {
+                    "type": "string",
+                    "description": ("The `image_file` value from an earlier tool result, "
+                                    "e.g. '2026-08-12/_microscope_153726_610.png'."),
+                },
+                "question": {
+                    "type": "string",
+                    "description": "What you want to check in the image (optional).",
+                },
+            },
+            "required": ["file_id"],
+        },
+    },
+}
+
 # 두 에이전트가 ALL_TOOLS 에 그대로 이어 붙이는 리스트.
 # run_analysis 는 여기 없다 — 스키마는 이미 RAMAN_TOOLS 에 있고 실행만 가로채기 때문.
-FILE_TOOLS = [_LIST_FILES_SCHEMA, _INSPECT_FILE_SCHEMA, _LIST_SESSION_ARTIFACTS_SCHEMA]
+FILE_TOOLS = [_LIST_FILES_SCHEMA, _INSPECT_FILE_SCHEMA, _LIST_SESSION_ARTIFACTS_SCHEMA,
+              _VIEW_IMAGE_SCHEMA]
 
 # CoALA 전용: 부수효과 없는 '정보 수집'이라 planning(retrieval) 액션으로 분류돼야 한다.
 # 이 집합에 없으면 사이클을 닫는 실행(commit) 액션이 되어, 파일 한 번 들여다볼 때마다
 # 의사결정 사이클을 하나씩 소모한다. run_analysis 는 결과물(그림)을 만드는
 # 실행 액션이므로 여기 넣지 않는다.
-FILE_RETRIEVAL = {"list_uploaded_files", "inspect_file", "list_session_artifacts"}
+# view_image 는 디스크에서 읽기만 하므로 여기 속한다. 두 경로 모두 execute_tool 을
+# 지나므로 retrieval 로 분류해도 이미지 주입은 그대로 된다(CoALA _execute_and_observe).
+FILE_RETRIEVAL = {"list_uploaded_files", "inspect_file", "list_session_artifacts", "view_image"}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -221,10 +257,66 @@ def _t_list_session_artifacts(args: dict) -> dict:
     return ok(session=cur["label"], session_dir=cur["rel_dir"], count=len(arts), artifacts=arts)
 
 
+#: view_image 가 한 번에 실어 보낼 수 있는 PNG 크기 상한(바이트).
+#: 현미경 캡처가 1060x800 에서 ~2MB 라 4MB 면 넉넉하고, 실수로 거대한 파일을 지목했을 때
+#: base64(원본의 4/3배)가 프로세스 메모리와 HTTP 페이로드를 밀어내는 것을 막는다.
+_MAX_VIEW_IMAGE_BYTES = 4 * 1024 * 1024
+
+
+def _t_view_image(args: dict) -> dict:
+    """저장된 이미지를 다시 모델에게 보여준다.
+
+    [이 도구가 있는 이유 — 2026-08-12]
+    이미지는 무겁다(현미경 캡처 1장 = base64 2.5MB). 대화 히스토리에 남겨 두면 이후 모든
+    LLM 호출마다 통째로 재전송된다. 그래서 턴이 끝날 때 히스토리에서 걷어내는데
+    (runtime.trim_history), 그러면 '지난 턴에 본 화면'으로 돌아갈 방법이 없어진다.
+    파일은 디스크에 남으므로, 모델이 필요할 때 스스로 다시 불러오게 하는 것이 이 도구다.
+
+    [왜 image_base64 키인가]
+    모델에게 이미지가 주입되는 조건은 도구 결과에 image_base64 가 있는 것 하나다
+    (runtime.execute_tool). 도구 이름을 따로 등록할 필요가 없어 배선이 이 키 하나로 끝난다.
+    """
+    import base64
+
+    from backend.service.store.spectrum_store import IMAGE_SUFFIXES, resolve_result_image
+
+    file_id = str(args.get("file_id") or "").strip()
+    if not file_id:
+        return fail("file_id is empty. Use the `image_file` value from an earlier "
+                    "analyze_microscope_image or preview_grid_scan result.")
+    try:
+        path = resolve_result_image(file_id)
+    except FileNotFoundError as e:
+        return fail(str(e), hint="Check the exact image_file value in the earlier tool result. "
+                                 "If the image was never saved, take a new one with "
+                                 "analyze_microscope_image.")
+    except ValueError as e:
+        return fail(str(e), hint=f"Supported image types: {', '.join(sorted(IMAGE_SUFFIXES))}.")
+    except Exception as e:
+        return fail(f"{type(e).__name__}: {e}")
+
+    size = path.stat().st_size
+    if size > _MAX_VIEW_IMAGE_BYTES:
+        return fail(f"The image is too large to show ({size / 1048576:.1f} MB, "
+                    f"limit {_MAX_VIEW_IMAGE_BYTES // 1048576} MB).")
+    try:
+        raw = path.read_bytes()
+    except Exception as e:
+        return fail(f"Failed to read the image: {type(e).__name__}: {e}")
+
+    question = str(args.get("question") or "").strip() or "Microscope image captured earlier."
+    return ok(image_base64=base64.b64encode(raw).decode("utf-8"),
+              question=f"{question}\n\n[This is a stored image ({file_id}), not a live view. "
+                       f"The stage may have moved since it was captured.]",
+              file_id=file_id,
+              bytes=size)
+
+
 # 이름 → 실행 함수. 각 에이전트의 _call_tool 이 하드웨어 가드보다 '먼저' 이 dict 를 본다.
 FILE_DISPATCH = {
     "list_uploaded_files":     _t_list_uploaded_files,
     "inspect_file":            _t_inspect_file,
     "run_analysis":            _t_run_analysis,
     "list_session_artifacts":  _t_list_session_artifacts,
+    "view_image":              _t_view_image,
 }

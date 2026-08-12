@@ -74,7 +74,7 @@ def _top_level_names(path: Path) -> set[str]:
 def _guarded_lines(tree: ast.Module) -> set[int]:
     """try/except 로 감싼 import 의 줄 번호.
 
-    이 프로젝트는 '없어도 되는 의존'을 전부 이 형태로 쓴다 — 장비 SDK, chromadb,
+    이 프로젝트는 '없어도 되는 의존'을 전부 이 형태로 쓴다 — 장비 SDK, langchain-ollama,
     벤치 전용 사본. 없는 것이 **정상 동작**이고 호출부가 폴백을 갖고 있으므로,
     모듈이 없다고 실패로 잡으면 안 된다.
     """

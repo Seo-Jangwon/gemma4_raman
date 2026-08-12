@@ -46,8 +46,8 @@ EXPECTED_ROUTES = {
     ("GET",  "/api/kb/status"),
     ("GET",  "/api/kb/search"),
     ("POST", "/api/kb/reload"),
-    ("POST", "/api/kb/upload"),
-    ("POST", "/api/kb/reindex"),
+    # (kb/upload · kb/reindex 는 Chroma 색인기와 함께 제거 — 2026-08-12.
+    #  knowledge/search.py 머리말 참고. 지식 추가는 knowledge_base.json 편집 + reload.)
 }
 
 

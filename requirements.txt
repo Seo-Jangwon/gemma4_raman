@@ -20,30 +20,26 @@ langchain-ollama      # 단일 에이전트(agents/single_agent.py)의 ChatOllam
                       # 차이를 비교에서 제거하기 위함(single_agent.py 상단 주석 참고).
 python-dotenv         # .env에서 ANTHROPIC_API_KEY 로드 (backend/agents/__init__.py)
 
-# ── 지식베이스 RAG (backend/agents/knowledge.py, kb_ingest.py) ──────────────
-chromadb              # 벡터 인덱스. backend/agents/knowledge_base/chroma.sqlite3에 영속.
-                      # ⚠ 설치 전 `pip install --dry-run chromadb`로 확인할 것 —
-                      # uvicorn/click/typer를 특정 버전으로 끌어내려 서버가 깨질 수 있다.
-                      # 없으면 키워드 매칭으로 폴백한다(경고 로그 + _retriever 필드로 추적).
-                      # ※ onnxruntime(~200MB)을 함께 끌고 오지만 우리는 Chroma 기본
-                      #    임베딩을 안 쓰므로 죽은 무게다. 제거하면 chromadb가 깨진다.
-# 임베딩은 별도 패키지가 없다 — Ollama HTTP(/api/embed)를 requests로 직접 호출한다.
-# 계측 PC에서 1회: ollama pull bge-m3    (한/영 혼용 KB라 다국어 모델이 필요)
+# ── 지식베이스 (backend/service/knowledge) ──────────────────────────────────
+# 의존성 없음 — knowledge_base.json 을 표준 라이브러리로 읽어 키워드 매칭한다.
+#
+# [chromadb 를 뺀 이유 — 2026-08-12]
+# 벡터 인덱스가 문서 0개였다. 도입 이래 한 번도 답한 적이 없고 모든 검색이 조용히
+# 키워드 폴백으로 처리되고 있었다. 함께 사라진 무게: chromadb + onnxruntime(~200MB),
+# bge-m3 임베딩 왕복, pymupdf(PDF 색인). 매뉴얼 PDF 를 넣기로 하면 그때 되돌린다.
 
 # ── 레거시 채팅 경로 (hardware-command, llm_client) ─────────────────────────
 ollama                # hardware_manager의 기동 시 연결 확인 + llm_client.run_agent(레거시).
                       # 단일 에이전트는 더 이상 이 raw 클라이언트를 쓰지 않는다.
 
 # ── 스펙트럼/이미지 처리 ─────────────────────────────────────────────────────
-numpy                  # 스펙트럼 리샘플/정규화(knowledge.preprocess_spectrum) 포함
+numpy                  # 스펙트럼 처리 전반(수집·배경제거·분석 샌드박스)
 opencv-python          # 카메라 스트림, ROI 처리
 matplotlib              # test_spectrum.py 플롯, Andor SDK 예제
 pandas                  # 채팅 첨부 파일(csv/txt/excel) 파싱 (upload_store).
                         # 구분자·헤더 유무가 파일마다 제각각이라 직접 파싱하면 깨지기 쉽다.
                         # 서버 쪽 전용 — 분석 샌드박스 화이트리스트에는 넣지 않는다.
 openpyxl                # pandas가 .xlsx를 읽을 때 쓰는 엔진 (upload_store)
-pymupdf                 # KB 색인 시 PDF 텍스트/페이지 렌더 (kb_ingest.load_pdf).
-                        # 색인 전용 — 서버/에이전트 런타임은 import하지 않는다.
 
 # ── 하드웨어 통신 ────────────────────────────────────────────────────────────
 pyserial                # hw_tools/USE_laser_with_power.py (레이저 파워 컨트롤러 시리얼 통신)

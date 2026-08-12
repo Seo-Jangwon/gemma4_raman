@@ -65,7 +65,10 @@ image - you only get its file path. So never claim you "looked at" your plot, an
 seeing it. Verify numerically instead, inside the same run_analysis call: print() the few numbers
 that would prove the step worked (how many spikes were removed, min/max after normalization, peak
 positions, residual size). If a result looks wrong, fix the code and call run_analysis again.
-The only images you actually see are those from analyze_microscope_image and preview_grid_scan."""
+The only images you actually see are those from analyze_microscope_image, preview_grid_scan and
+view_image. A picture you were shown stays visible for the rest of the current turn, but it is
+dropped once the turn ends - so read what you need from it now. It is not lost: those tools return
+an `image_file`, and view_image(image_file) shows the same picture again in a later turn."""
 
 
 # ══════════════════════════════════════════════════════════════════════════════

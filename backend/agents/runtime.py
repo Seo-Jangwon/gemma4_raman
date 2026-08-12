@@ -288,8 +288,17 @@ def image_message(img_b64: str, question: str = "") -> HumanMessage:
     )
 
 
+#: 히스토리에 남겨 둘 주입 이미지 개수. 나머지는 턴이 끝나면 버린다.
+#: [왜 0 이 아닌가] "방금 그 사진에서 왼쪽 입자로 가줘" 같은 후속 턴이 흔하다. 직전
+#: 1장은 남겨야 그게 재촬영 없이 된다.
+#: [왜 더 많이 안 두는가] 한 장이 base64 2.5MB 다. 이건 서버 RAM 이 아니라 **매 LLM
+#: 호출의 HTTP 페이로드**를 좌우한다 — 남겨 둔 장수만큼 매 호출 재전송된다.
+#: 더 오래된 화면은 모델이 view_image(image_file) 로 직접 불러온다.
+HISTORY_MAX_IMAGES = 1
+
+
 def trim_history(messages: list) -> list:
-    """마지막 HISTORY_MAX_TURNS 번째 사용자 메시지 지점부터 보존한다.
+    """다음 턴으로 넘길 히스토리를 만든다 — 턴 수로 한 번, 이미지 개수로 한 번 자른다.
 
     [왜 사용자 메시지 경계에서만 자르는가]
     ToolMessage 는 자신을 유발한 AIMessage(tool_calls) 뒤에 와야만 유효하다. 임의 지점에서
@@ -298,14 +307,41 @@ def trim_history(messages: list) -> list:
 
     이미지 주입용 HumanMessage 는 사용자 턴이 아니다 — 포함시키면 이미지 분석을 여러 번
     하는 세션에서 한 턴이 여러 턴으로 세어져 히스토리가 과하게 잘린다.
+
+    [왜 오래된 이미지를 버리는가 — 2026-08-12]
+    현미경 캡처 1장이 base64 2,543,820자다. 히스토리에 남으면 **세션이 끝날 때까지 매
+    LLM 호출마다 통째로 재전송된다**(실측: 한 세션에서 8회 ≈ 20MB). 컨텍스트 창 문제는
+    아니다 — Ollama 비전 인코더가 이미지를 ~300 토큰으로 바꾸므로 num_ctx 소모는 미미하다
+    (실측: 이미지 주입 전후 프롬프트 18,505 → 19,030 토큰). 아까운 건 네트워크와 RAM 이다.
+
+    [왜 base64 문자열만 자리표시로 바꾸지 않는가]
+    ChatOllama 는 image_url 의 쉼표 뒷부분을 그대로 ollama API 의 images 필드에 넣는다
+    (langchain-ollama 1.1.0 에서 확인). 자리표시 문자열을 남기면 그게 **진짜 이미지
+    데이터로 취급되어** 서버가 디코드를 시도한다. 메시지를 통째로 버리면 images 필드
+    자체가 안 생겨 그 위험이 없다.
+
+    [버려도 정보가 사라지지 않는 이유]
+    이미지를 낸 도구가 결과에 image_file 을 실어 두고, 그 ToolMessage 는 히스토리에 그대로
+    남는다(가볍다 — 164자). 모델은 view_image(image_file) 로 언제든 되돌아갈 수 있다.
+    그래서 여기서 버리는 것은 '기억'이 아니라 '사본'이다.
     """
     def is_user_turn(m) -> bool:
         return isinstance(m, HumanMessage) and not m.additional_kwargs.get(INJECTED_IMAGE, False)
 
+    def is_injected_image(m) -> bool:
+        return isinstance(m, HumanMessage) and bool(m.additional_kwargs.get(INJECTED_IMAGE, False))
+
     user_idx = [i for i, m in enumerate(messages) if is_user_turn(m)]
-    if len(user_idx) <= HISTORY_MAX_TURNS:
+    if len(user_idx) > HISTORY_MAX_TURNS:
+        messages = messages[user_idx[-HISTORY_MAX_TURNS]:]
+
+    # 주입 이미지는 tool_call 짝이 없는 독립 HumanMessage 라, 빼도 짝이 깨지지 않는다
+    # (위 '사용자 메시지 경계' 규칙이 지키려는 그 불변식과 무관하다).
+    img_idx = [i for i, m in enumerate(messages) if is_injected_image(m)]
+    if len(img_idx) <= HISTORY_MAX_IMAGES:
         return messages
-    return messages[user_idx[-HISTORY_MAX_TURNS]:]
+    drop = set(img_idx[:-HISTORY_MAX_IMAGES] if HISTORY_MAX_IMAGES > 0 else img_idx)
+    return [m for i, m in enumerate(messages) if i not in drop]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -372,6 +408,17 @@ def describe_tool(name: str, args: dict, result: dict) -> str:
 
 LLM_NOT_CONNECTED = ("Ollama LLM is not connected. "
                      "(Check that langchain-ollama is installed and the Ollama server is running)")
+
+#: 모델이 텍스트도 도구 호출도 내지 않고 턴을 끝냈을 때 사용자에게 보이는 문구.
+#: [왜 상수인가] AILA·CoALA 두 곳에서 같은 문장을 냈다. 두 에이전트는 서로를 import 하지
+#: 않으므로(비교 실험의 독립변수는 오케스트레이션 하나여야 한다) 공용 자리는 여기다.
+#: [왜 이렇게 긴가] 옛 문구는 "Failed to generate a response." 뿐이라, 받은 사람이 할 수
+#: 있는 일이 없었다. 원인은 로그의 Gemma EMPTY-REPLY 항목에 원문째로 남으므로
+#: (reason_log._empty_reply_dump) 어디를 봐야 하는지 알려 준다.
+EMPTY_REPLY = ("The model ended its turn without producing an answer or a tool call. "
+               "This is usually a malformed tool call that could not be parsed - it is not "
+               "something you did wrong. Try asking again, and if it repeats, check the "
+               "'Gemma EMPTY-REPLY' entry in DetailLog/reasoning/ for the raw response.")
 
 
 def llm_error_detail(e: Exception, stage: str = "LLM call") -> str:
@@ -508,9 +555,10 @@ __all__ = [
     "get_chat_model", "get_tool_dispatch", "grid_gate_begin_turn",
     "search_knowledge_base", "call_tool", "execute_tool", "MAX_DOSE_MJ_PER_TURN",
     # 메시지 · 히스토리
-    "INJECTED_IMAGE", "HISTORY_MAX_TURNS", "text_of", "image_message", "trim_history",
+    "INJECTED_IMAGE", "HISTORY_MAX_TURNS", "HISTORY_MAX_IMAGES",
+    "text_of", "image_message", "trim_history",
     # 진행 문구 · 오류 문구
-    "describe_tool", "LLM_NOT_CONNECTED", "llm_error_detail",
+    "describe_tool", "LLM_NOT_CONNECTED", "EMPTY_REPLY", "llm_error_detail",
     # 세션 껍데기
     "SessionStore", "stream_turn", "run_turn_once",
 ]

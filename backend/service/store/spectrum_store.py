@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import zipfile
 from datetime import datetime
 from math import ceil
@@ -540,6 +541,10 @@ def save_preview_png(png_bytes: bytes, tag: str = "preview") -> dict:
     """이미 인코딩된 PNG 바이트(오버레이 등)를 재렌더 없이 그대로 저장하고 image_url을 돌려준다.
     save_scene(matplotlib 재렌더·제목·축)과 달리 원본 PNG를 보존한다 — 그리드 미리보기처럼
     오버레이를 정확히 채팅에 보여줄 때 쓴다. '_' 접두라 list_results(개별 측정 목록)에는 안 잡힌다.
+
+    image_url 은 사람용(프론트가 채팅에 인라인 표시), file_id 는 모델용이다 —
+    view_image(file_id) 로 이 그림을 나중에 다시 볼 수 있다. 절대경로를 노출하지 않으므로
+    모델이 임의 경로를 읽어달라고 할 방법이 없다(upload_store 의 file_id 와 같은 규칙).
     """
     try:
         day = datetime.now().strftime("%Y-%m-%d")
@@ -550,9 +555,50 @@ def save_preview_png(png_bytes: bytes, tag: str = "preview") -> dict:
         safe = "".join(c for c in str(tag) if c.isalnum() or c in "-_") or "preview"
         name = f"_{safe}_{stamp}.png"
         (out_dir / name).write_bytes(png_bytes)
-        return ok(image_url=_url(day, name))
+        return ok(image_url=_url(day, name), file_id=f"{day}/{name}")
     except Exception as e:
         return fail(f"Failed to save preview image: {e}")
+
+
+#: view_image 가 읽어 줄 수 있는 확장자. 스펙트럼 csv/json 은 load_spectrum 담당이다.
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+
+
+def resolve_result_image(file_id: str) -> Path:
+    """file_id → data/results 아래 실제 이미지 경로. 경로 탈출을 여기서 전부 막는다.
+
+    받는 형태는 두 가지다 — 결과물이 두 깊이에 저장되기 때문이다:
+        "<YYYY-MM-DD>/<name>"           save_preview_png (현미경 캡처·그리드 미리보기)
+        "<YYYY-MM-DD>/<세션>/<name>"     측정 결과 png (세션 폴더 안)
+
+    image_url("/api/results/…")을 그대로 넘겨도 받아준다 — 모델이 도구 결과에서 눈에 띄는
+    쪽을 집어 오는 일이 흔해서, 둘 중 뭘 줘도 같은 파일로 풀리게 한다.
+
+    Raises: ValueError(형식·확장자 오류) / FileNotFoundError(없는 파일)
+    """
+    raw = str(file_id or "").replace("\\", "/").strip()
+    if raw.startswith(URL_PREFIX):
+        raw = raw[len(URL_PREFIX):]
+    parts = [p for p in raw.split("/") if p not in ("", ".")]
+    if not parts or any(p == ".." for p in parts):
+        raise ValueError(f"Invalid file_id: {file_id!r}")
+    if len(parts) not in (2, 3):
+        raise ValueError(f"Invalid file_id: {file_id!r} "
+                         f"(expected '<YYYY-MM-DD>/<filename>' or "
+                         f"'<YYYY-MM-DD>/<session>/<filename>')")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[0]):
+        raise ValueError(f"Invalid file_id: {file_id!r} (it must start with a 'YYYY-MM-DD' date)")
+    # 각 조각이 순수 파일/폴더 이름인지 — 여기서 심볼릭한 경로 조립을 차단한다.
+    if any(p != Path(p).name for p in parts):
+        raise ValueError(f"Invalid file_id: {file_id!r}")
+    if Path(parts[-1]).suffix.lower() not in IMAGE_SUFFIXES:
+        raise ValueError(f"Not an image file: {parts[-1]} "
+                         f"(supported: {', '.join(sorted(IMAGE_SUFFIXES))})")
+
+    path = RESULTS_ROOT.joinpath(*parts)
+    if not path.is_file():
+        raise FileNotFoundError(f"Image not found: {file_id}")
+    return path
 
 
 def latest_scene(date: str | None = None, scope: str = "session") -> str | None:

@@ -835,10 +835,21 @@ def _reconnect_locked(mgr, targets, done, errors, detail) -> dict:
     # **아직 장비 락 안이다** — 여기까지 와야 옛 핸들로 측정이 들어가는 틈이 사라진다.
     # init_hardware 도 같은 락을 잡지만 RLock 이라 재진입으로 통과한다.
     sync_tool_handles(mgr)
-    return {"ok": (len(errors) == 0), "reconnected": done,
-            "errors": (errors or None), "detail": detail,
-            "now_connected": {k: getattr(mgr, k, None) is not None
-                              for k in ("stage", "laser", "ccd", "camera")}}
+    now_connected = {k: getattr(mgr, k, None) is not None
+                     for k in ("stage", "laser", "ccd", "camera")}
+
+    # [왜 dict 리터럴이 아니라 ok()/fail() 인가 — 2026-08-12]
+    # 예전에는 {"ok": len(errors) == 0, ..., "errors": errors} 였다. 봉투 규약은 실패에
+    # error(단수)를 요구하는데 사유가 errors(복수)에만 있어서, normalize() 가 "사유 없는
+    # 실패"로 보고 진단을 통째로 버렸다. 155초짜리 재연결의 기록이 한 줄로 뭉개졌다.
+    # 여기서 규약대로 답하면 그 자리를 아예 지나가지 않는다.
+    #
+    # 부분 성공(넷 중 셋만 붙음)도 실패다 — 남은 하나로 측정이 안 되기 때문이다.
+    # 다만 reconnected 를 함께 실어, 무엇이 살았는지는 모델이 알고 판단하게 한다.
+    if errors:
+        return fail("; ".join(f"{k}: {v}" for k, v in errors.items()),
+                    reconnected=done, detail=detail, now_connected=now_connected)
+    return ok(reconnected=done, detail=detail, now_connected=now_connected)
 
 
 # ──────────────────────────────────────────
@@ -2922,18 +2933,35 @@ def analyze_microscope_image(
             return fail("PNG encoding failed")
         img_b64 = base64.b64encode(buf).decode('utf-8')
 
+        # 디스크에도 남긴다 — 이게 없으면 대화 히스토리의 base64 가 이 이미지의 **유일한
+        # 사본**이 된다(2026-08-12). 히스토리는 턴 경계에서 잘려 나가므로, 저장이 없으면
+        # 방금 본 화면을 다시 볼 방법이 영영 사라진다. file_id 를 결과에 실어 두면
+        # ToolMessage 에 남아, base64 가 사라진 뒤에도 view_image(file_id) 로 되돌아온다.
+        # (preview_grid_scan 이 이미 같은 헬퍼로 같은 일을 한다.)
+        saved_img = _store_save_preview(buf.tobytes(), tag="microscope")
+
         # 밝기 통계와 선명도 — 예전 capture_camera_frame 이 주던 값들을 여기로 합쳤다.
         # 리사이즈·8bit 정규화를 거친 '위에서 실제로 보낸 그 이미지'에서 계산하므로,
         # 모델이 보는 화면과 숫자가 일치한다(옛 툴은 uint16 원본을 그대로 재서 어긋났다).
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-        return ok(image_base64=img_b64,
-                  question=enhanced_question,
-                  width=width,
-                  height=height,
-                  min_intensity=float(gray.min()),
-                  max_intensity=float(gray.max()),
-                  mean_intensity=float(gray.mean()),
-                  sharpness_score=_vis.sharpness_score(gray))
+        out = ok(image_base64=img_b64,
+                 question=enhanced_question,
+                 width=width,
+                 height=height,
+                 min_intensity=float(gray.min()),
+                 max_intensity=float(gray.max()),
+                 mean_intensity=float(gray.mean()),
+                 sharpness_score=_vis.sharpness_score(gray))
+        # 저장 실패가 촬영 자체를 실패로 만들면 안 된다 — 모델은 이미 이미지를 받는다.
+        # 다만 file_id 가 없으면 다시 못 보므로, 그 사실을 결과에 적어 알린다.
+        if saved_img.get("ok"):
+            out["image_file"] = saved_img["file_id"]
+            out["saved"] = {"title": "Microscope view", "image_url": saved_img["image_url"]}
+        else:
+            out["image_file_error"] = (
+                f"The image was NOT saved to disk ({saved_img.get('error')}), so you cannot "
+                f"view it again later. Extract everything you need from it in this turn.")
+        return out
     except Exception as e:
         return fail(str(e))
 
@@ -3265,6 +3293,9 @@ def preview_grid_scan(
                  image_base64=img_b64,
                  question=question)
         if saved_img.get("ok"):
+            # image_file 은 모델용 — 승인 대기 중 턴이 넘어가 base64 가 히스토리에서
+            # 빠져도 view_image(file_id) 로 이 미리보기를 다시 볼 수 있다.
+            out["image_file"] = saved_img["file_id"]
             out["saved"] = {"title": f"Grid preview {rows}x{cols} @ {spacing_mm}mm",
                             "image_url": saved_img["image_url"]}
         # 사람-승인 게이트: 이 미리보기를 '승인 대기(pending)'로 등록한다. 이후 사용자

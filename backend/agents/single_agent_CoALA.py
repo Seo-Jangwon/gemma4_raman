@@ -381,7 +381,7 @@ def _planning_stage(llm_tools, ctx: dict, wm: WorkingMemory, propose_budget: lis
             rlog.phase("plan", f"cycle {cycle} · no tool candidate -> final report, turn ends")
             wm.messages.append(ai_msg)
             outcome["kind"] = "finish"
-            outcome["final_text"] = runtime.text_of(ai_msg).strip() or "Failed to generate a response."
+            outcome["final_text"] = runtime.text_of(ai_msg).strip() or runtime.EMPTY_REPLY
             return
 
         planning_actions, commit_actions = _partition(candidates)

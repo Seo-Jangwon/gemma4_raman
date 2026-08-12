@@ -1,22 +1,21 @@
 # -*- coding: utf-8 -*-
-"""지식베이스 — 읽기(search)와 쓰기(ingest)를 나눠 둔 패키지.
+"""지식베이스 — 손 큐레이션 JSON 을 키워드로 검색한다.
 
-    search.py    질의 → 청크. Chroma 벡터 검색, 실패하면 키워드 폴백.
-    ingest.py    pdf/txt/json/스펙트럼 → 색인. 무거운 의존(pymupdf 등)이 여기 있다.
-    kb_sources/  색인 대상 원본을 드랍하는 폴더 (git 추적)
-    knowledge_base/  Chroma 영속 디렉터리 (git 무시, 언제든 재생성되는 파생물)
+    search.py                   질의 → 항목. 표준 라이브러리만 쓴다.
+    kb_sources/
+      knowledge_base.json       KB 원본 전부 (git 추적)
 
-[여기서 search 만 재수출하는 이유]
-호출부(에이전트 · /api/kb)는 검색만 쓴다. ingest 는 pymupdf 를 끌어오므로, 패키지를
-import 하는 것만으로 색인용 의존이 따라 들어오면 서버 기동이 그만큼 무거워지고
-그 라이브러리가 없는 PC 에서는 검색까지 같이 죽는다. 색인은 부를 때만 import 한다:
+[색인기가 없는 이유 — 2026-08-12]
+예전에는 ingest.py 가 pdf/txt/스펙트럼을 Chroma 에 색인했다. 그런데 그 인덱스가
+문서 0개였다 — 도입 이래 한 번도 답한 적이 없고 모든 검색이 키워드 매칭으로
+처리되고 있었다. 그래서 Chroma 와 색인기를 함께 걷어냈다(search.py 머리말 참고).
 
-    python -m backend.service.knowledge.ingest
+지식을 늘리는 방법은 이제 하나다: knowledge_base.json 에 항목을 추가하고
+POST /api/kb/reload. 서버를 재기동할 필요는 없다.
 """
 from backend.service.knowledge.search import (  # noqa: F401
     KB_SOURCES_DIR,
     kb_status,
     reload_kb,
     search_kb,
-    search_spectra,
 )
