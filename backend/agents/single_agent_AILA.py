@@ -1,118 +1,74 @@
 # -*- coding: utf-8 -*-
 """
-SingleAgent — 라만 분광기 전체를 gemma4(Ollama) 하나로 제어하는 단일 파일 에이전트.
+AILA — 라만 분광기를 LLM 하나로 제어하는 **ReAct baseline** 에이전트.
 
-[설계 원칙 — 2026-07-15 사용자 지시로 확정]
-계획 수립·측정 파라미터 결정·재시도 판단·스펙트럼 해석·보고서 작성까지
-전부 gemma4의 chain-of-thought(반복적 tool-calling)에 맡긴다. 이 시스템에
-"에이전트"는 이 파일 하나뿐이다 — 별도 계획러/분석러/검증러 모듈, 별도
-"적응형 튜닝" 같은 파이썬 알고리즘, 별도 지식/경험 저장소를 두지 않는다.
-raman_tool_schemas.RAMAN_TOOLS 전체를 그대로 바인딩해 모델이 스스로
-무엇을 몇 번 어떻게 호출할지 판단하게 한다.
+이 파일에는 ReAct 루프 하나만 있다. 프롬프트는 backend.agents.prompts, 배관(LLM 연결·
+도구 디스패치·조사량 가드·메시지 변환·세션)은 backend.agents.runtime 에 있다.
 
 [왜 이 파일이 "깡통"이어야 하는가 — 의도적 설계]
-이 에이전트는 다중 에이전트와 비교하기 위한 baseline이다. baseline에 계획/검증
-로직을 덧붙이면 "단일 vs 다중" 실험의 독립변수가 오케스트레이션 방식이 아니라
-"내가 추가로 넣은 부가기능"이 되어 비교가 무너진다. 참고로 AILA(Nature Comm.,
-IIT Delhi의 AFM 자동화 시스템)의 단일 에이전트 baseline도 정확히 이 구조다 —
-LLM 하나 + 도구 전부 바인딩 + ReAct 루프, 에이전트 로직은 사실상 2줄이다.
-따라서 얇은 것은 결함이 아니라 baseline의 정의다.
+이 에이전트는 다른 아키텍처와 비교하기 위한 baseline 이다. baseline 에 계획/검증 로직을
+덧붙이면 "ReAct vs CoALA" 실험의 독립변수가 오케스트레이션이 아니라 "내가 추가로 넣은
+부가기능"이 되어 비교가 무너진다. 참고로 AILA(Nature Comm., IIT Delhi 의 AFM 자동화
+시스템)의 단일 에이전트 baseline 도 정확히 이 구조다 — LLM 하나 + 도구 전부 바인딩 +
+ReAct 루프, 에이전트 로직은 사실상 2줄이다. 따라서 얇은 것은 결함이 아니라 baseline 의
+정의다.
 
-[LLM 계층 — 2026-07-16 변경: raw ollama.chat() → LangChain ChatOllama]
-과거에는 ollama.Client().chat()을 직접 호출했다. 문제는 다중 에이전트 쪽이
-LangChain(_llm.bind_tools)을 쓴다는 것 — 같은 모델을 써도 tool-calling 직렬화와
-프롬프트 조립 경로가 서로 달라, 성능 차이가 아키텍처 때문인지 LLM 어댑터 때문인지
-분리할 수 없었다. 이제 양쪽 모두 `ChatOllama(...).bind_tools(...)` + 수동 루프를
-쓴다(다중 쪽 hw_manager.py:854와 동일한 패턴). 즉 LLM 상호작용 방식은 동일하고
-오케스트레이션만 다르다.
+[ReAct 루프의 전부]
+    모델에게 묻는다 → tool_calls 가 없으면 그게 최종 답변(턴 종료)
+                    → 있으면 **emit 된 것을 전부 순서대로 실행**하고 결과를 붙여 다시 묻는다
+계획 단계도, 후보 평가도, 장기기억도 없다. 그게 CoALA 와의 차이 전부다.
 
-  ※ create_react_agent(LangGraph prebuilt)를 쓰지 않은 이유:
-    다중 에이전트도 prebuilt가 아니라 bind_tools + 수동 루프다. 단일만 prebuilt로
-    바꾸면 오히려 비대칭이 커진다. 게다가 prebuilt의 ToolNode는 아래 이미지 주입
-    패턴(도구 결과와 별개로 user 메시지를 끼워 넣기)을 표현하지 못해 Command +
-    InjectedToolCallId 우회가 필요하고, _trim_history도 pre_model_hook으로 다시
-    구현해야 한다 — 얻는 것 없이 검증된 코드만 흔드는 셈이라 채택하지 않았다.
+[LLM 계층 — CoALA 와 100% 동일]
+양쪽 모두 ChatOllama(...).bind_tools(...) + 수동 루프다(runtime.get_chat_model).
+즉 LLM 상호작용 방식은 같고 오케스트레이션만 다르다.
+  ※ create_react_agent(LangGraph prebuilt)를 쓰지 않은 이유: prebuilt 의 ToolNode 는 아래
+    이미지 주입 패턴(도구 결과와 별개로 user 메시지를 끼워 넣기)을 표현하지 못해 Command +
+    InjectedToolCallId 우회가 필요하고, 히스토리 트리밍도 pre_model_hook 으로 다시 구현해야
+    한다 — 얻는 것 없이 검증된 코드만 흔드는 셈이라 채택하지 않았다.
 
-[비교 공정성을 위해 추가된 것 — search_knowledge_base]
-다중 에이전트의 Planner는 knowledge_base.json을 자동 검색해 권장 파워/노출을
-주입받는데 단일 에이전트는 그 지식에 접근할 방법이 아예 없었다. 이건 아키텍처
-차이가 아니라 그냥 불공정한 능력 격차라서, 같은 KB를 같은 알고리즘으로 검색하는
-도구를 추가했다(backend.agents.knowledge 참고). 단, Planner는 결과를 강제 주입받고
-단일은 스스로 호출을 판단한다는 차이는 남겨뒀다 — 그게 바로 측정 대상이다.
-
-[유일하게 남은 비-LLM "판단" 코드 — 왜 있는가]
-`_call_tool`의 조사량(dose) 누계 가드 하나뿐이다. 이건 "판단"이 아니라
-물리적 회로차단기다: 레이저가 시편에 조사되는 acquire_spectrum 호출마다
-이번 대화 턴의 누적 조사량을 더하고, 절대 상한을 넘으면 그 호출 자체를
-막는다. 별도 에이전트나 도구가 아니라 dispatch 경로에 낀 몇 줄의 방어
-코드일 뿐이며, 모델의 판단 범위(무엇을 측정할지, 파워를 얼마로 할지)에는
-전혀 개입하지 않는다 — 모델이 무엇을 요청하든, 그 총합이 물리적으로
-위험한 수준에 도달했을 때만 차단한다.
-
-[공개 API — server.py가 의존하는 계약]
-  ALL_TOOLS            : 바인딩된 도구 스키마 리스트 (/api/agents/health가 len() 호출)
+[공개 API — 서버가 의존하는 계약]
+  ALL_TOOLS            : 바인딩된 도구 스키마 리스트 (/api/agents/health 가 len() 호출)
   stream_experiment()  : SSE용 이벤트 제너레이터 (/api/experiment/stream)
   run_experiment()     : 동기 1회 실행 (/api/experiment/run, 벤치마크용)
+  run_stream()         : 저수준 루프 (벤치 러너가 원본 도구 이벤트를 보려고 직접 소비)
 """
 
 from __future__ import annotations
 
 import json
-import os
-import time
-import uuid
 from typing import Iterator
 
-from langchain_core.messages import (
-    AIMessage,
-    BaseMessage,
-    HumanMessage,
-    SystemMessage,
-    ToolMessage,
-)
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from backend.agents import reason_log, run_store
-from backend.agents.detail_log import new_turn
-from backend.agents.file_tools import FILE_DISPATCH, FILE_TOOLS
-from backend.agents.knowledge import search_kb
-from backend.hw_tools.raman_tool_schemas import RAMAN_TOOLS
-from backend.spectrum_store import spectrum_event
+from backend.agents import reason_log, runtime
+from backend.service.store import run_store
+from backend.agents.prompts import AUTONOMOUS, build_system_prompt
+from backend.hw_tools.hw_tools.raman_tool_schemas import RAMAN_TOOLS
+from backend.tools.file_tools import FILE_TOOLS
 
-# LLM 백엔드 설정(모델·호스트·num_ctx·타임아웃)은 backend.llm_config 단일 출처다
-# (2026-08-09). 예전에는 hardware_manager 에서 import 하고 실패하면 같은 문자열을 여기
-# except 절에 다시 적었는데, hardware_manager 는 장비 PC 의 Config.ini 와 Andor SDK 를
-# 끌고 들어와 개발 PC 에서는 항상 실패한다 — 즉 **실제로 쓰이던 것은 폴백 사본**이었고,
-# 같은 사본이 CoALA·두 벤치 사본·reason_log 에도 각각 있어 모델을 바꾸려면 일곱 군데를
-# 고쳐야 했다. llm_config 는 Config.ini 에도 SDK 에도 의존하지 않아 항상 import 되므로
-# 폴백이 필요 없다(backend/safety_limits.py 와 같은 논리).
-from backend.llm_config import (
-    LLM_TIMEOUT_S as _LLM_TIMEOUT_S,
-    NUM_CTX as _NUM_CTX,
-    OLLAMA_HOST,
-    OLLAMA_MODEL,
-)
+# /api/agents/health 가 mod.OLLAMA_MODEL / mod.OLLAMA_HOST 를 읽는다 — 실제로 바인딩된
+# 모델을 그대로 보고하기 위한 재수출이다(어느 모델로 돌았는지 사후 확인용).
+from backend.llm_config import OLLAMA_HOST, OLLAMA_MODEL   # noqa: F401
 
-_MAX_AGENT_STEPS = 100   # LLM 무한 루프 방지
+ARCH = "AILA"
+SYSTEM_PROMPT = build_system_prompt("ReAct")
 
-# 조사량 하드 상한 (대화 한 턴 기준, mJ 단위 근사치의 누계).
-# 별도 위치별 추적이나 시료별 클램프 없이 "이번 턴에 쏜 총량"만 본다 —
-# 유일한 목적은 폭주(무한 재시도로 계속 고출력 조사)를 막는 최후의 회로차단기.
-# 상한값과 계산식은 backend.safety_limits 단일 출처다(2026-07-30): 예전에는 같은 1000.0
-# 과 같은 식이 이 파일·CoALA·raman_tools 세 곳에 각각 박혀 있어서, 한 곳만 고치면
-# 나머지가 조용히 갈라졌다 — 하필 갈라지는 대상이 '레이저를 얼마나 쏘게 둘 것인가'였다.
-# safety_limits 는 Config.ini 에 의존하지 않으므로 하드웨어 없이도 항상 import 된다.
-from backend.safety_limits import MAX_DOSE_MJ_PER_TURN as _MAX_DOSE_MJ_PER_TURN, estimate_dose_mj
-
-# (_LLM_TIMEOUT_S 는 위 llm_config 에서 온다. 환경변수 이름은 RAMAN_LLM_TIMEOUT_S 로
-#  종전과 같다 — 이유와 실측 근거는 llm_config.LLM_TIMEOUT_S 주석 참고.)
+#: LLM 무한 루프 방지. 벽시계 가드는 아니다 — 응답이 아예 안 오는 경우는
+#: agent_config.LLM_TIMEOUT_S 가 막는다.
+MAX_AGENT_STEPS = 100
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 도구 스키마
+# 액션 공간
 # ══════════════════════════════════════════════════════════════════════════════
 
-# KB 검색 도구. RAMAN_TOOLS와 동일한 OpenAI function 포맷으로 직접 정의한다 —
-# 이건 하드웨어를 만지지 않으므로 raman_tool_schemas가 아니라 여기에 둔다.
+# KB 검색 도구. RAMAN_TOOLS 와 동일한 OpenAI function 포맷으로 직접 정의한다 — 하드웨어를
+# 만지지 않으므로 raman_tool_schemas 가 아니라 여기에 둔다.
+#
+# [왜 baseline 에 이게 있는가 — 비교 공정성]
+# CoALA 는 장기기억과 KB 를 조회할 수 있는데 baseline 이 그 지식에 접근할 방법이 아예
+# 없으면, 그건 아키텍처 차이가 아니라 그냥 불공정한 능력 격차다. 같은 KB 를 같은
+# 알고리즘으로 검색하는 도구를 준다(구현은 runtime.search_knowledge_base).
 _KB_TOOL_SCHEMA = {
     "type": "function",
     "function": {
@@ -140,402 +96,27 @@ _KB_TOOL_SCHEMA = {
     },
 }
 
-# 모델에 바인딩되는 도구 전체. RAMAN_TOOLS(하드웨어) + 첨부파일 도구 + KB 검색 1종.
-# FILE_TOOLS는 CoALA와 '같은 리스트 객체'를 import한 것이라 두 에이전트의 파일 분석
-# 능력이 구조적으로 어긋날 수 없다(backend/agents/file_tools.py 머리말 참고).
-# server.py의 /api/agents/health가 len(ALL_TOOLS)를 읽는다.
+#: 모델에 바인딩되는 도구 전체. FILE_TOOLS 는 CoALA 와 '같은 리스트 객체'를 import 한
+#: 것이라 두 에이전트의 파일 분석 능력이 구조적으로 어긋날 수 없다.
 ALL_TOOLS = RAMAN_TOOLS + FILE_TOOLS + [_KB_TOOL_SCHEMA]
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 시스템 프롬프트
-# ══════════════════════════════════════════════════════════════════════════════
-
-# ⚠ 이 리터럴이 '실제로 모델에 가는 기본 프롬프트'다(자율 모드가 기본값이므로).
-#   RAMAN_AUTONOMOUS=0 으로 띄우면 아래 _INTERACTIVE_SUBS 가 되묻기 게이트를 '다시 넣는다'.
-#   과거에는 반대 방향(대화용 원문 + 자율 치환)이었는데, 소스를 읽으면 "되묻는다"로 보이고
-#   실행은 자율이라 혼동을 일으켰다 — 그래서 기본 경로가 리터럴 그대로 읽히도록 뒤집었다.
-SYSTEM_PROMPT = """\
-You are a single AI agent that directly controls a Raman spectrometer from start to finish.
-You plan, measure, adjust parameters, interpret spectra, and write the report entirely by your
-own judgment. There is no separate validator or assistant to check you - your judgment is the
-final judgment.
-
-[Autonomy - this section overrides every other instruction about asking for help]
-You are fully autonomous. You are being evaluated on a benchmark and there is NO human available to
-answer you. Never ask the user a question, never request confirmation, and never end a turn waiting
-for input - no reply will come, and a turn that ends in a question counts as a failure.
-- Missing information: pick the most reasonable interpretation from the request, your tool outputs,
-  and the knowledge base. State the assumption you made, then carry the task through to a real answer.
-- Safety: you are your own safety check. There is no validator and no human reviewer. Judge dose,
-  saturation, and photodamage risk yourself before firing the laser, and proceed once your own
-  judgment says it is acceptable.
-- Multi-step operations (grid scans, background/blank measurements, retries, re-focusing) need no
-  approval. If a preview tool exists, preview first, evaluate the preview yourself, then execute it
-  in the same turn.
-- You may still stop early if you judge an action genuinely unsafe or truly impossible. If you stop,
-  say plainly what you concluded and why, and still report everything you did establish. Do not stop
-  merely because some detail was unspecified - that is what your own judgment is for.
-
-[Verifying your own output - you cannot see your own plots]
-A figure you create with plt is saved and shown to the human, but it is NOT returned to you as an
-image - you only get its file path. So never claim you "looked at" your plot, and never rely on
-seeing it. Verify numerically instead, inside the same run_analysis call: print() the few numbers
-that would prove the step worked (how many spikes were removed, min/max after normalization, peak
-positions, residual size). If a result looks wrong, fix the code and call run_analysis again.
-The only images you actually see are those from analyze_microscope_image and preview_grid_scan.
-
-[Conversation-type decision - do this first on every message]
-- Greeting / small talk / questions about system capabilities: do not call tools; answer immediately in English.
-- Instrument-status questions ("can you see the view?", "where is the stage?"): answer only after
-  actually checking with observation tools (get_stage_position, analyze_microscope_image,
-  get_hardware_status, get_ccd_info). Do not turn the laser on.
-- Raman measurement requests: plan and execute the measurement procedure below yourself.
-- Requests about a file the user attached: follow the attached-data-files section below. Do not turn
-  the laser on just because a file arrived.
-
-[Attached data files - csv / excel / txt]
-1. When the user attaches a data file or refers to one, call list_uploaded_files, then call
-   inspect_file on each relevant file. inspect_file returns only the structure - row/column counts,
-   column names, numeric-or-text per column, min/max/mean, and the first few rows.
-2. Decide yourself what the columns mean. Nothing has been interpreted for you: judge which numeric
-   column is a Raman shift axis in cm-1, which is intensity, which is a wavelength or a stage
-   coordinate, and which columns are not spectra at all but metadata (sample name, laser power,
-   exposure time, date, operator notes). Use the value ranges and column names as evidence, and say
-   what you concluded and why.
-3. Then call run_analysis with file_ids to compute on the full data - peak detection, baseline
-   correction, normalization, plotting, or comparison against spectra you measured. Inside the code
-   the file is available as files[i]["table"]["<column name>"].
-   If the task asks you to save a processed spectrum, save it inside that same run_analysis call with
-   save_result(filename, intensity, raman_shift=...) - that is the ONLY way to write an array, and it
-   keeps the numbers out of the context entirely. Never print an array in order to re-type it
-   somewhere else: it overflows the context and loses precision. print() only short summaries.
-4. Report both kinds of content separately: the spectral information you extracted (peak positions
-   and assignments, SNR, etc.) and any other information the file carried (measurement conditions,
-   sample identity, anything that changes how the spectrum should be read).
-5. If the file turns out to hold no spectrum, say so plainly and report what it does hold instead -
-   do not force a spectral interpretation onto it.
-
-[Measurement procedure - proceed step by step, using your own judgment]
-1. If you do not know the sample type, substrate, or target location (coordinates or appearance),
-   infer it from the request, the knowledge base, and your observation tools
-   (analyze_microscope_image), then proceed on your own judgment and state the assumptions you made.
-2. Once you know the sample type, use search_knowledge_base to look up the measurement protocol and
-   recommended parameters (laser power, exposure time, main peak positions) for that sample. Do not
-   guess parameters - base them on the lookup result; if the sample is not in the KB, decide yourself
-   and state that in the report.
-3. If you do not know the target location, use analyze_microscope_image to view the microscope image
-   (the image is provided), read the target's pixel coordinates yourself, and move with move_to_pixel.
-   Focus with run_autofocus if needed.
-4. If you must distinguish the target signal from the substrate background, measure a blank area once
-   with the "exactly identical" power and exposure as the target to use as a background baseline. Do
-   not forget to return to the original target location after measuring.
-5. Evaluate signal-to-background ratio, saturation, SNR, etc., and if needed move the position or
-   adjust parameters and re-measure. But do not repeat indefinitely - if 1-2 retries show no
-   improvement, proceed with the existing data and state the limitation in the report.
-6. When the measurement is done, stop calling tools and write the final report in English:
-   6.1. Experiment objective
-   6.2. Measurement conditions (including how they were adjusted)
-   6.3. Summary of measurement results (target vs background)
-   6.4. Physical analysis of the spectrum (main peak positions and assignments, SNR, saturation.
-        Peaks overlapping the background are treated as substrate-derived and excluded)
-   6.5. Domain-expert-level interpretation and conclusion appropriate to the sample type
-   6.6. Problems encountered during the process and how they were handled
-   6.7. Conclusion and recommendations
-
-[Hardware failure recovery - follow this ladder, do not improvise loops]
-1. Diagnose before fixing: call get_hardware_status. It tells you which components are down and
-   whether the connected ones actually respond. Never guess from a single failed tool call.
-2. Try recovery ONCE for the failed component: reconnect_hardware(component='<that one>'). Reconnect
-   only what is broken - never 'all' as a reflex, because reconnecting the ccd re-runs cooling and
-   blocks for minutes.
-3. Read the error text and classify it, because the two cases need opposite responses:
-   - "resource is still held by this process" -> a process-level lock. No tool can clear it and
-     retrying is useless. Stop trying immediately.
-   - "re-initialization failed" after a successful release -> device side (power, cable, driver, or
-     another program holds it). At most one more attempt, then stop.
-4. Then continue the task with whatever hardware still works. A missing camera does not block a stage
-   move; a dead laser does block any acquisition. Do as much of the task as the working hardware allows.
-5. Report it: say which component failed, what you tried, which case it was, and what part of the task
-   you could not complete. An honest partial result is worth far more than a retry loop.
-Never call the same recovery tool more than twice in a turn. If it did not work twice, it will not work
-a third time, and burning steps on it costs you the rest of the task.
-
-[Safety rules - must be followed]
-- If a tool returns an error or a safety block is triggered, do not bypass it and do not hammer it with
-  retries. Record what happened, decide yourself whether an alternative route exists, take it if so,
-  and state the block and your decision in the final report.
-- Do not guess blindly - verify with a tool first. If no tool can settle it, choose the most defensible
-  option, say so explicitly, and continue.
-- Stage coordinate units: mm (X: 0-75.3, Y: 0-50.2, Z: -1.0-1.0; origin at x=37.8759, y=25.24805, z n/a)
-"""
-
-
-# ── 대화(사람 개입) 모드로 되돌리는 토글 ────────────────────────────────────────
-# [기본값은 자율]
-# 벤치마크는 사람이 답을 줄 수 없는 환경이다. 되묻고 턴을 끝내면 그 문항은 '수행 실패'로
-# 채점되므로, 위 SYSTEM_PROMPT 리터럴 자체를 자율판으로 두었다. 그리드 스캔 사람-승인
-# 인터록도 같은 이유로 기본 OFF 다(stream_experiment 의 _grid_gate_begin_turn 참고).
-#
-# [RAMAN_AUTONOMOUS=0 이면] 아래 치환이 되묻기 게이트를 '다시 넣어' 실험실 대화용
-# 동작으로 복귀시킨다. 즉 치환 방향이 과거와 반대다 — 기본 경로(자율)가 리터럴 그대로
-# 읽히는 쪽이 오해가 없기 때문. 실제로 예전 구조에서 "소스엔 되묻기가 있는데 자율로
-# 도는 게 맞나"라는 혼동이 발생했다.
-#
-# [치환 방식] 문장 치환은 대상 문장이 바뀌면 조용히 무력화된다 — 과거 실제로 그랬다.
-# 그래서 각 치환의 성공/실패를 개별로 확인하고, 하나라도 못 찾으면 경고를 낸다.
-_AUTONOMOUS = os.getenv("RAMAN_AUTONOMOUS", "1").strip().lower() not in ("0", "false", "no", "off")
-
-if not _AUTONOMOUS:
-    # [Autonomy] 섹션은 '치환'이 아니라 통째로 잘라낸다 — 헤더만 바꿔 두면 "Never ask the
-    # user a question" 같은 본문이 그대로 남아 대화 모드와 정면으로 모순된다.
-    # 섹션 시작부터 '다음 섹션 헤더([...] 로 시작하는 줄)' 직전까지를 제거한다.
-    _a = SYSTEM_PROMPT.find("[Autonomy -")
-    if _a != -1:
-        _nxt = SYSTEM_PROMPT.find("\n[", _a + 1)
-        SYSTEM_PROMPT = (SYSTEM_PROMPT[:_a] + SYSTEM_PROMPT[_nxt + 1:]) if _nxt != -1 else SYSTEM_PROMPT[:_a]
-
-    # (자율판, 대화판) 쌍. 자율판은 SYSTEM_PROMPT 에 '정확히' 존재해야 한다.
-    _INTERACTIVE_SUBS = [
-        # 측정 절차 1번 — 시료 미상 시 되묻기 게이트 복원
-        ("1. If you do not know the sample type, substrate, or target location (coordinates or appearance),\n"
-         "   infer it from the request, the knowledge base, and your observation tools\n"
-         "   (analyze_microscope_image), then proceed on your own judgment and state the assumptions you made.",
-         "1. If you do not know the sample type, substrate, or target location (coordinates or appearance),\n"
-         "   ask the user first before calling any tool. Do not turn the laser on without identifying the sample."),
-        # 안전 규칙 — 사람에게 넘기는 경로 복원
-        ("- If a tool returns an error or a safety block is triggered, do not bypass it and do not hammer it with\n"
-         "  retries. Record what happened, decide yourself whether an alternative route exists, take it if so,\n"
-         "  and state the block and your decision in the final report.",
-         "- If a tool returns an error or a safety block is triggered, immediately report the situation to the\n"
-         "  user as is. Do not bypass it or force a retry."),
-        ("- Do not guess blindly - verify with a tool first. If no tool can settle it, choose the most defensible\n"
-         "  option, say so explicitly, and continue.",
-         "- Do not guess what you do not know - verify with a tool or ask the user."),
-    ]
-    _missed = [src.splitlines()[0][:60] for src, _ in _INTERACTIVE_SUBS if src not in SYSTEM_PROMPT]
-    for _src, _dst in _INTERACTIVE_SUBS:
-        SYSTEM_PROMPT = SYSTEM_PROMPT.replace(_src, _dst)
-    # 런타임 출력은 ASCII 로만 — cp949/ascii 콘솔에서도 import 가 깨지지 않게.
-    print(f"[info] RAMAN_AUTONOMOUS=0: AILA interactive mode "
-          f"({len(_INTERACTIVE_SUBS) - len(_missed)}/{len(_INTERACTIVE_SUBS)} ask-the-user gates restored).")
-    if _missed:
-        import sys as _sys
-        print("[warn] AILA interactive mode: these texts were not found (prompt edited?): "
-              + "; ".join(_missed), file=_sys.stderr)
-else:
-    print("[info] AILA autonomous mode (default). Set RAMAN_AUTONOMOUS=0 for interactive/ask-the-user behavior.")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# LLM / 도구 dispatch 로딩
-# ══════════════════════════════════════════════════════════════════════════════
-
-# bind_tools까지 끝난 Runnable을 재사용하기 위한 캐시.
-# 매 턴 새로 만들면 HTTP 커넥션 풀이 매번 새로 뜬다.
-_llm_cache = None
-
-
 def _get_llm():
-    """ChatOllama에 ALL_TOOLS를 바인딩한 Runnable을 반환한다(실패 시 None).
-
-    [왜 지연 생성인가]
-    langchain_ollama 미설치나 Ollama 호스트 불통이 모듈 import 자체를 깨뜨리면
-    server.py 기동이 통째로 실패한다. 여기서 지연 import + 예외 격리해
-    "LLM 없음(None)"이라는 정상적인 실패 상태로 강등한다.
-
-    [raw dict 스키마를 그대로 bind_tools에 넘기는 이유]
-    RAMAN_TOOLS는 이미 OpenAI function 포맷({"type":"function","function":{...}})이고
-    LangChain의 convert_to_openai_tool은 이 포맷 dict를 그대로 통과시킨다.
-    게다가 이 파일은 수동 루프라 도구 "실행"을 LangChain에 맡기지 않고 TOOL_DISPATCH로
-    직접 한다 — 즉 LangChain은 스키마를 모델에 알려주는 역할만 하면 되므로
-    BaseTool/StructuredTool 객체로 감쌀 이유가 전혀 없다.
-    """
-    global _llm_cache
-    if _llm_cache is not None:
-        return _llm_cache
-    try:
-        from langchain_ollama import ChatOllama
-        _llm_cache = ChatOllama(
-            model=OLLAMA_MODEL,
-            base_url=OLLAMA_HOST,
-            num_ctx=_NUM_CTX,
-            client_kwargs={"timeout": _LLM_TIMEOUT_S},
-        ).bind_tools(ALL_TOOLS)
-    except Exception:
-        return None
-    return _llm_cache
-
-
-def _get_dispatch():
-    """raman_tools.TOOL_DISPATCH 로드. 하드웨어 모듈이 없으면 None.
-
-    ImportError만이 아니라 Exception 전체를 잡는 이유: raman_tools가 import하는
-    config.py는 장비 PC의 Config.ini를 읽는데, 파일이 없는 개발 PC에서는
-    NoSectionError(ImportError 아님)가 발생한다.
-    """
-    try:
-        from backend.hw_tools.raman_tools import TOOL_DISPATCH
-        return TOOL_DISPATCH
-    except Exception:
-        return None
+    """도구가 바인딩된 ChatOllama Runnable (실패 시 None)."""
+    return runtime.get_chat_model(ALL_TOOLS)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 도구 호출
-# ══════════════════════════════════════════════════════════════════════════════
-
-# 관측 축약(도구 결과 중 무엇을 모델 컨텍스트에 싣는가)은 backend.tool_slim 단일
-# 출처다(2026-08-09). 예전에는 같은 _slim() 과 _SLIM_KEEP_KEYS 가 이 파일·벤치 사본·
-# CoALA·CoALA 벤치 사본 네 곳에 한 글자도 다르지 않게 복사돼 있었다 — CoALA 쪽 주석이
-# 이미 "AILA의 _SLIM_KEEP_KEYS와 동일해야 비교가 공정하다"고 적을 만큼 갈라지면 안 되는
-# 값인데도 사본으로 두고 있었다. tool_slim 은 Config.ini 에도 장비 SDK 에도 의존하지
-# 않아 항상 import 된다(backend/llm_config.py, backend/safety_limits.py 와 같은 논리).
-#
-# 옛 규칙은 최상위 한 겹만 봐서, 배열이 dict 안에 든 kinetic 측정을 그대로 통과시켰다
-# (5프레임 하나가 224,078자). 그게 num_ctx 를 넘겨 Ollama 가 프롬프트를 조용히 잘라냈고
-# 빈 응답의 실제 원인이었다 — 경위와 실측은 tool_slim 머리말 참고.
-from backend.tool_slim import slim as _slim
-
-
-def _search_knowledge_base(args: dict) -> dict:
-    """search_knowledge_base 도구의 실제 구현 — backend.agents.knowledge에 위임.
-
-    다중 에이전트의 Planner와 "같은 파일을 같은 알고리즘으로" 검색해야 비교가
-    공정하므로, 검색 로직 자체는 절대 여기에 복제하지 않는다(knowledge.py 참고).
-    """
-    query = str(args.get("query", "")).strip()
-    if not query:
-        return {"ok": False, "error": "query is empty. Provide a sample/material keyword."}
-
-    hits = search_kb(query, top_k=3)
-    if not hits:
-        # 빈 결과를 에러로 만들지 않는 이유: "KB에 없는 시편"은 정상적인 상황이고,
-        # 모델은 이때 스스로 파라미터를 판단해야 한다(시스템 프롬프트 2번 참고).
-        # 에러로 주면 모델이 재시도 루프에 빠지거나 측정을 포기할 수 있다.
-        return {"ok": True, "results": [],
-                "note": f"No protocol matching '{query}' in the knowledge base. "
-                        "Decide the parameters yourself and state that in the report."}
-    return {"ok": True, "results": hits}
-
-
-def _call_tool(ctx: dict, name: str, args: dict) -> dict:
-    """단일 도구 호출 관문. 유일한 비-LLM 판단은 조사량 회로차단기뿐 —
-    그 외에는 raman_tools.TOOL_DISPATCH를 그대로 호출한다."""
-
-    # KB 검색은 하드웨어를 만지지 않으므로 dispatch 유무와 무관하게 먼저 처리한다.
-    # (아래 dispatch is None 가드보다 뒤에 두면 하드웨어 미연결 상태에서 KB 조회까지
-    #  "하드웨어가 연결되어 있지 않습니다"로 막혀버린다.)
-    if name == "search_knowledge_base":
-        return _search_knowledge_base(args)
-
-    # 첨부 파일 조회/분석도 같은 이유로 하드웨어 가드보다 먼저. run_analysis도 여기 포함되어
-    # 있어(file_tools.FILE_DISPATCH) 순수 계산인 분석이 장비 유무에 묶이지 않는다.
-    if name in FILE_DISPATCH:
-        return FILE_DISPATCH[name](args)
-
-    dispatch = ctx["dispatch"]
-    if dispatch is None:
-        return {"ok": False, "error": "Hardware is not connected."}
-    fn = dispatch.get(name)
-    if fn is None:
-        return {"ok": False, "error": f"Unknown tool: {name}"}
-
-    if name == "acquire_spectrum":
-        # power/exposure 를 생략하면 acquire_spectrum 은 '현재 장비 설정을 유지'한다.
-        # 여기서는 그 값을 알 수 없으므로 기본값으로 근사한다 — 누계가 실제보다 작게
-        # 잡힐 수 있지만, 도구 계층(run_grid_scan)과 시료 자체의 상한이 따로 있다.
-        power = float(args.get("power") or 40.0)
-        exposure = float(args.get("exposure") or 0.2)
-        dose_inc = estimate_dose_mj(power, exposure)
-        if ctx["dose"] + dose_inc > _MAX_DOSE_MJ_PER_TURN:
-            return {"ok": False,
-                    "error": (f"Safety block: this turn's cumulative dose would exceed the limit "
-                              f"({_MAX_DOSE_MJ_PER_TURN} mJ). "
-                              "Wrap up the measurement or start again with a new request.")}
-        try:
-            result = fn(dict(args))
-        except Exception as e:
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-        # 실패한 조사는 누계에 넣지 않는다 — 레이저가 실제로 나가지 않았으므로.
-        if isinstance(result, dict) and result.get("ok"):
-            ctx["dose"] += dose_inc
-        return result
-
-    # run_grid_scan은 내부에서 rows*cols번 조사하므로, acquire_spectrum과 동일한 per-turn
-    # 회로차단기에 편입한다. 예상 총량으로 사전 판정하고(보수적) 성공 시 누계에 더한다.
-    if name == "run_grid_scan":
-        rows = int(args.get("rows", 0) or 0)
-        cols = int(args.get("cols", 0) or 0)
-        power = float(args.get("power") or 40.0)
-        exposure = float(args.get("exposure") or 0.2)
-        dose_inc = estimate_dose_mj(power, exposure, rows * cols)
-        if ctx["dose"] + dose_inc > _MAX_DOSE_MJ_PER_TURN:
-            return {"ok": False,
-                    "error": (f"Safety block: this turn's cumulative dose would exceed the limit "
-                              f"({_MAX_DOSE_MJ_PER_TURN} mJ) after this grid scan. "
-                              "Reduce the grid size, power, or exposure, or start a new request.")}
-        try:
-            result = fn(dict(args))
-        except Exception as e:
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-        if isinstance(result, dict) and result.get("ok"):
-            ctx["dose"] += dose_inc
-        return result
-
-    try:
-        return fn(dict(args))
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 메시지 유틸
-# ══════════════════════════════════════════════════════════════════════════════
-
-# 이미지 주입용으로 끼워 넣은 HumanMessage를 표시하는 키.
-# 이 메시지는 "사용자 턴"이 아니므로 _trim_history의 턴 계산에서 제외해야 한다.
-_INJECTED_IMAGE = "_injected_image"
-
-
-def _msg_text(msg) -> str:
-    """AIMessage의 content에서 순수 텍스트를 뽑는다.
-
-    [왜 msg.content를 그냥 쓰지 않는가]
-    LangChain 메시지의 content는 str일 수도, 콘텐츠 블록 리스트
-    ([{"type":"text","text":...}, ...])일 수도 있다. 어느 쪽이 오는지는
-    langchain-core 버전과 모델 어댑터에 따라 달라지므로 둘 다 처리한다.
-    (.text / .text() 프로퍼티는 버전에 따라 있고 없고가 갈려 의존하지 않는다.)
-    """
-    content = getattr(msg, "content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("type") == "text":
-                parts.append(block.get("text", ""))
-        return "".join(parts)
-    return str(content or "")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 에이전트 루프
+# ReAct 루프 — 이 파일의 전부
 # ══════════════════════════════════════════════════════════════════════════════
 
 def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
-    """단일 에이전트 ReAct 루프 (ChatOllama + bind_tools, 수동 루프).
-
-    다중 에이전트의 각 노드(hw_manager.py:854 `_llm.bind_tools(lc_tools)`)와
-    동일한 패턴이다 — 두 아키텍처의 LLM 상호작용 방식을 일치시켜, 성능 차이가
-    오케스트레이션에서만 오도록 만든다.
+    """ReAct 루프: 제안 → (도구 전부 실행 → 관측) → 반복, 도구가 없으면 종료.
 
     Parameters
     ----------
-    llm  : _get_llm()이 반환한, 도구가 바인딩된 Runnable (None이면 error 이벤트)
-    history : 이전 턴의 LangChain 메시지 리스트
+    llm          : _get_llm() 이 반환한, 도구가 바인딩된 Runnable (None 이면 error 이벤트)
+    history      : 이전 턴의 LangChain 메시지 리스트
     user_message : 이번 턴 사용자 입력
 
     yield 이벤트:
@@ -544,321 +125,112 @@ def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
       {"type": "final", "text": str, "ctx": dict, "messages": list}
     """
     # 추론 로그(results/<run_id>/<문항>.log). 세션은 run_store 의 스레드로컬에서 읽으므로
-    # 이 함수의 시그니처는 바뀌지 않는다 — 벤치 경로(server.py 가 run_stream 을 직접
-    # 소비)는 호출 직전에 begin_session 을 부른다. 로깅이 꺼져 있으면 무동작 대역이다.
-    rlog = reason_log.open_turn("AILA", user_message)
+    # 시그니처가 바뀌지 않는다 — 벤치 경로는 호출 직전에 begin_session 을 부른다.
+    # 로깅이 꺼져 있으면 무동작 대역이다.
+    rlog = reason_log.open_turn(ARCH, user_message)
     try:
         if llm is None:
-            rlog.failed("Ollama LLM is not connected.")
-            yield {"type": "error",
-                   "detail": "Ollama LLM is not connected. "
-                             "(Check that langchain-ollama is installed and the Ollama server is running)"}
+            rlog.failed(runtime.LLM_NOT_CONNECTED)
+            yield {"type": "error", "detail": runtime.LLM_NOT_CONNECTED}
             return
 
-        ctx = {"dispatch": _get_dispatch(), "dose": 0.0, "tool_call_order": []}
+        ctx = {"dispatch": runtime.get_tool_dispatch(), "dose": 0.0, "tool_call_order": []}
         messages: list[BaseMessage] = list(history) + [HumanMessage(content=user_message)]
 
-        for step in range(_MAX_AGENT_STEPS):
+        for step in range(MAX_AGENT_STEPS):
+            # ── 제안 ──────────────────────────────────────────────────────────
             try:
                 # 시스템 프롬프트는 세션 히스토리에 남기지 않고 매 호출마다 새로 붙인다 —
-                # history에 넣으면 턴마다 중복 누적된다.
-                # 세션 요약(내 세션 라벨 + 지금까지 저장한 산출물)도 매 호출마다 새로 만든다.
-                # 히스토리에 넣으면 안 되는 이유: 산출물이 늘어날 때마다 낡은 목록이 계속
-                # 쌓여 모델이 이미 지난 상태를 현재로 오인한다. 매번 '현재 상태'만 실어준다.
-                _sess = run_store.summary_for_prompt()
-                _sys_text = SYSTEM_PROMPT + (f"\n\n[This session]\n{_sess}\n" if _sess else "")
+                # history 에 넣으면 턴마다 중복 누적된다. 세션 요약(내 세션 라벨 + 지금까지
+                # 저장한 산출물)도 마찬가지다: 히스토리에 넣으면 산출물이 늘 때마다 낡은
+                # 목록이 쌓여 모델이 지난 상태를 현재로 오인한다. 매번 '현재'만 실어준다.
+                session_note = run_store.summary_for_prompt()
+                system_text = SYSTEM_PROMPT + (f"\n\n[This session]\n{session_note}\n"
+                                               if session_note else "")
                 # rlog.invoke 는 llm.invoke 를 그대로 부르고 프롬프트·생각·본문·토큰통계를
                 # 남긴다. 로깅이 꺼져 있으면 llm.invoke(messages) 와 완전히 동일하다.
                 ai_msg: AIMessage = rlog.invoke(
-                    [SystemMessage(content=_sys_text)] + messages,
+                    [SystemMessage(content=system_text)] + messages,
                     llm=llm, stage="ReAct propose", step=step + 1)
             except Exception as e:
-                # 타임아웃은 "모델이 틀렸다"가 아니라 "응답이 아예 안 왔다"이므로 구분해서
-                # 알린다 — 로그만 보고 Ollama/네트워크 쪽을 봐야 한다는 걸 알 수 있게.
-                if "timeout" in type(e).__name__.lower() or "timeout" in str(e).lower():
-                    detail = (f"No response from the LLM within {_LLM_TIMEOUT_S:.0f}s "
-                              f"({type(e).__name__}). The Ollama server may have dropped the "
-                              f"request or be overloaded - check that {OLLAMA_HOST} is healthy "
-                              f"and retry.")
-                    rlog.failed(detail)
-                    yield {"type": "error", "detail": detail}
-                    return
-                rlog.failed(f"LLM call failed: {type(e).__name__}: {e}")
-                yield {"type": "error", "detail": f"LLM call failed: {type(e).__name__}: {e}"}
+                detail = runtime.llm_error_detail(e, "LLM call")
+                rlog.failed(detail)
+                yield {"type": "error", "detail": detail}
                 return
 
-            # 도구 호출이 없으면 = 모델이 할 말을 다 했다 = 이번 턴 종료.
+            # ── 도구 호출이 없으면 = 모델이 할 말을 다 했다 = 이번 턴 종료 ──────
             if not ai_msg.tool_calls:
-                final_text = _msg_text(ai_msg).strip() or "Failed to generate a response."
+                final_text = runtime.text_of(ai_msg).strip() or "Failed to generate a response."
                 messages.append(ai_msg)
                 rlog.reasoning(step + 1, "도구 호출 없음 → 최종 보고서 작성으로 턴 종료")
                 rlog.final(final_text, ctx)
                 yield {"type": "final", "text": final_text, "ctx": ctx, "messages": messages}
                 return
 
-            messages.append(ai_msg)   # tool_calls를 담은 assistant 메시지를 그대로 추가
+            messages.append(ai_msg)   # tool_calls 를 담은 assistant 메시지를 그대로 추가
             rlog.reasoning(step + 1,
                            f"도구 {len(ai_msg.tool_calls)}개 실행 결정 → "
                            + ", ".join(str(tc["name"]) for tc in ai_msg.tool_calls))
 
+            # ── 실행 + 관측 — ★ ReAct 의 정의: emit 된 것을 전부, 그 순서대로 ────
+            #    (CoALA 는 여기서 후보를 평가해 하나만 고른다. 그게 유일한 구조 차이다.)
             for tc in ai_msg.tool_calls:
-                # LangChain의 tool_call은 dict: {"name":..., "args":..., "id":...}
-                # (raw ollama의 tc.function.name / tc.function.arguments 와 형태가 다르다)
+                # LangChain 의 tool_call 은 dict: {"name":..., "args":..., "id":...}
                 name = tc["name"]
                 args = dict(tc.get("args") or {})
-                tool_call_id = tc.get("id") or ""
-                ctx["tool_call_order"].append(name)
 
                 rlog.acting(step + 1, name, args)
-                _t0 = time.time()
-                raw_result = _call_tool(ctx, name, args)
-                _ms = (time.time() - _t0) * 1000.0
-                result = _slim(raw_result) if isinstance(raw_result, dict) else raw_result
-
-                # 이미지 반환 도구(analyze_microscope_image)는 base64를 tool 메시지에
-                # 그대로 싣지 않고, 별도 user 메시지의 이미지 블록으로 전달한다 —
-                # gemma4가 실제로 "보고" 판단하게 하면서도 tool 메시지 자체는 가볍게 유지한다.
-                img_b64 = result.pop("image_base64", None) if isinstance(result, dict) else None
-                question = result.pop("question", None) if isinstance(result, dict) else None
-
-                rlog.observation(step + 1, name, result, _ms)
-                if img_b64:
+                ex = runtime.execute_tool(ctx, name, args, tc.get("id") or "")
+                rlog.observation(step + 1, name, ex["result"], ex["elapsed_ms"])
+                if ex["img_b64"]:
                     rlog.rec("ReAct OBSERVATION",
                              f"step {step + 1} · {name} · 이미지 1장을 모델에게 주입 "
-                             f"(base64 {len(img_b64)}자, 로그에는 싣지 않음)")
+                             f"(base64 {len(ex['img_b64'])}자, 로그에는 싣지 않음)")
 
-                yield {"type": "tool", "name": name, "args": args, "result": result}
+                yield {"type": "tool", "name": name, "args": args, "result": ex["result"]}
 
-                # ToolMessage는 반드시 자신을 유발한 tool_call의 id를 가져야 한다 —
-                # 없으면 다음 invoke에서 assistant.tool_calls와 짝이 안 맞아 거부된다.
+                # ToolMessage 는 반드시 자신을 유발한 tool_call 의 id 를 가져야 한다 —
+                # 없으면 다음 invoke 에서 assistant.tool_calls 와 짝이 안 맞아 거부된다.
                 messages.append(ToolMessage(
-                    content=json.dumps(result, ensure_ascii=False, default=str),
-                    tool_call_id=tool_call_id,
+                    content=json.dumps(ex["result"], ensure_ascii=False, default=str),
+                    tool_call_id=ex["tool_call_id"],
                 ))
+                if ex["img_b64"]:
+                    messages.append(runtime.image_message(ex["img_b64"], ex["question"]))
 
-                if img_b64:
-                    # ChatOllama는 image_url 콘텐츠 블록을 ollama API의 images 필드로
-                    # 변환해 준다. data URI의 base64 부분만 잘라 보내므로 접두사가 필요하다.
-                    messages.append(HumanMessage(
-                        content=[
-                            {"type": "text", "text": question or "Microscope camera image:"},
-                            {"type": "image_url",
-                             "image_url": f"data:image/png;base64,{img_b64}"},
-                        ],
-                        # 이 메시지는 사람이 친 게 아니라 시스템이 끼워 넣은 것이므로
-                        # 히스토리 트리밍의 "사용자 턴" 계산에서 빠져야 한다.
-                        additional_kwargs={_INJECTED_IMAGE: True},
-                    ))
-
-        _capped = (f"Stopped after reaching the maximum number of steps ({_MAX_AGENT_STEPS}). "
-                   f"Please check the progress and request again.")
-        rlog.final(_capped, ctx)
-        yield {"type": "final", "text": _capped, "ctx": ctx, "messages": messages}
+        capped = (f"Stopped after reaching the maximum number of steps ({MAX_AGENT_STEPS}). "
+                  f"Please check the progress and request again.")
+        rlog.final(capped, ctx)
+        yield {"type": "final", "text": capped, "ctx": ctx, "messages": messages}
     finally:
-        # 벤치 러너가 중단하면 server.py 가 gen.close() 를 부른다(GeneratorExit).
+        # 벤치 러너가 중단하면 서버가 gen.close() 를 부른다(GeneratorExit).
         # 그때도 로그 꼬리가 닫히도록 finally 에 둔다.
         rlog.close()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 세션 관리 + SSE 진입점
+# 공개 API — 껍데기는 runtime 이 갖고 있고, 여기서는 루프만 꽂아 준다
 # ══════════════════════════════════════════════════════════════════════════════
 
-# 세션별 LangChain 메시지 히스토리. {session_id: [BaseMessage, ...]}
-# 로컬 단일 사용자 도구라 in-memory dict로 충분하다(프로세스 종료 시 초기화).
-_SESSIONS: dict[str, list] = {}
-# 세션 히스토리에 보존할 최대 사용자 턴 수.
-# [100 → 30] 이건 서버 RAM이 아니라 '매 호출 프롬프트에 실리는 토큰 수'(=num_ctx 예산)를
-# 좌우하는 값이다. 100은 34번째 문항에서 앞 문항 맥락이 통째로 누적돼 컨텍스트가 폭주,
-# 무응답을 냈다. 30이면 대부분 소형인 문항 30턴 ≈ ~20k 토큰이라 num_ctx(32768) 아래에
-# 들어오고, 안전상 되묻기(원 요청 + 확인응답 여러 회)에 필요한 직전 맥락도 넉넉히 유지된다.
-_HISTORY_MAX_TURNS = 30
-
-
-def _is_user_turn(msg) -> bool:
-    """이 메시지가 '사람이 친 사용자 턴'인지 — 트리밍 경계 판정용.
-
-    이미지 주입용으로 끼워 넣은 HumanMessage는 제외한다. 포함시키면 이미지 분석을
-    여러 번 하는 세션에서 한 턴이 여러 턴으로 세어져 히스토리가 과하게 잘린다.
-    """
-    if not isinstance(msg, HumanMessage):
-        return False
-    return not msg.additional_kwargs.get(_INJECTED_IMAGE, False)
-
-
-def _trim_history(messages: list) -> list:
-    """마지막 _HISTORY_MAX_TURNS번째 사용자 메시지 지점부터 보존 —
-    도구호출↔응답 쌍이 중간에서 끊기지 않도록 '사용자 턴' 단위로 자른다.
-
-    [왜 사용자 메시지 경계에서만 자르는가]
-    ToolMessage는 자신을 유발한 AIMessage(tool_calls) 뒤에 와야만 유효하다.
-    임의 지점에서 자르면 짝 잃은 ToolMessage가 맨 앞에 남아 API가 거부한다.
-    사용자 메시지 경계에서 자르면 그 앞의 AIMessage+ToolMessage 쌍이 통째로
-    함께 사라지므로 항상 안전하다.
-    """
-    user_idx = [i for i, m in enumerate(messages) if _is_user_turn(m)]
-    if len(user_idx) <= _HISTORY_MAX_TURNS:
-        return messages
-    start = user_idx[-_HISTORY_MAX_TURNS]
-    return messages[start:]
-
-
-def _describe_tool(name: str, args: dict, result: dict) -> str:
-    """tool 호출 1건을 사람이 읽는 한 줄로 요약 — SSE "node" 이벤트 메시지."""
-    ok = result.get("ok", True)
-    if not ok:
-        return f"⚠️ {name} failed: {result.get('error', '')}"
-    if name == "acquire_spectrum":
-        return f"📈 Spectrum acquired (max {result.get('max_intensity', 0):.0f} ADU)"
-    if name in ("move_stage", "move_stage_relative", "move_to_pixel"):
-        pos = result.get("position", {})
-        return f"🧭 Moved → ({pos.get('x', '?')}, {pos.get('y', '?')})"
-    if name == "analyze_microscope_image":
-        return "👁️ Microscope image checked"
-    if name == "run_autofocus":
-        return "🔬 Autofocus complete"
-    if name == "preview_grid_scan":
-        return (f"🔲 Grid preview {result.get('rows', '?')}×{result.get('cols', '?')} "
-                f"({result.get('n_in_view', '?')}/{result.get('n_points', '?')} in view)")
-    if name == "run_grid_scan":
-        return (f"🗺️ Grid scan done "
-                f"({result.get('n_measured', '?')}/{result.get('n_points', '?')} points)")
-    if name == "apply_background_subtraction":
-        return "🧹 Fluorescence background subtraction applied"
-    if name == "search_knowledge_base":
-        hits = result.get("results", [])
-        if not hits:
-            return f"📚 KB lookup — no match for '{args.get('query', '')}'"
-        titles = ", ".join(h.get("title", "?") for h in hits)
-        return f"📚 KB lookup → {titles}"
-    if name == "list_uploaded_files":
-        files = result.get("files", [])
-        if not files:
-            return "📎 Attached files — none"
-        return f"📎 Attached files → {', '.join(f.get('filename', '?') for f in files)}"
-    if name == "inspect_file":
-        return (f"🔍 Inspected {result.get('filename', '?')} "
-                f"({result.get('n_rows', '?')} rows × {result.get('n_cols', '?')} cols)")
-    if name == "run_analysis":
-        return f"🧮 Analysis code executed ({result.get('image_count', 0)} figure(s))"
-    return f"🔧 {name} called"
-
-
-def _grid_gate_begin_turn(interactive: bool) -> None:
-    """raman_tools의 그리드 사람-승인 게이트에 턴 시작을 알린다(대화=강제 ON, 벤치마크=OFF).
-    하드웨어 모듈 import가 실패하는 개발 PC에서는 조용히 무시한다 — 그 경우 grid scan 자체가
-    'Hardware not connected'로 막히므로 게이트는 무의미하다."""
-    try:
-        from backend.hw_tools.raman_tools import grid_gate_begin_turn
-        grid_gate_begin_turn(interactive=interactive)
-    except Exception:
-        pass
+_SESSIONS: runtime.SessionStore = {}
 
 
 def stream_experiment(user_message: str, session_id: str = "") -> Iterator[dict]:
-    """단일 에이전트를 이벤트 제너레이터로 실행한다 (프론트엔드 SSE용).
-
-    yield하는 이벤트 — 모두 "type"과 "session_id"를 포함:
-      {"type": "node",  "node": str, "message": str}   도구 호출 진행상황
-      {"type": "chat",  "reply": str}                  도구 호출 없이 끝난 턴
-      {"type": "done",  "final_report": str}           측정을 포함한 턴 완료
-      {"type": "error", "detail": str}
-    """
-    sid = session_id or str(uuid.uuid4())
-
-    def ev(d: dict) -> dict:
-        d["session_id"] = sid
-        return d
-
-    # 벤치마크 로그: resolved sid(빈 값이면 위에서 uuid로 확정한 것)를 넘겨야 서로 다른
-    # 세션이 'nosession' 파일 하나로 뭉치지 않는다. run_stream 소비 전에 만들어 첫
-    # tool 이벤트부터 관측한다. 로깅 실패는 detail_log가 내부에서 삼키므로 여기선 그냥 먹인다.
-    turn = new_turn("AILA", sid, user_message)
-    # 이 턴의 산출물이 갈 세션 폴더를 연다(data/runs/<sid>/). 같은 sid 로 다시 불러도
-    # 같은 폴더를 이어 쓰므로 멀티턴 세션의 산출물이 한곳에 모인다.
-    run_store.begin_session(sid, "AILA")
-
-    try:
-        llm = _get_llm()
-        history = _SESSIONS.get(sid, [])
-        # 새 사용자 턴 시작 — 그리드 사람-승인 게이트를 이번 턴 상태로 맞춘다.
-        # 자율 모드(_AUTONOMOUS, 기본 ON)에서는 대화 경로에서도 게이트를 끈다:
-        # "그리드 스캔도 승인 없이 스스로" 라는 자율 정책과 코드 인터록이 어긋나면,
-        # 모델은 프롬프트대로 실행하려 하는데 도구가 거부해 턴이 헛돈다.
-        # RAMAN_AUTONOMOUS=0 이면 종전처럼 미리보기→사람 승인→실행 2턴 흐름으로 복귀한다.
-        _grid_gate_begin_turn(interactive=not _AUTONOMOUS)
-
-        final_text = None
-        final_ctx = None
-        final_messages = history
-
-        for event in run_stream(llm, history, user_message):
-            turn.observe(event)
-            etype = event["type"]
-            if etype == "tool":
-                yield ev({"type": "node", "node": event["name"],
-                          "message": _describe_tool(event["name"], event["args"], event["result"])})
-                sp = spectrum_event(event["result"])   # 측정이면 스펙트럼 이미지도 전달
-                if sp:
-                    yield ev(sp)
-            elif etype == "error":
-                turn.fail(event["detail"])
-                yield ev({"type": "error", "detail": event["detail"]})
-                return
-            elif etype == "final":
-                final_text = event["text"]
-                final_ctx = event["ctx"]
-                final_messages = event["messages"]
-
-        if final_ctx is None:
-            turn.fail("The agent failed to generate a response.")
-            yield ev({"type": "error", "detail": "The agent failed to generate a response."})
-            return
-
-        _SESSIONS[sid] = _trim_history(final_messages)
-
-        # 측정(레이저 조사)이 실제로 있었는지로 "실험 보고서" vs "일반 대화"를 가른다.
-        used_measurement = bool({"acquire_spectrum", "run_grid_scan"}
-                                 & set(final_ctx.get("tool_call_order", [])))
-        turn.complete("done" if used_measurement else "chat", final_text, final_ctx)
-        if used_measurement:
-            yield ev({"type": "done", "final_report": final_text})
-        else:
-            yield ev({"type": "chat", "reply": final_text})
-
-    except Exception as e:
-        turn.fail(str(e))
-        yield ev({"type": "error", "detail": str(e)})
+    """이 에이전트를 프론트엔드 SSE 이벤트 제너레이터로 실행한다."""
+    return runtime.stream_turn(
+        ARCH, _SESSIONS,
+        lambda history, sid: run_stream(_get_llm(), history, user_message),
+        user_message, session_id,
+        # 자율 모드(기본)에서는 대화 경로에서도 그리드 승인 게이트를 끈다: "그리드 스캔도
+        # 승인 없이 스스로" 라는 자율 정책과 코드 인터록이 어긋나면, 모델은 프롬프트대로
+        # 실행하려 하는데 도구가 거부해 턴이 헛돈다. RAMAN_AUTONOMOUS=0 이면 종전처럼
+        # 미리보기 → 사람 승인 → 실행 2턴 흐름으로 복귀한다.
+        interactive_grid_gate=not AUTONOMOUS)
 
 
 def run_experiment(user_message: str, session_id: str = "") -> dict:
     """동기 1회 실행 — 벤치마크/레거시용 (세션 히스토리 없이 매번 새로 시작)."""
-    # 벤치마크 로그: 빈 session_id면 매 실행마다 uuid를 새로 만들어 실행 1회 = 파일 1개로
-    # 분리한다(안 그러면 모든 벤치마크 질의가 'nosession' 한 파일에 뭉친다).
-    sid = session_id or str(uuid.uuid4())
-    turn = new_turn("AILA", sid, user_message)
-    # 이 문항의 산출물이 갈 세션 폴더를 연다. 벤치마크는 문항마다 새 session_id
-    # (bench_<run_id>_<agent>_<stamp>)를 주므로 폴더 이름만으로 과제·에이전트가 드러난다.
-    run_store.begin_session(sid, "AILA")
-    # 벤치마크는 사람이 없는 자율 평가 — 그리드 승인 게이트를 끈다(안 끄면 모든 격자
-    # 스캔이 승인 없이 거부된다).
-    _grid_gate_begin_turn(interactive=False)
-    llm = _get_llm()
-    final_text = ""
-    final_ctx = None
-    error_detail = None
-    for event in run_stream(llm, [], user_message):
-        turn.observe(event)
-        if event["type"] == "final":
-            final_text = event["text"]
-            final_ctx = event["ctx"]
-        elif event["type"] == "error":
-            error_detail = event["detail"]
-            final_text = f"[Error] {event['detail']}"
-    if error_detail is not None:
-        turn.fail(error_detail, final_ctx)
-    else:
-        used_measurement = bool({"acquire_spectrum", "run_grid_scan"}
-                                 & set((final_ctx or {}).get("tool_call_order", [])))
-        turn.complete("done" if used_measurement else "chat", final_text, final_ctx)
-    return {"final_report": final_text}
+    return runtime.run_turn_once(
+        ARCH,
+        lambda history, sid: run_stream(_get_llm(), history, user_message),
+        user_message, session_id)

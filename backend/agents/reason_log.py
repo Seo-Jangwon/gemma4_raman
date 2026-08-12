@@ -1,15 +1,13 @@
 # -*- coding: utf-8 -*-
-"""추론과정 로그 — 세션(=벤치 문항) 하나당 사람이 읽는 .log 파일 하나.
+"""추론과정 로그 — 세션 하나당 사람이 읽는 .log 파일 하나.
 
 [detail_log.py 와 무엇이 다른가]
-detail_log 는 '채점에 필요한 것'(질문/최종답/도구호출/planning 요약)을 JSON 으로 남긴다.
+detail_log 는 '무엇을 했는가'(질문/최종답/도구호출/planning 요약)를 JSON 으로 남긴다.
 이 모듈은 '모델이 무슨 생각을 하며 그렇게 했는가'를 시간순 텍스트로 남긴다. 둘은 서로를
 대체하지 않는다 — JSON 은 기계가, 이 로그는 사람이 읽는다.
 
-또 하나 결정적인 차이: **벤치 경로에서는 detail_log 가 아예 안 돈다.**
-서버의 /api/bench/stream 은 stream_experiment/run_experiment 를 거치지 않고
-mod.run_stream() 을 직접 소비하는데(server.py:704 _producer), new_turn() 은 그 두
-진입점에만 걸려 있기 때문이다. 그래서 이 모듈은 run_stream 안쪽에 건다.
+거는 자리도 다르다. detail_log 는 stream_experiment/run_experiment 진입점에,
+이 모듈은 그 안쪽 run_stream 에 건다 — 에이전트를 서버 없이 직접 호출해도 남게.
 
 [무엇을 남길 수 있고 무엇은 못 남기는가 — Ollama 기준]
 Ollama HTTP API 가 돌려주는 것은 이게 전부다:
@@ -32,9 +30,6 @@ step 의 텍스트만 쓰고 중간 step 의 텍스트는 messages 에 넣고 �
 왜 없는가'를 파일 하나만 보고 알 수 있게 한다.
 
 [저장 위치]
-벤치 세션(session_id 가 `bench_<run_id>_<agent>_<task>_<hex>`)이면
-    results/<run_id>/<task>.log          예: results/2026-08-06_AILA/T001.log
-즉 채점 결과 T001.json 바로 옆에 T001.log 가 놓인다. 그 외(프론트 대화 등)는
     DetailLog/reasoning/<agent>_<YYYYMMDD_HHMMSS>_<sid>.log
 
 [환경변수]
@@ -44,7 +39,7 @@ step 의 텍스트만 쓰고 중간 step 의 텍스트는 messages 에 넣고 �
     RAMAN_LLM_THINK=auto|1|0      think 토글(기본 auto = capabilities 조회로 결정)
 
 [실패 격리]
-로깅이 실험을 깨뜨리면 안 된다 — 파일 I/O 와 능력 조회는 예외를 삼키고 stderr 경고만
+로깅이 실행을 깨뜨리면 안 된다 — 파일 I/O 와 능력 조회는 예외를 삼키고 stderr 경고만
 낸다. 단 invoke() 자체는 삼키지 않는다(그건 실험의 본체다).
 """
 from __future__ import annotations
@@ -61,8 +56,7 @@ from typing import Any, Optional
 
 # backend/agents/reason_log.py → parents[2] = 프로젝트 루트
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-RESULTS_ROOT = _PROJECT_ROOT / "results"
-FALLBACK_ROOT = _PROJECT_ROOT / "DetailLog" / "reasoning"
+LOG_ROOT = _PROJECT_ROOT / "DetailLog" / "reasoning"
 
 # 로그 머리말에 '어떤 모델로 돌았는가'를 적는 데 쓴다. 에이전트가 실제로 쓰는 값과
 # 반드시 같아야 하므로(다르면 로그가 거짓말을 한다) 같은 단일 출처를 읽는다 —
@@ -152,34 +146,10 @@ def _sanitize(text: str) -> str:
     return re.sub(r"[^0-9A-Za-z_-]", "-", str(text))[:64] or "nosession"
 
 
-def parse_session(session_id: str) -> tuple[str, str]:
-    """벤치 session_id 에서 (run_id, task) 를 뽑는다. 벤치 형식이 아니면 ("", "").
-
-    형식: bench_<run_id>_<agent>_<task>_<hex6>
-      예: bench_2026-08-06_AILA_AILA_T001_79933f → ("2026-08-06_AILA", "T001")
-    run_id 안에 '_' 가 들어 있으므로(날짜_에이전트) 뒤에서부터 세 조각을 떼어낸다.
-    """
-    sid = str(session_id or "")
-    if not sid.startswith("bench_"):
-        return "", ""
-    try:
-        head = sid[len("bench_"):].rsplit("_", 1)[0]      # <run_id>_<agent>_<task>
-        head, task = head.rsplit("_", 1)                   # <run_id>_<agent>, <task>
-        run_id, _agent = head.rsplit("_", 1)
-    except ValueError:
-        return "", ""
-    if not run_id or not task:
-        return "", ""
-    return run_id, task
-
-
 def log_path(agent: str, session_id: str) -> Path:
     """이 세션의 로그 파일 경로."""
-    run_id, task = parse_session(session_id)
-    if run_id and task:
-        return RESULTS_ROOT / run_id / f"{_sanitize(task)}.log"
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    return FALLBACK_ROOT / f"{agent}_{stamp}_{_sanitize(session_id)}.log"
+    return LOG_ROOT / f"{agent}_{stamp}_{_sanitize(session_id)}.log"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -315,13 +285,10 @@ class ReasonLog:
 
     def _header(self, question: str) -> None:
         think_on, why = think_capability()
-        run_id, task = parse_session(self.session_id)
         bar = "═" * 78
         self._w(
             f"{bar}\n"
-            f" {self.agent}"
-            + (f" · {task}" if task else "")
-            + f" · {OLLAMA_MODEL} @ {OLLAMA_HOST}\n"
+            f" {self.agent} · {OLLAMA_MODEL} @ {OLLAMA_HOST}\n"
             f" session : {self.session_id}\n"
             f" started : {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f" thinking: {'ON' if think_on else 'OFF'} — {why}\n"
@@ -471,7 +438,7 @@ def open_turn(agent: str, question: str, session_id: str = ""):
     sid = session_id
     if not sid:
         try:
-            from backend.agents import run_store
+            from backend.service.store import run_store
             sid = run_store.current().get("session_id", "")
         except Exception:
             sid = ""
@@ -507,4 +474,4 @@ if __name__ == "__main__":
             print("     Ollama HTTP API 자체에 표면이 없어 어떤 설정으로도 얻을 수 없습니다.")
     on, why = think_capability()
     print(f"\n이번 설정에서 think: {'ON' if on else 'OFF'} — {why}")
-    print(f"로그 위치 예시: {log_path('AILA', 'bench_2026-08-06_AILA_AILA_T001_abc123')}")
+    print(f"로그 위치 예시: {log_path('AILA', 'sess_abc123')}")

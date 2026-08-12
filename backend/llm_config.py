@@ -34,7 +34,7 @@ try/except 로 감싸고 폴백에 같은 문자열을 다시 적었다 — 즉 
 
 이 모듈은 backend.config(Config.ini)에도 장비 SDK 에도 의존하지 않으므로 **어디서든 항상
 import 된다.** 따라서 try/except 폴백이 필요 없고, 사본이 생길 이유도 사라진다.
-(같은 논리로 만들어진 backend/safety_limits.py 의 머리말 참고 — 그쪽은 조사량 상한이었다.)
+(같은 논리로 만들어진 backend/util/safety_limits.py 의 머리말 참고 — 그쪽은 조사량 상한이었다.)
 
 [왜 server.py 가 아닌가]
 server.py 한 곳에 두자는 것이 원래 요구였는데, 그러면 vbench 가 깨진다. vbench/run.py 는
@@ -65,7 +65,7 @@ def _env(*names: str, default: str) -> str:
 # 두 에이전트(AILA/CoALA)와 KB 캡션이 전부 이 하나를 쓴다.
 # 비교 실험의 독립변수는 오케스트레이션 하나여야 하므로, 여기가 갈라지면 안 된다.
 # gemma4:31b, gemma4:12b
-OLLAMA_MODEL = _env("RAMAN_OLLAMA_MODEL", default="gemma4:12b")
+OLLAMA_MODEL = _env("RAMAN_OLLAMA_MODEL", default="gemma4:31b")
 
 # ── 호스트 ────────────────────────────────────────────────────────────────────
 # OLLAMA_HOST 도 함께 보는 이유: ollama 공식 클라이언트가 쓰는 표준 변수명이라
