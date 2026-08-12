@@ -8,7 +8,16 @@ import numpy as np
 
 __all__ = ["RamanCalibrator", "wl_p_calib"]
 
-_DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "Config.ini"
+def _default_config_path() -> Path:
+    """장비 PC 의 Config.ini 경로 — 정본은 backend.hw_tools.config.CONFIG_PATH.
+
+    import 시점이 아니라 호출 시점에 끌어온다: config.py 는 import 하자마자 Config.ini 를
+    읽으므로, 미리 당겨오면 그 파일이 없는 개발 PC 에서 이 모듈까지 import 불가가 된다.
+    (예전에는 __file__ 기준 상대경로였는데, andor_codes/ 가 SDKs/ 아래로 내려가면서
+     backend/Config.ini → SDKs/Config.ini 로 어긋나 CCD 초기화가 깨졌다.)
+    """
+    from backend.hw_tools.config import CONFIG_PATH
+    return Path(CONFIG_PATH)
 
 
 def wl_p_calib(px, n0, offset_adjust, wl_center, m_order, d_grating,
@@ -50,7 +59,7 @@ class RamanCalibrator:
                                   groove: float | None = None,
                                   tilt_angle_deg: float | None = None,
                                   si_peak_offset: float | None = None) -> "RamanCalibrator":
-        path = Path(config_path) if config_path else _DEFAULT_CONFIG
+        path = Path(config_path) if config_path else _default_config_path()
 
         cp = configparser.ConfigParser(strict=False)
         with open(path, encoding="cp949", errors="ignore") as fh:

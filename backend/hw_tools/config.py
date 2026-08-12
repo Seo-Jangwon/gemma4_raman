@@ -6,11 +6,13 @@
 import configparser
 from pathlib import Path
 
-# _CONFIG_PATH = Path(__file__).parent / "Config.ini"
-_CONFIG_PATH = r"C:\WEVE\Rays-ON_20260115\Config.ini"
+# 장비 PC 의 실장비 설정 파일 — 이 상수가 Config.ini 경로의 정본이다.
+# (SDKs/andor_codes/raman_calibration.py 도 여기서 끌어다 쓴다. 저장소 안에 사본을
+#  두지 않는다 — 예전 backend/Config.ini 사본은 경로가 어긋나 CCD 초기화를 깨뜨렸다.)
+CONFIG_PATH = r"C:\WEVE\Rays-ON_20260115\Config.ini"
 
 _cfg = configparser.ConfigParser(strict=False)
-_cfg.read(_CONFIG_PATH, encoding="cp949")
+_cfg.read(CONFIG_PATH, encoding="cp949")
 
 # ── Stage 한계 / 중점 ─ [STAGE_INFO] ─────────────────────────────────────────
 STAGE_MAX_X    = _cfg.getfloat("STAGE_INFO", "MaxX")
@@ -49,7 +51,7 @@ STAGE_MAX_Z =  1.0          # Z축 최댓값 — Config.ini 항목 없음
 
 
 if __name__ == "__main__":
-    print(f"Config.ini 경로: {Path(_CONFIG_PATH).resolve()}")
+    print(f"Config.ini 경로: {Path(CONFIG_PATH).resolve()}")
     print()
     print("── Stage [STAGE_INFO] ──────────────────────────────")
     print(f"  STAGE_MAX_X    = {STAGE_MAX_X}")
