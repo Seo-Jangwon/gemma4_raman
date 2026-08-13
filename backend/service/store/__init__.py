@@ -1,4 +1,14 @@
 # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
+
+from pathlib import Path
+
+# 현재 파일(store/__init__.py) 기준으로 3단계 상위 폴더가 프로젝트 루트(gemma4_raman)입니다.
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+# 프로젝트 루트 아래의 'data' 폴더를 DATA_ROOT로 지정합니다.
+DATA_ROOT = _PROJECT_ROOT / "data"
+
 """순수 계산·규약 모듈. 장비 SDK 도 Config.ini 도 건드리지 않는다.
 
 여기 있는 것들의 공통점은 **여러 계층이 같은 답을 내야 해서** 사본을 둘 수 없다는 것이다.

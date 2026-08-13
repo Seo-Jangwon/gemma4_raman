@@ -65,7 +65,7 @@ try:
 except ImportError:
     RamanCalibrator = None
 
-STAGE_DLL_PATH   = str(_BACKEND / "hw_tools" / "Tango_DLL.dll")
+STAGE_DLL_PATH = str(Path(__file__).resolve().parent.parent / "SDKs" / "Tango_DLL.dll")
 
 LASER_PORT       = "COM4"
 

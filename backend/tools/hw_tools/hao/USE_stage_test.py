@@ -45,7 +45,7 @@ def _clip(value: float, lo: float, hi: float) -> float:
 class TangoController:
     """Tango 스테이지 컨트롤러 래퍼 클래스"""
     
-    def __init__(self, dll_path: str = r"C:/Users/user/Desktop/RamanGPT/backend/agents/Tango_DLL.dll"):
+    def __init__(self, dll_path: str = r"C:/Users/user/Desktop/gemma4_raman/backend/tools/hw_tools/SDKs/Tango_DLL.dll"):
         self.dll_path = dll_path
         self.dll = None
         self.LSID = c_int()
