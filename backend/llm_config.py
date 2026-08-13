@@ -141,7 +141,7 @@ AGENT_ARCH = _env("RAMAN_AGENT", default="CoALA")
 #: CHAT_SESSION_ISOLATED 와는 다른 축이다 — 그쪽은 '파일', 이쪽은 '기억'이다. 세션 격리를
 #: 켜도 이 값이 global 이면 앞 세션의 경험은 그대로 조회된다.
 COALA_MEMORY_SCOPE = _env("RAMAN_COALA_MEMORY_SCOPE", "RAMAN_MEMORY_SCOPE",
-                          default="global").lower()
+                          default="session").lower()
 
 #: 에피소딕 기억(recall_experiences / record_experience) 사용 여부. 끄면 도구 2종이 액션
 #: 공간에서 빠지고 프롬프트의 해당 지시문도 함께 빠져, "CoALA 에서 episodic 만 없앤"
