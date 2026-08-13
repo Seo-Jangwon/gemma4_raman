@@ -49,10 +49,10 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-# data/ 위치는 service.store 패키지가 단 한 번만 계산한다(__init__.py 머리말 참고).
+# data/ 위치는 service.store 패키지가 단 한 번만 계산하고(__init__.py 머리말),
+# 뿌리 이름과 file_id 규칙은 paths.py 가 단독으로 정한다(그 파일 머리말).
 from backend.service.store import DATA_ROOT
-
-RUNS_ROOT = DATA_ROOT / "runs"
+from backend.service.store.paths import RUNS_ROOT
 
 # 산출물 종류. 디렉터리를 갖는 것은 spectra/points 이고 나머지는 '제자리 + 인덱싱'이다.
 KIND_SPECTRA = "spectra"
@@ -92,6 +92,7 @@ class _Current(threading.local):
         self.session_id = ""
         self.agent = ""
         self.label = ""
+        self.isolated = False
 
 
 _current = _Current()
@@ -117,13 +118,19 @@ def _safe_name(name, fallback: str = "result") -> str:
 
 
 # ── 세션 경계 ────────────────────────────────────────────────────────────────
-def begin_session(session_id: str, agent: str = "") -> dict:
+def begin_session(session_id: str, agent: str = "", isolated: bool = False) -> dict:
     """턴 시작 시 에이전트 루프가 호출한다. 같은 session_id 로 다시 불러도
-    같은 디렉터리를 계속 쓴다(멀티턴 세션의 산출물이 한곳에 모여야 하므로)."""
+    같은 디렉터리를 계속 쓴다(멀티턴 세션의 산출물이 한곳에 모여야 하므로).
+
+    isolated=True 면 이 턴은 **자기 세션의 파일만** 읽는다(벤치마크). 자세한 규칙은
+    isolated_label() 참고. 대화는 False — 사용자가 지난 세션 결과를 물어보는 것이
+    정상적인 사용이다.
+    """
     label = _sanitize(session_id)
     _current.session_id = str(session_id or "")
     _current.agent = str(agent or "")
     _current.label = label
+    _current.isolated = bool(isolated)
     try:
         d = RUNS_ROOT / label
         d.mkdir(parents=True, exist_ok=True)
@@ -151,6 +158,27 @@ def current() -> dict:
         "dir": str(RUNS_ROOT / label) if label else "",
         "rel_dir": f"runs/{label}" if label else "",
     }
+
+
+def isolated_label() -> str | None:
+    """격리 모드면 현재 세션 라벨, 아니면 None. **세션 격리의 단일 판정 지점.**
+
+    [왜 있는가 — 2026-08-13]
+    벤치마크는 문항마다 새 세션이지만 파일은 날짜 폴더를 공유한다. 앞 문항이 남긴
+    측정을 뒤 문항이 읽으면 그 문항의 점수는 '이번에 측정했는가'가 아니라 '앞 문항이
+    뭘 남겼는가'에 달린다 — 채점이 문항 순서에 의존하게 되고, 재현이 안 된다.
+    대화에서는 반대다: 사용자가 어제 결과를 물어보는 것이 정상적인 사용이다.
+
+    [무엇을 막는가]
+      results:<날짜>/<세션>/…   세션이 내 라벨일 때만
+      runs:<라벨>/…             라벨이 내 것일 때만
+      results:<날짜>/<이름>      세션 세그먼트 없는 구버전 → 격리 모드에서는 막는다
+      uploads:…                 항상 허용 — 사용자 첨부는 세션 소유가 아니다(2026-08-13 결정)
+
+    [왜 스레드로컬인가] _Current 와 같은 이유 — 채팅 탭 두 개와 벤치가 같은
+    ThreadPoolExecutor 의 서로 다른 워커에서 동시에 돌 수 있다.
+    """
+    return _current.label if _current.isolated and _current.label else None
 
 
 def session_dir() -> Path:
@@ -184,7 +212,7 @@ def manifest() -> dict:
 
 def record(kind: str, rel_path: str, **meta) -> dict:
     """산출물 1건을 manifest 에 인덱싱한다. rel_path 는 data/ 기준 상대경로
-    (그대로 load_spectrum 에 넘길 수 있는 형태) 또는 서빙 URL.
+    (그대로 open_file / run_analysis(file_ids) 에 넘길 수 있는 형태) 또는 서빙 URL.
 
     같은 rel_path 를 다시 기록하면 덮어쓴다 — 덮어쓴 파일이 두 줄로 남지 않게.
     """
@@ -216,7 +244,7 @@ def new_artifact_path(kind: str, name, ext: str = ".csv") -> tuple[Path, str]:
     """kind 별 세션 하위 디렉터리에 순번이 붙은 저장 경로를 발급한다.
 
     Returns (절대경로, data/ 기준 상대경로).
-    상대경로는 그 문자열 그대로 다시 읽을 수 있는 형태다(스펙트럼이면 load_spectrum).
+    상대경로는 그 문자열 그대로 다시 읽을 수 있는 형태다(open_file 이 받는다).
     """
     if kind not in _DIR_KINDS:
         raise ValueError(f"kind must be one of {sorted(_DIR_KINDS)} (got {kind!r})")
@@ -260,7 +288,13 @@ def summary_for_prompt() -> str:
     head = (f"Your session label is `{cur['label']}`. Files you save go under "
             f"`{cur['rel_dir']}/`, and spectra you measure are auto-saved under "
             f"`results/<date>/{cur['label']}/`. Both are listed below and both are "
-            f"readable with load_spectrum('<path>').")
+            f"readable with open_file('<path>').")
+    # 격리 모드에서는 왜 남의 파일이 안 열리는지 미리 말해 준다 — 모르면 차단된 id 를
+    # 여러 번 재시도하다 사이클을 태운다(에러 메시지만으로는 한 번 부딪혀야 안다).
+    if isolated_label():
+        head += (" This run is ISOLATED: you can only read files from your own session "
+                 "(and files the user attached). Measurements from other sessions are not "
+                 "available - if you need data, measure it yourself in this run.")
     if not arts:
         return head + " You have not saved any artifact in this session yet."
     lines = [f"  - [{a.get('kind')}] {a.get('path')}"
@@ -269,4 +303,4 @@ def summary_for_prompt() -> str:
     more = "" if len(arts) <= 12 else f"  ... and {len(arts) - 12} earlier artifact(s)\n"
     return (head + f" Artifacts you have already saved in this session ({len(arts)}):\n"
             + more + "\n".join(lines)
-            + "\nRead any of these back with load_spectrum('<path>') or run_analysis.")
+            + "\nRead any of these back with open_file('<path>') or run_analysis.")

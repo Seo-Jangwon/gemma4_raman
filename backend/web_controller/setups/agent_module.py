@@ -20,7 +20,7 @@ def select_agent_module(name: Optional[str]):
     arch = "CoALA" if coala else "AILA"
 
     if coala:
-        from backend.agents import single_agent_CoALA as mod
+        from backend.agents.architectures import single_agent_CoALA as mod
         return mod, arch
-    from backend.agents import single_agent_AILA as mod
+    from backend.agents.architectures import single_agent_AILA as mod
     return mod, arch

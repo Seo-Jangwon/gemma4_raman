@@ -17,7 +17,7 @@ import backend.llm_config as llm_config
 from backend.web_controller.setups.agent_module import select_agent_module
 from backend.web_controller.setups.state import StateDep, run_in_worker
 from backend.web_controller.setups.streaming import sse_response
-from backend.web_controller.schemas.requests import ExperimentRequest
+from backend.web_controller.dto.requests import ExperimentRequest
 
 router = APIRouter(prefix="/api", tags=["agent"])
 

@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import csv
 import json
-import re
 import zipfile
 from datetime import datetime
 from math import ceil
@@ -45,11 +44,11 @@ plt.rcParams["font.family"] = ["Malgun Gothic", "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
 
 from backend.service.store import DATA_ROOT
+# 뿌리와 file_id 규칙은 paths.py 단일 출처다 — 여기서 DATA_ROOT/"results" 를 다시 적으면
+# 해석기와 저장 위치가 갈라질 수 있다(그게 정확히 2026-08-12 에 걷어낸 문제다).
+from backend.service.store.paths import RESULTS_ROOT, URL_PREFIX, make_id
 from backend.tools.result import fail, ok
 
-# data/results — web_controller/main.py 가 /api/results 로 정적 서빙한다.
-RESULTS_ROOT = DATA_ROOT / "results"
-URL_PREFIX = "/api/results"      # 프론트에서 접근하는 공개 경로
 UNASSIGNED = "_unassigned"       # 세션 없이 나온 산출물이 떨어지는 폴더
 
 
@@ -175,7 +174,7 @@ def render_png(result: dict, path: Path, title: str) -> None:
 # 스펙트럼 CSV 를 쓰는 코드가 네 벌 있었고, 헤더가 서로 달랐다:
 #   spectrum_store._write_csv                pixel, raman_shift_cm-1, wavelength_nm, intensity
 #   analysis_sandbox.save_result             pixel_index, raman_shift_cm-1, wavelength_nm, intensity
-#   raman_tools.apply_background_subtraction pixel_index, raman_shift_cm-1,
+#   bg_tools.apply_background_subtraction pixel_index, raman_shift_cm-1,
 #                                            corrected_intensity, background_intensity
 #   save_csv.save_spectrum_csv               pixel, ...  (테스트 스크립트 전용)
 # 그 결과 load_spectrum 이 세기 열 이름을 추측해야 했고('intensity' 인지
@@ -359,8 +358,32 @@ def _resolve_date(date: str | None) -> str:
     return date or datetime.now().strftime("%Y-%m-%d")
 
 
-def _url(date: str, name: str) -> str:
-    return f"{URL_PREFIX}/{date}/{name}"
+def _url(*parts: str) -> str:
+    return f"{URL_PREFIX}/" + "/".join(str(p).strip("/") for p in parts if str(p).strip("/"))
+
+
+def run_store_isolated() -> bool:
+    """이 턴이 세션 격리 모드인가(벤치마크). session_folder 와 같은 이유로 지연 import."""
+    try:
+        from backend.service.store import run_store
+        return run_store.isolated_label() is not None
+    except Exception:
+        return False
+
+
+def _artifact_dir(day: str) -> tuple[Path, str]:
+    """생성물(합본 png·요약 csv·zip·미리보기)이 갈 자리 → (경로, 세션 라벨).
+
+    [왜 날짜 폴더 직속이 아니라 세션 하위인가 — 2026-08-13]
+    이것들은 전부 '누가 만들었는가'가 있는 파일인데 예전에는 날짜 폴더에 바로 떨어졌다.
+    그러면 세션 격리(run_store.isolated_label)에서 귀속 불명이 되어, **모델이 방금 자기가
+    만든 요약 CSV 를 다시 못 읽는다.** 측정 파일(save_spectrum)은 이미 세션 하위이므로
+    모양을 맞춘다. '_' 접두는 그대로라 list_results 에는 여전히 안 잡힌다.
+    """
+    sess = session_folder()
+    d = RESULTS_ROOT / day / sess
+    d.mkdir(parents=True, exist_ok=True)
+    return d, sess
 
 
 def list_results(date: str | None = None, scope: str = "session") -> list[dict]:
@@ -379,23 +402,31 @@ def list_results(date: str | None = None, scope: str = "session") -> list[dict]:
     측정이 다음 문항 코드에 섞여 들어가(문항 간 오염) 채점이 무의미해지고, 하루가
     쌓일수록 주입량도 같이 커진다. 여러 세션을 일부러 합칠 때만 scope="all" 을 준다.
 
-    구버전(날짜 폴더 직속) 파일도 함께 읽는다 — session 은 빈 문자열이 되고,
-    scope="session" 이어도 '귀속 불명' 이므로 배제하지 않는다(안 보이면 유실로 보인다).
+    구버전(날짜 폴더 직속) 파일도 함께 읽는다 — session 은 빈 문자열이 되고, 평소에는
+    '귀속 불명' 이므로 배제하지 않는다(안 보이면 유실로 보인다). **격리 모드에서는 반대로
+    배제한다** — 아래 strict 참고.
     """
     d = _resolve_date(date)
     day_dir = RESULTS_ROOT / d
     if not day_dir.exists():
         return []
 
-    cur = session_folder() if scope == "session" else ""
+    # [격리 모드 — 2026-08-13]
+    # 여기가 paths.resolve 게이트로 못 막는 자리다. 이 함수는 file_id 를 풀지 않고 폴더를
+    # 직접 훑기 때문이다. 그래서 두 가지를 여기서 따로 강제한다:
+    #   · scope="all" 무시  — 모델이 명시해도 자기 세션만 본다
+    #   · strict          — 귀속 불명(sess=="")도 배제. 평소의 관대한 규칙은 벤치에서
+    #                       '앞 문항이 남긴 파일을 뒤 문항이 본다'가 되어 채점이 문항
+    #                       순서에 의존하게 된다.
+    strict = run_store_isolated()
+    cur = session_folder() if (strict or scope == "session") else ""
     items = []
     # 세션 하위 폴더 + 구버전(날짜 폴더 직속). '_' 접두 파일은 생성물이라 제외한다.
     for jp in list(day_dir.glob("*/*.json")) + list(day_dir.glob("*.json")):
         if jp.stem.startswith("_"):
             continue
         sess = jp.parent.name if jp.parent != day_dir else ""
-        # 구버전 파일(sess=="")은 귀속 불명이므로 세션 필터에서 걸러내지 않는다.
-        if cur and sess and sess != cur:
+        if cur and sess != cur and (strict or sess):
             continue
         try:
             payload = json.loads(jp.read_text(encoding="utf-8"))
@@ -455,15 +486,15 @@ def combine_spectra(date: str | None = None, names: list[str] | None = None,
     fig.suptitle(f"{d} · {n} measurements combined", fontsize=12)
     fig.tight_layout()
 
-    day_dir = RESULTS_ROOT / d
-    day_dir.mkdir(parents=True, exist_ok=True)
+    out_dir, sess = _artifact_dir(d)
     stamp = datetime.now().strftime("%H%M%S")
     base = (out_name or f"combined_{stamp}").lstrip("_")
-    png = day_dir / f"_{base}.png"
+    png = out_dir / f"_{base}.png"
     fig.savefig(png, bbox_inches="tight")
     plt.close(fig)
     return ok(count=n,
-              saved={"title": f"Combined · {n} measurements", "image_url": _url(d, png.name)})
+              file_id=make_id("results", d, sess, png.name),
+              saved={"title": f"Combined · {n} measurements", "image_url": _url(d, sess, png.name)})
 
 def aggregate_spectra_csv(date: str | None = None, names: list[str] | None = None,
                           out_name: str | None = None, scope: str = "session") -> dict:
@@ -472,11 +503,10 @@ def aggregate_spectra_csv(date: str | None = None, names: list[str] | None = Non
     d, items = _select(date, names, scope)
     if not items:
         return fail(f"No measurement results to summarize on {d}.")
-    day_dir = RESULTS_ROOT / d
-    day_dir.mkdir(parents=True, exist_ok=True)
+    out_dir, sess = _artifact_dir(d)
     stamp = datetime.now().strftime("%H%M%S")
     base = (out_name or f"summary_{stamp}").lstrip("_")
-    csv_path = day_dir / f"_{base}.csv"
+    csv_path = out_dir / f"_{base}.csv"
     with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(["date", "time", "title", "x", "y", "power_pct", "exposure_s",
@@ -497,7 +527,9 @@ def aggregate_spectra_csv(date: str | None = None, names: list[str] | None = Non
                 f"{sum(inten):.1f}" if inten else "", peak,
             ])
     return ok(count=len(items),
-              saved={"title": f"Summary table · {len(items)} measurements", "csv_url": _url(d, csv_path.name)})
+              file_id=make_id("results", d, sess, csv_path.name),
+              saved={"title": f"Summary table · {len(items)} measurements",
+                     "csv_url": _url(d, sess, csv_path.name)})
 
 def save_scene(image, extent: list | None = None, meta: dict | None = None) -> dict:
     """현미경(카메라) 이미지 한 장을 저장한다 — 분석 코드가 피크맵을 이 위에 오버레이한다.
@@ -543,62 +575,20 @@ def save_preview_png(png_bytes: bytes, tag: str = "preview") -> dict:
     오버레이를 정확히 채팅에 보여줄 때 쓴다. '_' 접두라 list_results(개별 측정 목록)에는 안 잡힌다.
 
     image_url 은 사람용(프론트가 채팅에 인라인 표시), file_id 는 모델용이다 —
-    view_image(file_id) 로 이 그림을 나중에 다시 볼 수 있다. 절대경로를 노출하지 않으므로
+    open_file(file_id) 로 이 그림을 나중에 다시 볼 수 있다. 절대경로를 노출하지 않으므로
     모델이 임의 경로를 읽어달라고 할 방법이 없다(upload_store 의 file_id 와 같은 규칙).
     """
     try:
         day = datetime.now().strftime("%Y-%m-%d")
-        out_dir = RESULTS_ROOT / day
-        out_dir.mkdir(parents=True, exist_ok=True)
+        out_dir, sess = _artifact_dir(day)
         now = datetime.now()
         stamp = now.strftime("%H%M%S_") + f"{now.microsecond // 1000:03d}"
         safe = "".join(c for c in str(tag) if c.isalnum() or c in "-_") or "preview"
         name = f"_{safe}_{stamp}.png"
         (out_dir / name).write_bytes(png_bytes)
-        return ok(image_url=_url(day, name), file_id=f"{day}/{name}")
+        return ok(image_url=_url(day, sess, name), file_id=make_id("results", day, sess, name))
     except Exception as e:
         return fail(f"Failed to save preview image: {e}")
-
-
-#: view_image 가 읽어 줄 수 있는 확장자. 스펙트럼 csv/json 은 load_spectrum 담당이다.
-IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
-
-
-def resolve_result_image(file_id: str) -> Path:
-    """file_id → data/results 아래 실제 이미지 경로. 경로 탈출을 여기서 전부 막는다.
-
-    받는 형태는 두 가지다 — 결과물이 두 깊이에 저장되기 때문이다:
-        "<YYYY-MM-DD>/<name>"           save_preview_png (현미경 캡처·그리드 미리보기)
-        "<YYYY-MM-DD>/<세션>/<name>"     측정 결과 png (세션 폴더 안)
-
-    image_url("/api/results/…")을 그대로 넘겨도 받아준다 — 모델이 도구 결과에서 눈에 띄는
-    쪽을 집어 오는 일이 흔해서, 둘 중 뭘 줘도 같은 파일로 풀리게 한다.
-
-    Raises: ValueError(형식·확장자 오류) / FileNotFoundError(없는 파일)
-    """
-    raw = str(file_id or "").replace("\\", "/").strip()
-    if raw.startswith(URL_PREFIX):
-        raw = raw[len(URL_PREFIX):]
-    parts = [p for p in raw.split("/") if p not in ("", ".")]
-    if not parts or any(p == ".." for p in parts):
-        raise ValueError(f"Invalid file_id: {file_id!r}")
-    if len(parts) not in (2, 3):
-        raise ValueError(f"Invalid file_id: {file_id!r} "
-                         f"(expected '<YYYY-MM-DD>/<filename>' or "
-                         f"'<YYYY-MM-DD>/<session>/<filename>')")
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[0]):
-        raise ValueError(f"Invalid file_id: {file_id!r} (it must start with a 'YYYY-MM-DD' date)")
-    # 각 조각이 순수 파일/폴더 이름인지 — 여기서 심볼릭한 경로 조립을 차단한다.
-    if any(p != Path(p).name for p in parts):
-        raise ValueError(f"Invalid file_id: {file_id!r}")
-    if Path(parts[-1]).suffix.lower() not in IMAGE_SUFFIXES:
-        raise ValueError(f"Not an image file: {parts[-1]} "
-                         f"(supported: {', '.join(sorted(IMAGE_SUFFIXES))})")
-
-    path = RESULTS_ROOT.joinpath(*parts)
-    if not path.is_file():
-        raise FileNotFoundError(f"Image not found: {file_id}")
-    return path
 
 
 def latest_scene(date: str | None = None, scope: str = "session") -> str | None:
@@ -615,11 +605,14 @@ def latest_scene(date: str | None = None, scope: str = "session") -> str | None:
     day_dir = RESULTS_ROOT / _resolve_date(date)
     if not day_dir.exists():
         return None
-    if scope == "session":
+    strict = run_store_isolated()        # 격리 모드: scope="all" 무시 + 구버전 폴백도 끈다
+    if strict or scope == "session":
         sess_dir = day_dir / session_folder()
         scenes = sorted(sess_dir.glob("_scene_*.npz")) if sess_dir.exists() else []
         if scenes:
             return str(scenes[-1])
+        if strict:
+            return None
         scenes = sorted(day_dir.glob("_scene_*.npz"))        # 구버전 폴백
         return str(scenes[-1]) if scenes else None
     # scope="all": 그날 아무 세션에서든 가장 최근 것(수동 조사용)
@@ -635,11 +628,10 @@ def bundle_results(date: str | None = None, names: list[str] | None = None,
     d, items = _select(date, names, scope)
     if not items:
         return fail(f"No measurement results to bundle on {d}.")
-    day_dir = RESULTS_ROOT / d
-    day_dir.mkdir(parents=True, exist_ok=True)
+    out_dir, sess = _artifact_dir(d)
     stamp = datetime.now().strftime("%H%M%S")
     zip_name = f"_bundle_{stamp}.zip"
-    zip_path = day_dir / zip_name
+    zip_path = out_dir / zip_name
     n_files = 0
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for it in items:
@@ -654,4 +646,4 @@ def bundle_results(date: str | None = None, names: list[str] | None = None,
     return ok(count=len(items),
               files=n_files,
               saved={"title": f"Bundle (zip) · {len(items)} measurements / {n_files} files",
-                     "zip_url": _url(d, zip_name)})
+                     "zip_url": _url(d, sess, zip_name)})

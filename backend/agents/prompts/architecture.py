@@ -36,7 +36,7 @@ REACT = {
         "execution_timing": "in the same turn",
         "autonomy_extra":   "",
         # [Attached data files]
-        "inspect_lead":      "call list_uploaded_files, then call inspect_file on each relevant file",
+        "inspect_lead":      "call list_uploaded_files, then call open_file on each relevant file",
         "run_analysis_lead": "Then call run_analysis with file_ids to compute",
         # [Measurement procedure]
         "procedure_mode":  "proceed step by step, using your own judgment",
@@ -110,9 +110,9 @@ def coala(episodic: bool = True) -> dict:
     부족하고(모델이 없는 도구를 호출하려 사이클을 태운다) 지시문도 함께 빠져야 한다.
     """
     planning_tools = ("search_knowledge_base, recall_experiences, recall_insights,\n"
-                      "    list_uploaded_files, inspect_file") if episodic else \
+                      "    list_uploaded_files, open_file") if episodic else \
                      ("search_knowledge_base, recall_insights,\n"
-                      "    list_uploaded_files, inspect_file")
+                      "    list_uploaded_files, open_file")
     recording_tools = "record_experience, record_insight" if episodic else "record_insight"
 
     # 측정 절차의 근거 수집 도구와 프로토콜 조회 문구도 episodic 유무를 따라간다.
@@ -146,7 +146,7 @@ def coala(episodic: bool = True) -> dict:
                 "\n- Insufficient evidence is a reason to run more planning actions, not a reason to ask the user.",
             # [Attached data files]
             "inspect_lead": ("gather evidence with the planning actions list_uploaded_files "
-                             "and then inspect_file on each relevant file"),
+                             "and then open_file on each relevant file"),
             "run_analysis_lead": "Then run_analysis with file_ids (an execution action - one per cycle) to compute",
             # [Measurement procedure]
             "procedure_mode":  "proceed on your own through the cycles",

@@ -66,9 +66,9 @@ seeing it. Verify numerically instead, inside the same run_analysis call: print(
 that would prove the step worked (how many spikes were removed, min/max after normalization, peak
 positions, residual size). If a result looks wrong, fix the code and call run_analysis again.
 The only images you actually see are those from analyze_microscope_image, preview_grid_scan and
-view_image. A picture you were shown stays visible for the rest of the current turn, but it is
+open_file. A picture you were shown stays visible for the rest of the current turn, but it is
 dropped once the turn ends - so read what you need from it now. It is not lost: those tools return
-an `image_file`, and view_image(image_file) shows the same picture again in a later turn."""
+an `image_file`, and open_file(image_file) shows the same picture again in a later turn."""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -99,8 +99,9 @@ CONVERSATION_TYPES = """\
 ATTACHED_FILES = """\
 [Attached data files - csv / excel / txt]
 1. When the user attaches a data file or refers to one, {inspect_lead}.
-   inspect_file returns only the structure - row/column counts, column names, numeric-or-text per
-   column, min/max/mean, and the first few rows.
+   open_file returns only the structure for a table - row/column counts, column names,
+   numeric-or-text per column, min/max/mean, and the first few rows. The same tool opens an
+   attached image and shows it to you; `kind` in the reply tells you which you got.
 2. Decide yourself what the columns mean. Nothing has been interpreted for you: judge which numeric
    column is a Raman shift axis in cm-1, which is intensity, which is a wavelength or a stage
    coordinate, and which columns are not spectra at all but metadata (sample name, laser power,

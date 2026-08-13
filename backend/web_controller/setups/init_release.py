@@ -23,7 +23,7 @@ from fastapi import FastAPI
 #    이 파일이 로드되지 않는다 — llm_config 머리말 참고.)
 #   파일을 고치지 않고 바꾸려면:  RAMAN_OLLAMA_MODEL=gemma4:12b python -m backend.web_controller.main
 import backend.llm_config as llm_config
-from backend.hw_tools.hw_tools.raman_tools import (
+from backend.tools.hw_tools.hw_tools.hw_core import (
     init_hardware as rt_init_hardware,
     # 매니저의 현재 핸들 4개를 도구 계층 전역에 다시 주입하는 공용 헬퍼.
     sync_tool_handles as rt_sync_handles,

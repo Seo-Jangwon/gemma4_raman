@@ -14,7 +14,7 @@
   GET  /api/health             서버·장비 연결 요약
 
 여기 있는 것은 전부 '사람이 버튼으로 시키는' 경로다. 에이전트는 이 HTTP API 를 쓰지 않고
-raman_tools 를 직접 부른다.
+도구 계층(backend/tools/tools.py 의 TOOL_DISPATCH)을 직접 부른다.
 """
 
 from __future__ import annotations
@@ -26,9 +26,9 @@ from typing import Callable
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from backend.hw_tools.hw_tools.raman_tools import (
+from backend.tools.hw_tools.hw_tools.hw_core import (
     # 장비 조작 직렬화 가드. 락 순서는 항상 instrument_guard -> component_lock 이다
-    # (raman_tools.instrument_guard docstring 참고) — 뒤집으면 reconnect_hardware 와 교착한다.
+    # (hw_core.instrument_guard docstring 참고) — 뒤집으면 reconnect_hardware 와 교착한다.
     instrument_guard,
     InstrumentBusy,
     # 매니저의 현재 핸들 4개를 도구 계층 전역에 다시 주입하는 공용 헬퍼.
@@ -39,7 +39,7 @@ from backend.web_controller.setups.request_log import log_ccd_reading
 from backend.web_controller.setups.state import (
     AppState, CcdInitState, StateDep, run_in_worker,
 )
-from backend.web_controller.schemas.requests import (
+from backend.web_controller.dto.requests import (
     AcquireSpectrumRequest,
     CameraConnectRequest,
     CCDConnectRequest,
@@ -87,7 +87,7 @@ async def camera_connect(body: CameraConnectRequest, state: StateDep):
         with instrument_guard("camera connect"), hw.component_lock("camera"):
             if hw.camera is not None:
                 return "카메라 이미 연결됨"
-            from backend.hw_tools.hw_tools.USE_camera_stream import StreamingTUCam
+            from backend.tools.hw_tools.hao.USE_camera_stream import StreamingTUCam
             cam = StreamingTUCam(exposure_ms=body.exposure_ms)
             cam.start_stream()
             hw.camera = cam
@@ -107,7 +107,7 @@ async def stage_connect(body: StageConnectRequest, state: StateDep):
         with instrument_guard("stage connect"), hw.component_lock("stage"):
             if hw.stage is not None:
                 # 해제에 실패해 '죽은' 핸들은 고아 세션을 막으려고 일부러 남겨둔 것이다
-                # (raman_tools._teardown_component). 여기서 '이미 연결됨' 으로 200 을
+                # (system_tools._teardown_component). 여기서 '이미 연결됨' 으로 200 을
                 # 돌려주면 프론트는 초록불을 켜지만 실제로는 아무것도 못 한다 —
                 # 재초기화도 불가능하다(새 핸들을 만들면 죽은 세션이 고아가 된다).
                 # 그래서 재시작이 필요하다고 503 으로 정직하게 알린다.
@@ -134,7 +134,7 @@ async def laser_connect(body: LaserConnectRequest, state: StateDep):
         with instrument_guard("laser connect"), hw.component_lock("laser"):
             if hw.laser is not None:
                 return "레이저 이미 연결됨"
-            from backend.hw_tools.hw_tools.USE_laser_with_power import LaserController
+            from backend.tools.hw_tools.hao.USE_laser_with_power import LaserController
             laser = LaserController(port=body.port)
             if not (laser.ser and laser.ser.is_open):
                 raise RuntimeError(f"레이저 포트 연결 실패 ({body.port})")
@@ -255,8 +255,8 @@ async def stage_move_pixel(body: MovePixelRequest, state: StateDep):
     **하드코딩**해서 config.CALIB_FACTOR_* 와 우연히 같을 뿐이었다 — 보정값을 다시 재면
     프론트 클릭 이동만 옛 값으로 남는다.
     """
-    from backend.hw_tools.hw_tools.raman_tools import move_stage_relative
-    from backend.hw_tools.hw_tools import optics_map
+    from backend.tools.hw_tools.hw_tools.stage_tools import move_stage_relative
+    from backend.service.vision import optics_map
 
     dx_mm, dy_mm = optics_map.pixel_delta_to_mm(
         body.px - body.stream_width  / 2,
@@ -273,17 +273,17 @@ async def hardware_state(state: StateDep):
     [왜 도구 계층 함수를 쓰는가]
     같은 값을 읽는 코드가 여기에 또 있었다(get_ccd_info / get_laser_status /
     get_stage_position / get_stage_speed 에 이은 다섯 번째 경로). 필드 폴백 규칙이
-    미묘하게 달라 프론트와 에이전트가 다른 숫자를 보게 되므로, raman_tools 의
+    미묘하게 달라 프론트와 에이전트가 다른 숫자를 보게 되므로, stage_tools 의
     hardware_snapshot 하나로 모았다.
     """
-    from backend.hw_tools.hw_tools.raman_tools import hardware_snapshot
+    from backend.tools.hw_tools.hw_tools.system_tools import hardware_snapshot
     return await run_in_worker(state, lambda: hardware_snapshot(state.hw))
 
 
 @router.post("/stage/speed")
 async def stage_set_speed(body: StageSpeedRequest, state: StateDep):
     """스테이지 이동 속도 직접 설정 — 파라미터 패널 수동 변경용."""
-    from backend.hw_tools.hw_tools.raman_tools import set_stage_speed
+    from backend.tools.hw_tools.hw_tools.stage_tools import set_stage_speed
     return await run_in_worker(state, lambda: set_stage_speed(
         x_speed_mm_s=body.x, y_speed_mm_s=body.y, z_speed_mm_s=body.z))
 
@@ -291,7 +291,7 @@ async def stage_set_speed(body: StageSpeedRequest, state: StateDep):
 @router.post("/spectrum/acquire")
 async def spectrum_acquire(body: AcquireSpectrumRequest, state: StateDep):
     """파라미터 패널 수동 측정 버튼용 — LLM 없이 acquire_spectrum() 직접 호출."""
-    from backend.hw_tools.hw_tools.raman_tools import acquire_spectrum
+    from backend.tools.hw_tools.hw_tools.acquire_tools import acquire_spectrum
 
     result = await run_in_worker(state, lambda: acquire_spectrum(
         exposure=body.exposure,

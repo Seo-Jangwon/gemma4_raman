@@ -9,7 +9,9 @@
   저장 레이아웃 (spectrum_store 와 동일한 날짜 폴더 규칙):
     data/uploads/<YYYY-MM-DD>/<HHMMSS_mmm>_<원본파일명>
 
-  file_id 는 그 상대 키다: "<YYYY-MM-DD>/<HHMMSS_mmm>_<원본파일명>".
+  file_id 는 "uploads:<YYYY-MM-DD>/<HHMMSS_mmm>_<원본파일명>" 이다. 뿌리 이름이 앞에
+  붙는 이유와 해석 규칙은 backend/service/store/paths.py 머리말에 있다 — 이 모듈은
+  id 를 **만들기만** 하고(make_id), 푸는 일은 거기 하나가 한다.
   절대경로를 노출하지 않으므로 LLM 이 임의 경로를 읽어달라고 할 방법이 없다.
 
   [왜 세션이 아니라 날짜로 묶는가]
@@ -28,19 +30,28 @@
 """
 from __future__ import annotations
 
-import re
+import json
+import sys
 from datetime import datetime
 from pathlib import Path
 
-from backend.service.store import DATA_ROOT
+# 뿌리와 file_id 규칙은 paths.py 단일 출처다(그 파일 머리말 참고).
+from backend.service.store.paths import UPLOADS_ROOT, FileIdError, make_id, resolve
 
-# data/uploads — spectrum_store.RESULTS_ROOT(data/results) 와 같은 부모.
-UPLOADS_ROOT = DATA_ROOT / "uploads"
-
-# 허용 확장자 — '표 형태 데이터'만. 논문/프로토콜 문서(pdf/md)는 지식베이스로
-# 가야 하므로 여기가 아니라 /api/kb/upload 담당이다.
-ALLOWED_SUFFIXES = {".csv", ".tsv", ".txt", ".dat", ".xlsx", ".xls"}
+# 허용 확장자. 논문/프로토콜 문서(pdf/md)는 지식베이스로 가야 하므로 여기가 아니다.
+#
+# [이미지를 받는 이유 — 2026-08-12]
+# 예전에는 표 데이터만 받았고, 그래서 모델이 볼 수 있는 이미지는 **장비가 방금 찍은 것**
+# 뿐이었다. 사람이 가진 참고 사진·이전 실험 이미지·논문 그림을 넣을 통로가 아예 없었다.
+# open_file 이 뿌리도 종류도 가리지 않으므로(paths.resolve/kind_of), 확장자만 열면 그대로 동작한다.
+_TABLE_SUFFIXES = {".csv", ".tsv", ".txt", ".dat", ".xlsx", ".xls"}
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+ALLOWED_SUFFIXES = _TABLE_SUFFIXES | _IMAGE_SUFFIXES
 _EXCEL_SUFFIXES = {".xlsx", ".xls"}
+
+#: 업로드 파일 옆에 붙는 메타 쪽지의 확장자. "<저장이름>.json" 으로 나란히 둔다.
+#: ALLOWED_SUFFIXES 에 .json 이 없으므로 list_uploads 의 목록에는 잡히지 않는다.
+_SIDECAR_EXT = ".json"
 
 # 병적으로 큰 파일이 payload JSON 을 통째로 메모리에 올리는 것을 막는 상한.
 _MAX_LOAD_ROWS = 200_000
@@ -67,59 +78,88 @@ def _safe_name(raw: str) -> str:
 
 
 def _resolve_path(file_id: str) -> Path:
-    """file_id → 실제 경로. 경로 탈출을 여기서 전부 막는다.
+    """file_id → 실제 경로. 해석은 paths.resolve 한 곳이 한다.
 
-    받는 형태는 두 가지:
-      "<YYYY-MM-DD>/<name>"  정식 file_id
-      "<name>"               날짜를 빠뜨린 경우 — 최근 날짜부터 역순으로 찾아준다.
-                             (모델이 날짜 접두사를 흘리는 일이 흔해서 허용한다)
+    [왜 여기서 직접 풀지 않는가 — 2026-08-12]
+    예전에는 이 함수가 자기만의 규칙("<날짜>/<이름>", 날짜 생략 허용, 경로 탈출 방어)을
+    따로 갖고 있었다. 같은 일을 하는 함수가 프로젝트에 넷이었고, 도구마다 아는 뿌리가
+    달라서 목록 도구가 준 id 를 다른 도구에 넘기면 "File not found" 가 났다.
+    이제 규칙은 paths.py 하나뿐이고, 이 함수는 그리로 넘기는 얇은 껍데기다.
+
+    호출부 호환을 위해 예외 종류는 그대로 유지한다 — 못 찾으면 FileNotFoundError,
+    형식이 틀리면 ValueError(FileIdError 가 ValueError 를 상속한다).
     """
-    raw = str(file_id or "").replace("\\", "/")
-    parts = [p for p in raw.split("/") if p not in ("", ".")]
-    if not parts or any(p == ".." for p in parts):
-        raise ValueError(f"Invalid file_id: {file_id!r}")
-
-    if len(parts) == 1:
-        name = parts[0]
-        if name != Path(name).name:
-            raise ValueError(f"Invalid file_id: {file_id!r}")
-        if not UPLOADS_ROOT.exists():
-            raise FileNotFoundError(f"No uploaded file named {name!r}.")
-        for day_dir in sorted(UPLOADS_ROOT.iterdir(), reverse=True):
-            cand = day_dir / name
-            if day_dir.is_dir() and cand.is_file():
-                return cand
-        raise FileNotFoundError(f"No uploaded file named {name!r}.")
-
-    if len(parts) != 2:
-        raise ValueError(f"Invalid file_id: {file_id!r} (expected '<YYYY-MM-DD>/<filename>')")
-
-    date, name = parts
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or name != Path(name).name:
-        raise ValueError(f"Invalid file_id: {file_id!r} (expected '<YYYY-MM-DD>/<filename>')")
-
-    path = UPLOADS_ROOT / date / name
-    if not path.is_file():
-        raise FileNotFoundError(f"Uploaded file not found: {file_id}")
-    return path
+    try:
+        return resolve(file_id, kind="table")
+    except FileIdError as e:
+        # '없다'와 '형식이 틀리다'를 호출부가 구분해 왔다(open_file 이 다른 hint 를 준다).
+        msg = str(e)
+        if "Not found" in msg or "No file matches" in msg or "File not found" in msg:
+            raise FileNotFoundError(msg) from None
+        raise
 
 
 def resolve_upload_path(file_id: str) -> Path:
     """file_id → 실제 경로. **다른 모듈이 file_id 를 풀 때 쓰는 공개 창구.**
 
-    업로드 파일이 어디 있는지 아는 곳은 이 모듈 하나여야 한다. 바깥에서 경로를
-    직접 조립하면 UPLOADS_ROOT 가 바뀌는 순간 조용히 어긋난다 — 실제로 raman_tools
-    가 data/<날짜>/ 를 보는 바람에(정답은 data/uploads/<날짜>/) 업로드 파일을 넘긴
-    호출이 전부 "File not found" 로 떨어졌다.
-
-    경로 탈출 방어와 '날짜 없는 이름' 허용은 _resolve_path 가 이미 하므로 그대로 쓴다.
-    못 찾으면 ValueError(형식 오류) 또는 FileNotFoundError 를 올린다.
+    이제 uploads 뿌리에만 한정되지 않는다 — paths.resolve 가 접두를 보고 알아서 고른다.
+    'uploads:' 접두가 없는 옛 id 도 그대로 받는다.
     """
     return _resolve_path(file_id)
 
 
 def _kind(path: Path) -> str:
-    return "excel" if path.suffix.lower() in _EXCEL_SUFFIXES else "text"
+    """목록에 실리는 종류표. 모델이 어느 도구로 열어야 하는지 여기서 바로 안다."""
+    suffix = path.suffix.lower()
+    if suffix in _IMAGE_SUFFIXES:
+        return "image"          # open_file 이 그림으로 보여준다
+    if suffix in _EXCEL_SUFFIXES:
+        return "excel"          # open_file 이 구조 요약을 준다
+    return "text"               # open_file 이 구조 요약을 준다
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# sidecar — "이 파일이 무엇인가"를 파일 옆에 적어 둔다
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# [왜 필요한가 — 2026-08-12]
+# _safe_name() 이 파일명에서 특수문자를 전부 '_' 로 바꾼다(파일시스템 안전을 위해 필요).
+# 그래서 "시료 A(1).csv" 가 "___A_1_.csv" 로 저장되고, **원본 이름이 디스크에서 사라진다.**
+# 나중에 "이 데이터가 어느 파일이었나"를 되짚을 근거가 없어진다 — 논문 쓸 때 문제가 된다.
+#
+# 측정 결과는 이미 같은 구조다(spectrum_store 가 png/csv/json 3종을 같은 이름으로 남긴다).
+# 업로드만 파일 한 장 덜렁 있었으므로 모양을 맞춘다.
+#
+# 중앙 인덱스 파일 하나로 모으지 않는 이유: 쓰기 경합(락)이 생기고, 파일을 지우면 인덱스에
+# 유령 항목이 남는다. 파일 옆에 두면 같이 지워지므로 디스크와 어긋날 수가 없다.
+
+def _sidecar_path(path: Path) -> Path:
+    return path.with_name(path.name + _SIDECAR_EXT)
+
+
+def _write_sidecar(path: Path, file_id: str, original: str) -> None:
+    """저장 직후 메타 쪽지를 남긴다. 실패해도 업로드 자체는 성공시킨다."""
+    try:
+        _sidecar_path(path).write_text(json.dumps({
+            "file_id": file_id,
+            "original_filename": original,
+            "stored_filename": path.name,
+            "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+            "bytes": path.stat().st_size,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:      # noqa: BLE001 — 메타 기록 실패가 업로드를 깨선 안 된다
+        print(f"[upload_store] sidecar write failed for {path.name}: "
+              f"{type(e).__name__}: {e}", file=sys.stderr)
+
+
+def read_sidecar(path: Path) -> dict:
+    """파일 옆 메타 쪽지. 없거나 깨졌으면 빈 dict(하위호환 — 예전 업로드에는 없다)."""
+    try:
+        with open(_sidecar_path(path), encoding="utf-8") as f:
+            doc = json.load(f)
+        return doc if isinstance(doc, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -145,10 +185,16 @@ def save_upload(filename: str, data: bytes) -> dict:
     path = out_dir / stored
     path.write_bytes(data)
 
+    file_id = make_id("uploads", day, stored)
+    # 원본 이름은 _safe_name 이 이미 뭉갰다 — 여기 남기지 않으면 영영 사라진다.
+    _write_sidecar(path, file_id, str(filename or ""))
+
     return {
         "ok": True,
-        "file_id": f"{day}/{stored}",
+        "file_id": file_id,
         "filename": name,
+        "original_filename": str(filename or ""),
+        "kind": _kind(path),
         "bytes": path.stat().st_size,
     }
 
@@ -163,12 +209,18 @@ def list_uploads(date: str | None = None) -> list[dict]:
     for p in sorted(day_dir.iterdir()):
         if not p.is_file() or p.suffix.lower() not in ALLOWED_SUFFIXES:
             continue
-        items.append({
-            "file_id": f"{day}/{p.name}",
+        side = read_sidecar(p)
+        item = {
+            "file_id": make_id("uploads", day, p.name),
             "filename": p.name,
             "kind": _kind(p),
             "bytes": p.stat().st_size,
-        })
+        }
+        # 원본 이름은 sidecar 에만 있다. 뭉개진 이름과 다를 때만 실어 컨텍스트를 아낀다.
+        original = side.get("original_filename")
+        if original and original != p.name:
+            item["original_filename"] = original
+        items.append(item)
     return items
 
 

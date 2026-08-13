@@ -15,7 +15,7 @@ from typing import Annotated, Callable, Optional, TypeVar
 
 from fastapi import Depends, Request
 
-from backend.hw_tools.hardware_manager import HardwareManager, get_manager
+from backend.tools.hw_tools.hao.hardware_manager import HardwareManager, get_manager
 
 
 class CcdInitState(str, Enum):
