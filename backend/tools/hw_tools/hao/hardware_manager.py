@@ -125,6 +125,34 @@ def _guarded(component: str):
     return deco
 
 
+def _progress_line():
+    """한 줄짜리 진행 표시기를 만든다. **내용이 바뀔 때만** 다시 그린다.
+
+    Returns
+    -------
+    callable
+        ``draw(text)`` — 직전과 같은 문자열이면 아무것도 하지 않는다.
+
+    Notes
+    -----
+    CCD 온도 폴링은 3~5초마다 도는데 온도는 그보다 훨씬 느리게 변한다. 매 폴링마다
+    출력하면 같은 값이 수십 번 다시 그려지고, 종료 로그가 온도 줄로만 찬다.
+
+    잔상 지우기: 이전 줄이 더 길었으면(예: ``-40°C`` → ``-5°C``) ``\\r`` 만으로는 뒤쪽
+    글자가 남아 ``-5°C]  (목표…C) ...C) ...`` 같은 깨진 줄이 된다. 길이 차이만큼 공백을
+    덧칠해 지운다.
+    """
+    last = ["", 0]
+
+    def draw(text: str) -> None:
+        if text == last[0]:
+            return
+        print("\r" + text + " " * max(0, last[1] - len(text)), end="", flush=True)
+        last[0], last[1] = text, len(text)
+
+    return draw
+
+
 class HardwareManager:
     """
     모든 하드웨어 연결 수명주기 관리.
@@ -165,19 +193,52 @@ class HardwareManager:
             for name in ("stage", "ccd", "camera", "laser", "ollama")
         }
 
-        # Ctrl+C / 프로세스 종료 신호 처리
+        # Ctrl+C / 프로세스 종료 신호 처리.
+        # **원래 핸들러를 보관한다** — 우리가 signal.signal 로 덮어쓰면 그 전에 등록돼
+        # 있던 것(서버로 돌 때는 uvicorn 의 graceful shutdown)이 사라진다. 보관해 두고
+        # _signal_handler 에서 그대로 이어 부른다.
+        self._prev_signal_handlers: dict = {}
         if threading.current_thread() is threading.main_thread():
-            signal.signal(signal.SIGINT,  self._signal_handler)
-            signal.signal(signal.SIGTERM, self._signal_handler)
+            for _sig in (signal.SIGINT, signal.SIGTERM):
+                self._prev_signal_handlers[_sig] = signal.signal(_sig, self._signal_handler)
         else:
             print("[WARN] HardwareManager를 워커 스레드에서 생성 — 종료 신호 핸들러 미등록")
 
     # ── 신호 처리 ──────────────────────────────────────────────────────────────
 
     def _signal_handler(self, sig, frame):
+        """Ctrl+C / SIGTERM — 종료를 **시작만** 시키고 즉시 돌려준다.
+
+        [왜 핸들러 안에서 종료를 끝내지 않는가]
+        파이썬 신호 핸들러는 메인 스레드가 하던 일에 끼어들어 그 자리에서 실행된다.
+        서버로 돌 때 그 자리는 asyncio 이벤트 루프 내부(GetQueuedCompletionStatus)다.
+        예전에는 여기서 shutdown() 을 통째로 돌렸는데, CCD 온도 복구가 수 분 걸리므로
+        그동안 이벤트 루프가 멈춰 서버가 아무 응답도 못 했다.
+
+        [왜 sys.exit(0) 을 부르지 않는가]
+        그것이 콘솔에 뜨던 두 개의 트레이스백의 원인이다. sys.exit 은 SystemExit 예외를
+        올리는데, 그게 이벤트 루프 내부에서 터지면 run_forever 가 예외로 빠져나가고
+        대기 중이던 task 들이 전부 CancelledError 로 끊긴다. uvicorn 은 그것을
+        "Exception in ASGI application" 으로 보고한다 — 장비는 이미 정상 해제된 뒤라
+        무해했지만, 실제 오류와 구분이 안 됐다.
+
+        대신 종료는 스레드로 넘기고(daemon=False — 온도 복구 전에 프로세스가 죽으면
+        안 된다), 신호는 원래 핸들러에 그대로 넘긴다. shutdown() 은 _shutdown_called
+        로 멱등하므로 lifespan 종료 훅이 한 번 더 불러도 안전하다.
+        """
         print("\n\n[!] 종료 신호 수신 — CCD 온도 복구 후 안전 종료합니다 (강제 중단 금지)")
-        self.shutdown()
-        sys.exit(0)
+        threading.Thread(target=self.shutdown, name="hw-shutdown", daemon=False).start()
+
+        prev = self._prev_signal_handlers.get(sig)
+        if callable(prev):
+            # uvicorn 의 graceful shutdown, 또는 파이썬 기본 SIGINT 핸들러
+            # (signal.default_int_handler — KeyboardInterrupt 를 올린다).
+            prev(sig, frame)
+        else:
+            # SIG_DFL/SIG_IGN 이 걸려 있던 경우(대개 SIGTERM). 메인 스레드를 풀어 주지
+            # 않으면 아무도 프로세스를 끝내지 않으므로, 여기서 풀어 준다. 종료 스레드는
+            # daemon=False 라 온도 복구가 끝날 때까지 프로세스가 살아 있다.
+            raise KeyboardInterrupt
 
     # ── 컴포넌트 락 ────────────────────────────────────────────────────────────
 
@@ -344,12 +405,13 @@ class HardwareManager:
             DRV_TEMP_DRIFT:          "드리프트",
             DRV_TEMP_OFF:            "냉각기 OFF",
         }
+        # 온도나 상태가 실제로 바뀔 때만 다시 그린다 — 3초마다 같은 줄을 쌓지 않는다.
+        draw = _progress_line()
         while True:
             t      = ccd.get_temperature()
             status = ccd.temperature_status_num
             label  = _LABELS.get(status, f"status={status}")
-            print(f"\r        현재: {t:5d}°C  [{label}]  "
-                  f"(목표: {CCD_COOL_TARGET}°C) ...", end="", flush=True)
+            draw(f"        현재: {t:5d}°C  [{label}]  (목표: {CCD_COOL_TARGET}°C)")
             if status == DRV_TEMP_STABILIZED:
                 print(f"\n[CCD]   온도 안정화 완료: {t}°C")
                 break
@@ -565,14 +627,16 @@ class HardwareManager:
             DRV_TEMP_DRIFT:          "드리프트",
             DRV_TEMP_OFF:            "냉각기 OFF",
         }
+        # 온도나 상태가 실제로 바뀔 때만 다시 그린다. 워밍업은 20분 넘게 걸릴 수 있는데
+        # 5초마다 찍으면 종료 로그가 온도 줄 수백 개로 덮인다.
+        draw = _progress_line()
         while True:
             try:
                 t      = self.ccd.get_temperature()
                 status = self.ccd.temperature_status_num
                 label  = _LABELS.get(status, f"status={status}")
 
-                print(f"\r        온도 복구 중: {t:5d}°C  [{label}]  (목표: ≥ {CCD_WARM_TARGET}°C) ...",
-                      end="", flush=True)
+                draw(f"        온도 복구 중: {t:5d}°C  [{label}]  (목표: ≥ {CCD_WARM_TARGET}°C)")
 
                 if t >= CCD_WARM_TARGET:
                     print(f"\n[CCD]   온도 복구 완료: {t}°C")
@@ -620,6 +684,24 @@ def get_manager() -> HardwareManager:
 # ── 단독 실행 시 초기화 테스트 ────────────────────────────────────────────────
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+
+    # 장비를 건드리기 전에 진행 표시기부터 확인한다(장비 없이 도는 유일한 조각이다).
+    # 이 모듈은 Andor SDK 가 깔린 장비 PC 에서만 import 되므로 검사도 여기 붙는다.
+    import io as _io
+    import contextlib as _ctx
+    _long, _short = "현재: -40C  [냉각 중]", "현재: -5C"
+    _buf = _io.StringIO()
+    with _ctx.redirect_stdout(_buf):
+        _draw = _progress_line()
+        _draw(_long)            # 첫 출력
+        _draw(_long)            # 같은 값 — 조용해야 한다
+        _draw(_long)
+        _draw(_short)           # 짧아진 줄 — 잔상이 지워져야 한다
+    _out = _buf.getvalue()
+    assert _out.count("\r") == 2, f"값이 그대로인데 다시 그렸다: {_out!r}"
+    assert _out.endswith(_short + " " * (len(_long) - len(_short))), \
+        f"짧아진 줄의 잔상이 안 지워졌다: {_out!r}"
+    print("[selfcheck] 진행 표시기: 값 변화 때만 갱신 · 잔상 제거 OK")
 
     hw = HardwareManager()
     try:
