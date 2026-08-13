@@ -10,9 +10,13 @@
     architecture.py  ReAct / CoALA 프로필 (전용 섹션 + 호칭 슬롯)
     이 파일          블록 순서 + 모드 토글 적용
 
-[모드 토글 — 환경변수 2개]
-  RAMAN_AUTONOMOUS=0        되묻기 게이트를 되살린 실험실 대화 모드 (기본은 자율)
-  RAMAN_EPISODIC_MEMORY=0   CoALA 에피소딕 메모리 ablation (기본은 켜짐)
+[모드 토글 2개]
+  RAMAN_AUTONOMOUS=0                되묻기 게이트를 되살린 실험실 대화 모드 (기본은 자율)
+  llm_config.COALA_EPISODIC_MEMORY  CoALA 에피소딕 메모리 ablation (기본은 켜짐)
+
+에피소딕 토글을 여기서 직접 읽지 않는 이유: 도구 계층(long_term_memory)이 같은 값을 보고
+액션 공간에서 도구를 뺀다. 두 곳이 각자 환경변수를 읽으면 '프롬프트는 기록하라는데 도구가
+없는' 상태가 만들어지고, 모델은 없는 도구를 계속 부른다.
 
 [왜 '치환'이 아니라 '조립'인가]
 예전에는 완성된 프롬프트 문자열에서 섹션을 잘라내고 여러 문장을 replace 했다. 대상 문장이
@@ -26,6 +30,7 @@ from __future__ import annotations
 import os
 
 from backend.agents.prompts import architecture, common
+from backend.llm_config import COALA_EPISODIC_MEMORY
 
 
 def _env_on(name: str, default: str = "1") -> bool:
@@ -37,7 +42,8 @@ def _env_on(name: str, default: str = "1") -> bool:
 AUTONOMOUS = _env_on("RAMAN_AUTONOMOUS")
 
 #: CoALA 에피소딕 메모리(recall_experiences / record_experience) 사용 여부.
-EPISODIC_MEMORY = _env_on("RAMAN_EPISODIC_MEMORY")
+#: 값은 llm_config 단일 출처 — long_term_memory 가 도구를 빼는 판단과 반드시 같아야 한다.
+EPISODIC_MEMORY = COALA_EPISODIC_MEMORY
 
 
 def build_system_prompt(arch: str, *,

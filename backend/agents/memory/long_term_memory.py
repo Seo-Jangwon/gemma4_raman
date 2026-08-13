@@ -13,7 +13,7 @@ CoALA(Sumers et al. 2024) §4.5·§6 의 핵심은 "자기 생성 콘텐츠를 �
 의사결정 사이클(single_agent_CoALA.py)의 몫이다 — CoALA 에서 학습은 스케줄이 아니라
 에이전트가 사이클에서 **고르는 액션**이기 때문이다.
 
-[스코프 토글 — RAMAN_MEMORY_SCOPE=session]
+[스코프 토글 — llm_config.COALA_MEMORY_SCOPE = "session"]
 저장소가 coala_memory/sessions/<session_id>/ 로 갈라져, 새 session_id 로 들어오면 그 순간
 빈 저장소가 된다. 벤치는 문항마다 새 session_id 로 공정성을 맞추는데 장기기억은 세션을
 넘어 축적되므로, 1번 문항은 경험 0건으로 200번 문항은 199개가 남긴 경험으로 푸는 셈이
@@ -27,7 +27,6 @@ CoALA(Sumers et al. 2024) §4.5·§6 의 핵심은 "자기 생성 콘텐츠를 �
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 import time
@@ -37,6 +36,8 @@ from typing import Annotated, Optional
 
 from pydantic import Field
 
+# 기억 관련 토글 2종의 단일 출처. 이 모듈은 장비도 Config.ini 도 끌지 않아 어디서든 import 된다.
+from backend.llm_config import COALA_EPISODIC_MEMORY, COALA_MEMORY_SCOPE
 from backend.tools.result import fail, ok
 # 도구 인자의 이름·타입·설명은 아래 함수 시그니처에 직접 적고, 스키마는 tool_schema() 가
 # 그것을 읽어 만든다 — RAMAN_TOOLS·FILE_TOOLS 와 같은 방식이다(tools/schema.py 머리말).
@@ -46,21 +47,22 @@ _MEMORY_DIR = Path(__file__).resolve().parent / "coala_memory"
 _EPISODIC_NAME = "experiences.json"
 _SEMANTIC_NAME = "insights.json"
 
-_SCOPE = os.getenv("RAMAN_MEMORY_SCOPE", "global").strip().lower()
+#: 두 값 모두 llm_config 단일 출처에서 읽는다 — 여기서 os.getenv 를 직접 부르면
+#: 프롬프트 계층(agents/prompts)이 읽는 값과 조용히 갈라진다.
+_SCOPE = COALA_MEMORY_SCOPE
 SESSION_SCOPED = _SCOPE == "session"
 if SESSION_SCOPED:
     # 런타임 출력은 ASCII 로만 — cp949/ascii 콘솔에서도 import 가 깨지지 않게.
-    print("[info] RAMAN_MEMORY_SCOPE=session: CoALA long-term memory is per-session "
+    print("[info] COALA_MEMORY_SCOPE=session: CoALA long-term memory is per-session "
           "(episodic+semantic start empty for every new session_id).")
 elif _SCOPE != "global":
-    print(f"[warn] RAMAN_MEMORY_SCOPE='{_SCOPE}' is not recognized "
+    print(f"[warn] COALA_MEMORY_SCOPE='{_SCOPE}' is not recognized "
           "(use 'global' or 'session'); falling back to 'global'.", file=sys.stderr)
 
 #: 에피소딕 메모리 사용 여부. 끄면 도구 2종을 액션 공간에서 빼고, 프롬프트의 episodic
 #: 지시문도 함께 빠진다(backend.agents.prompts 참고) — semantic 은 그대로라
 #: "CoALA 에서 episodic 만 없앤" ablation 이 된다.
-EPISODIC_ENABLED = os.getenv("RAMAN_EPISODIC_MEMORY", "1").strip().lower() \
-    not in ("0", "false", "no", "off")
+EPISODIC_ENABLED = COALA_EPISODIC_MEMORY
 EPISODIC_TOOL_NAMES = {"recall_experiences", "record_experience"}
 
 #: 회수 payload 예산 — 저장은 full, 회수는 이 상한 안에서 projection 한다.

@@ -187,7 +187,7 @@ def _accept(path: Path, kind: str | None, file_id: str) -> Path:
 
     from backend.service.store import run_store          # 순환 import 회피(지연)
     mine = run_store.isolated_label()
-    if mine is None:                                     # 격리 OFF — 대화 모드
+    if mine is None:                                     # 격리 OFF(llm_config 로 끈 경우)
         return path
 
     root, owner = _owner_session(path)

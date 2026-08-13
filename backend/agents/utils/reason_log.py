@@ -54,8 +54,9 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
-# backend/agents/reason_log.py → parents[2] = 프로젝트 루트
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# backend/agents/utils/reason_log.py → parents[3] = 프로젝트 루트
+#   parents[0]=utils · [1]=agents · [2]=backend · [3]=<루트>
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LOG_ROOT = _PROJECT_ROOT / "DetailLog" / "reasoning"
 
 # 로그 머리말에 '어떤 모델로 돌았는가'를 적는 데 쓴다. 에이전트가 실제로 쓰는 값과
@@ -446,10 +447,18 @@ class ReasonLog:
     # ── 종료 ─────────────────────────────────────────────────────────────────
     def final(self, text: str, ctx: Optional[dict] = None) -> None:
         ctx = ctx or {}
-        self.rec("FINAL",
-                 f"{time.time() - self._t0:.2f}s · LLM {self._llm_calls} calls · "
-                 f"tools {self._tool_calls} calls · dose {float(ctx.get('dose', 0.0)):.2f} mJ",
-                 _clip(text, 8000))
+        head = (f"{time.time() - self._t0:.2f}s · LLM {self._llm_calls} calls · "
+                f"tools {self._tool_calls} calls · dose {float(ctx.get('dose', 0.0)):.2f} mJ")
+        # CoALA 의 evaluate 집계를 같은 줄에 싣는다. 평가의 실패·생략 경로가 셋인데 전부
+        # 조용히 첫 후보로 폴백하므로, 이 한 줄이 없으면 '평가가 돌긴 했나'를 로그 전체를
+        # 훑어야 알 수 있다. AILA 는 이 키가 없어 그대로 빠진다.
+        ev = ctx.get("eval_stats")
+        if ev:
+            head += (f" · evaluate scored {ev.get('scored', 0)}"
+                     f"(changed {ev.get('changed', 0)})"
+                     f" · skipped {ev.get('skipped_single', 0)}"
+                     f" · fallback parse {ev.get('parse_failed', 0)}/llm {ev.get('llm_error', 0)}")
+        self.rec("FINAL", head, _clip(text, 8000))
         self.close()
 
     def failed(self, detail: str) -> None:

@@ -53,14 +53,32 @@ import json
 import sys
 from pathlib import Path
 
-# backend/service/analysis_sandbox.py → parents[2] = 프로젝트 루트
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# backend/service/analyse/analysis_sandbox.py → parents[3] = 프로젝트 루트
+#   parents[0]=analyse · [1]=service · [2]=backend · [3]=<루트>
+# 이 깊이는 아래 _MODULE_PATH 와 함께 움직인다 — 파일을 옮기면 둘 다 고쳐야 한다.
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+#: 자식 프로세스를 띄울 때 `-m` 에 넘기는 이름. 이 파일의 실제 위치와 반드시 같아야 하고,
+#: 틀리면 자식이 시작조차 못 한다("Error while finding module specification for …").
+_MODULE_PATH = "backend.service.analyse.analysis_sandbox"
+
 # sys.path 를 세운 뒤에 import 한다 — 이 파일은 자식 프로세스에서도 실행되므로
-# (python -m backend.service.analysis_sandbox), backend 패키지가 보이는 시점 뒤여야 한다.
+# (python -m backend.service.analyse.analysis_sandbox), backend 패키지가 보이는 시점 뒤여야 한다.
 from backend.tools.result import fail, ok  # noqa: E402
+
+# 이동 감지. 부모가 import 할 때의 __name__ 이 곧 이 파일의 진짜 모듈 경로이므로, 위의 두
+# 상수와 대조하면 파일을 옮긴 순간 여기서 걸린다. 없으면 다음 run_analysis 호출까지 아무도
+# 모르고, 그때 나오는 것은 자식 프로세스의 ModuleNotFoundError 한 줄뿐이다.
+# (자식은 `-m` 으로 들어와 __name__ 이 "__main__" 이라 이 검사를 건너뛴다.)
+if __name__ != "__main__":
+    assert __name__ == _MODULE_PATH, (
+        f"analysis_sandbox 가 옮겨졌다: _MODULE_PATH={_MODULE_PATH!r} 인데 실제 모듈은 "
+        f"{__name__!r} 이다. _MODULE_PATH 와 _PROJECT_ROOT 의 parents[] 깊이를 함께 고칠 것.")
+    assert (_PROJECT_ROOT / "backend").is_dir(), (
+        f"_PROJECT_ROOT={_PROJECT_ROOT} 밑에 backend/ 가 없다 — parents[] 깊이가 틀렸다. "
+        f"이대로 두면 자식이 \"No module named 'backend'\" 로 즉사한다.")
 
 # ── 정책 ──────────────────────────────────────────────────────────────────────
 _ALLOWED_IMPORT_ROOTS = {
@@ -265,7 +283,7 @@ def _make_save_result(data_dir, saved: list, rel_prefix: str = "", start_index: 
     return save_result
 
 
-# ── 서브프로세스 진입점: python -m backend.service.analysis_sandbox <payload.json> ──────
+# ── 서브프로세스 진입점: python -m backend.service.analyse.analysis_sandbox <payload.json> ──
 def _main(payload_path: str) -> None:
     import io
     import contextlib
@@ -606,17 +624,17 @@ def run_analysis(code: str, date: str | None = None, names: list[str] | None = N
         _cwd = _PROJECT_ROOT / "data"
         _cwd.mkdir(parents=True, exist_ok=True)
 
-    # `-m backend.service.analysis_sandbox` 는 모듈을 **파일 안의 sys.path.insert 가 돌기 전에**
-    # 찾는다. 예전에는 cwd 가 프로젝트 루트라 sys.path 의 '' 가 그 일을 대신했는데,
-    # cwd 를 세션 폴더로 옮기면 그게 사라져 ModuleNotFoundError 로 죽는다.
-    # 루트를 PYTHONPATH 로 명시해 cwd 와 무관하게 만든다.
+    # `-m <_MODULE_PATH>` 는 모듈을 **파일 안의 sys.path.insert 가 돌기 전에** 찾는다.
+    # cwd 는 세션 폴더라 거기서는 backend 패키지가 보이지 않으므로, 루트를 PYTHONPATH 로
+    # 명시해 cwd 와 무관하게 만든다. 이 값이 루트가 아니면 자식이 "No module named 'backend'"
+    # 로 즉사한다 — 부모는 멀쩡하므로 증상은 'run_analysis 만 항상 실패'로 나타난다.
     _env = dict(os.environ)
     _env["PYTHONPATH"] = (str(_PROJECT_ROOT) + os.pathsep + _env.get("PYTHONPATH", "")
                           ).rstrip(os.pathsep)
 
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "backend.service.analysis_sandbox", payload_path],
+            [sys.executable, "-m", _MODULE_PATH, payload_path],
             # errors="replace": 자식 stderr 에 로케일로 못 읽는 바이트가 섞여도 부모의
             # 읽기 스레드가 UnicodeDecodeError 로 죽지 않게 한다
             # (encoding 은 자식과 같은 로케일 기본값을 그대로 쓴다).

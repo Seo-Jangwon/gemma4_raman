@@ -55,8 +55,13 @@ async def experiment_stream(body: ExperimentRequest, state: StateDep) -> Streami
 
 
 @router.get("/agents/health")
-async def agents_health(agent: str = "AILA"):
-    """단일 에이전트 시스템 상태 확인. agent 쿼리로 AILA/CoALA 중 선택(기본 AILA)."""
+async def agents_health(agent: str = ""):
+    """단일 에이전트 시스템 상태 확인. agent 쿼리로 AILA/CoALA 중 선택.
+
+    쿼리를 비우면 llm_config.AGENT_ARCH 로 답한다 — 즉 **아무 인자 없이 부르면 실제
+    실행 경로와 같은 아키텍처**를 보고한다. 예전에는 여기만 "AILA" 로 고정이라, CoALA 로
+    돌고 있는 서버에 health 를 물어도 AILA 라고 답했다.
+    """
     mod, name = select_agent_module(agent)
     return {
         "status": "ok",
@@ -67,5 +72,8 @@ async def agents_health(agent: str = "AILA"):
         "model": mod.OLLAMA_MODEL,
         "host": mod.OLLAMA_HOST,
         "num_ctx": llm_config.NUM_CTX,
+        "chat_isolated": llm_config.CHAT_SESSION_ISOLATED,
+        "memory_scope": llm_config.COALA_MEMORY_SCOPE,
+        "episodic_memory": llm_config.COALA_EPISODIC_MEMORY,
         "tools": len(mod.ALL_TOOLS),
     }

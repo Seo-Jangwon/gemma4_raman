@@ -27,9 +27,10 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-# <프로젝트 루트>/DetailLog. __file__ = backend/util/detail_log.py 이므로
-# parents[2] = 프로젝트 루트(gemma4_raman).
-_LOG_DIR = Path(__file__).resolve().parents[2] / "DetailLog"
+# <프로젝트 루트>/DetailLog. __file__ = backend/service/store/detail_log.py 이므로
+# parents[0]=store · [1]=service · [2]=backend · [3]=프로젝트 루트(gemma4_raman).
+# reason_log.LOG_ROOT 와 같은 루트를 가리켜야 두 로그가 한 폴더에서 대조된다.
+_LOG_DIR = Path(__file__).resolve().parents[3] / "DetailLog"
 
 # (agent, session_id) → 이미 만들어 둔 로그 파일 경로. 같은 세션의 이후 턴이
 # 같은 파일에 append되도록 첫 턴에서 정한 파일명을 재사용한다.
@@ -134,6 +135,9 @@ class TurnLog:
             "num_tool_calls": len(self.tool_calls),
             "dose_mj": round(float(ctx.get("dose", 0.0)), 4),
             "learned": bool(ctx.get("learned", False)),
+            # CoALA 의 evaluate 집계. AILA 는 평가 단계가 없어 None 으로 남고, 그 None 이
+            # 곧 '이 턴은 평가 아키텍처가 아니었다'는 뜻이라 0 으로 채우지 않는다.
+            "eval_stats": ctx.get("eval_stats"),
             "started_at": self.started_at,
             "ended_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "duration_s": round(time.time() - self._start, 3),

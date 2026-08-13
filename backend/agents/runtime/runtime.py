@@ -33,7 +33,7 @@ from backend.tools.non_hw_tools.data_tools import search_knowledge_base
 from backend.tools.schema import call_with
 from backend.service.store.spectrum_store import spectrum_event
 from backend.llm_config import (
-    LLM_TIMEOUT_S, NUM_CTX, OLLAMA_HOST, OLLAMA_MODEL,
+    CHAT_SESSION_ISOLATED, LLM_TIMEOUT_S, NUM_CTX, OLLAMA_HOST, OLLAMA_MODEL,
 )
 # 조사량 상한·계산식은 backend.util.safety_limits 단일 출처. 예전에는 같은 1000.0 과 같은
 # 식이 AILA·CoALA·도구 계층 세 곳에 박혀 있어 한 곳만 고치면 나머지가 조용히 갈라졌다 —
@@ -52,7 +52,7 @@ from backend.service.agents.tool_slim import slim
 _llm_cache: dict[str, object] = {}
 
 
-def get_chat_model(tools: Optional[list] = None):
+def get_chat_model(tools: Optional[list] = None, num_predict: Optional[int] = None):
     """ChatOllama Runnable 을 반환한다(실패 시 None). tools 를 주면 bind_tools 까지.
 
     [왜 지연 생성인가]
@@ -71,14 +71,25 @@ def get_chat_model(tools: Optional[list] = None):
 
     tools=None 은 CoALA 의 evaluate 단계용이다: 후보를 '점수화'하는 순수 추론이라
     tool 바인딩이 없는 편이 JSON 출력을 방해받지 않아 안정적이다. 모델·호스트는 동일하다.
+
+    [num_predict 는 왜 있는가]
+    출력 토큰 상한이다. 답이 '점수 JSON 한 줄'로 정해져 있는 호출(evaluate)에만 건다.
+    thinking 모델은 근거가 부족하면 결론을 못 내고 같은 비교를 되풀이하는데, 실측에서
+    후보 2개를 고르는 데 thinking 10,187자 · 출력 2,584 토큰 · 39.7초를 썼다(그 턴 벽시계의
+    25%). 상한을 넘겨 잘리면 JSON 파싱이 실패하고 첫 후보로 폴백하는데, 그 폴백은
+    계측된다(single_agent_CoALA 의 EvalStats) — 조용히 사라지지 않는다.
+    본 응답(propose)에는 걸지 않는다. 최종 보고서가 잘리면 사용자가 받는 답이 잘린다.
     """
-    key = "plain" if tools is None else "tools"
+    key = ("plain" if tools is None else "tools") + f":{num_predict or 0}"
     if key in _llm_cache:
         return _llm_cache[key]
     try:
         from langchain_ollama import ChatOllama
+        opts = {}
+        if num_predict:
+            opts["num_predict"] = int(num_predict)
         llm = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_HOST, num_ctx=NUM_CTX,
-                         client_kwargs={"timeout": LLM_TIMEOUT_S})
+                         client_kwargs={"timeout": LLM_TIMEOUT_S}, **opts)
         _llm_cache[key] = llm.bind_tools(tools) if tools else llm
     except Exception:
         return None
@@ -468,8 +479,11 @@ def stream_turn(arch: str, sessions: SessionStore, run: Callable[[list, str], It
     turn = new_turn(arch, sid, user_message)
     # 이 턴의 산출물이 갈 세션 폴더를 연다(data/runs/<sid>/). 같은 sid 로 다시 불러도 같은
     # 폴더를 이어 쓰므로 멀티턴 세션의 산출물이 한곳에 모인다.
-    # isolated=False — 대화에서는 지난 세션 결과를 물어보는 것이 정상적인 사용이다.
-    run_store.begin_session(sid, arch, isolated=False)
+    # 격리 여부는 llm_config.CHAT_SESSION_ISOLATED 하나가 정한다(기본 켜짐 — 이 세션이
+    # 만든 파일만 읽는다). 여기서 True/False 를 직접 적지 않는 이유는, 그러면 '대화는 어느
+    # 규칙으로 도는가'가 코드 안쪽에 숨어 버리기 때문이다. 규칙 자체는 run_store.
+    # isolated_label() 과 paths._accept 에 있고, 이 줄은 그 스위치를 전달만 한다.
+    run_store.begin_session(sid, arch, isolated=CHAT_SESSION_ISOLATED)
 
     try:
         history = sessions.get(sid, [])

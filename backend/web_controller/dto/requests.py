@@ -74,8 +74,9 @@ class AcquireSpectrumRequest(BaseModel):
 class ExperimentRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
-    # 어떤 에이전트 아키텍처로 실행할지 선택. 기본값 "CoALA".
-    # 이 필드를 보내지 않던 기존 프론트엔드/벤치마크도 그대로 동작한다.
-    agent: Optional[str] = "CoALA"
+    # 어떤 에이전트 아키텍처로 실행할지 선택("CoALA" | "AILA").
+    # 여기에 기본값을 적지 않는 이유: 안 적으면 select_agent_module 이 llm_config.AGENT_ARCH
+    # 로 떨어뜨린다. 여기에 문자열을 박으면 설정을 바꿔도 이 입구만 옛 값으로 남는다.
+    agent: Optional[str] = None
 
 

@@ -66,6 +66,24 @@ MAX_PLANNING_STEPS = 6      # 한 사이클 내 planning(정보수집) 라운드
 SOFT_PLAN_LIMIT = 4         # 이 라운드부터 "이제 실행/보고서로" 진행 문구를 강화
 MAX_AGENT_STEPS = 150       # 턴 전체 propose() 호출 총량 가드(무한 루프 방지)
 
+# ── evaluate 예산 ────────────────────────────────────────────────────────────
+# 평가 프롬프트에 실을 근거의 상한. 이 값들이 곧 evaluate 호출 1회의 입력 크기다.
+#
+# [왜 상한이 필요한가]
+# 근거를 붙이는 목적은 평가자가 추측 대신 사실로 판단하게 하는 것이지, 평가자에게 propose
+# 와 같은 컨텍스트를 통째로 주는 것이 아니다. 도구 설명 하나가 4,035자(run_analysis)까지
+# 있고 관측 결과에는 스펙트럼 통계가 통째로 들어 있어서, 자르지 않으면 evaluate 가 propose
+# 만큼 비싸진다. 아래 상한이면 근거를 다 채워도 입력이 ~2,600자(≈700 토큰)를 넘지 않는다.
+#
+# [VRAM 과는 무관하다]
+# Ollama 의 KV 캐시는 num_ctx(=100,000)로 미리 잡히므로, 실제 프롬프트가 239 토큰이든
+# 1,200 토큰이든 점유 VRAM 은 같다. 여기서 아끼는 것은 생성 시간과 네트워크다.
+MAX_EVAL_CANDIDATES = 4     # 후보가 더 많아도 앞의 4개만 채점한다(나머지는 폐기)
+EVAL_DESC_CHARS = 400       # 후보 도구 설명을 이 길이에서 자른다 — 앞머리에 계약이 있다
+EVAL_OBS_CHARS = 500        # 직전 관측 1건의 최대 길이
+EVAL_OBS_COUNT = 2          # 몇 건까지 실을 것인가
+EVAL_NUM_PREDICT = 512      # 평가 응답 출력 토큰 상한 — 답은 점수 JSON 한 줄이다
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 액션 공간 — internal action 도 tool 로 노출한다 (논문 §4.1: 모든 액션이 action space)
@@ -101,8 +119,11 @@ def _get_llm_plain():
 
     evaluate 는 도구를 '호출'하는 게 아니라 후보를 '점수화'하는 순수 추론이라 tool 바인딩이
     없는 편이 JSON 출력을 방해받지 않아 안정적이다. 모델·호스트는 동일하다.
+
+    출력만 EVAL_NUM_PREDICT 로 묶는다 — 답이 점수 JSON 한 줄로 정해져 있어서다. 상한에
+    걸려 잘리면 파싱이 실패하고 첫 후보로 폴백하는데, 그 폴백은 EvalStats 에 남는다.
     """
-    return runtime.get_chat_model(None)
+    return runtime.get_chat_model(None, num_predict=EVAL_NUM_PREDICT)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -256,43 +277,152 @@ def _propose(llm_tools, wm: WorkingMemory, plan_note: str = "",
                        llm=llm_tools, stage=stage, step=step)
 
 
+#: 도구 이름 → 모델에게 준 설명. 평가자에게 붙일 근거의 출처이고, propose 가 보는 것과
+#: 같은 문장이다(다른 문장을 쓰면 두 단계가 서로 다른 계약을 보게 된다).
+_TOOL_DESC: dict[str, str] = {
+    t["function"]["name"]: t["function"].get("description", "")
+    for t in ALL_TOOLS if isinstance(t, dict) and "function" in t
+}
+
+
+def _eval_stats() -> dict:
+    """evaluate 결과 집계용 카운터. 턴 시작 시 ctx 에 하나 만든다.
+
+    [왜 세는가]
+    evaluate 의 실패·생략 경로가 셋인데 **전부 첫 후보로 폴백**한다(후보 1개 / 파싱 실패 /
+    LLM 예외). 셋 다 사이클을 멈추지 않으므로, 세지 않으면 평가가 실제로 돌았는지 아무도
+    모른 채 결과만 남는다. 그 상태에서 "CoALA 가 AILA 보다 낫다/못하다"를 말하면 근거가
+    없다 — 평가 단계가 한 번도 개입하지 않은 실행일 수도 있기 때문이다.
+
+    changed 는 '평가가 선택을 바꾼 횟수'다. 폴백은 언제나 0번 후보를 고르므로, 0번이
+    아닌 것을 골랐을 때만 evaluate 가 결과에 실제로 기여했다고 말할 수 있다.
+    """
+    return {"scored": 0, "skipped_single": 0, "parse_failed": 0, "llm_error": 0, "changed": 0}
+
+
+def _clip(text: str, limit: int) -> str:
+    """길이 상한. 잘렸다는 사실을 남겨 '원래 이만큼'인지 '잘린 것'인지 구분되게 한다."""
+    text = str(text or "").strip()
+    return text if len(text) <= limit else text[:limit].rstrip() + " …"
+
+
+def _eval_evidence(wm: WorkingMemory, candidates: list[dict]) -> str:
+    """평가자에게 줄 근거 — 후보 도구의 계약 + 직전 관측.
+
+    [왜 필요한가 — 2026-08-13 실행 로그]
+    평가 프롬프트는 wm.render() 만 받아 239 토큰이었다(같은 시점 propose 는 18,091 토큰).
+    그래서 평가자는 도구가 무엇을 하는지도, 방금 무슨 일이 있었는지도 모른 채 점수를 매겼고,
+    실제로 이런 추론을 남겼다:
+
+        "Wait, can analyze_microscope_image work without start_camera_stream?
+         In many API setups, taking a snapshot implies the camera is active…"
+
+    답은 도구 설명에 그대로 적혀 있다("Streaming must be ON before analyze_microscope_image
+    … can get a frame"). 평가자에게 안 보였을 뿐이다. 이 프로젝트의 도구 계약 대신 일반적인
+    에이전트 관례로 판단한 셈이고, 그런 점수는 채점이 아니라 추측이다.
+
+    [무엇을 싣는가]
+    · 후보에 등장하는 도구의 설명 앞머리(EVAL_DESC_CHARS) — 선행조건·안전 규칙이 거기 있다.
+      같은 도구가 여러 후보에 나오면 한 번만 싣는다(인자만 다른 후보들이 흔하다).
+    · 직전 관측 EVAL_OBS_COUNT 건 — wm.observations 는 한 줄 요약이라 '방금 무엇이
+      실패했는지'가 남지 않는다. 실제 ToolMessage 본문 꼬리를 잘라 싣는다.
+    """
+    parts = []
+
+    seen: list[str] = []
+    lines = []
+    for c in candidates:
+        name = c.get("name", "")
+        if name in seen or name not in _TOOL_DESC:
+            continue
+        seen.append(name)
+        lines.append(f"- {name}: {_clip(_TOOL_DESC[name], EVAL_DESC_CHARS)}")
+    if lines:
+        parts.append("[What these tools actually do]\n" + "\n".join(lines))
+
+    # 메시지 로그 꼬리에서 도구 결과만 최신순으로 모은 뒤, 읽기 좋게 시간순으로 되돌린다.
+    obs = []
+    for m in reversed(wm.messages):
+        if isinstance(m, ToolMessage):
+            obs.append(_clip(m.content, EVAL_OBS_CHARS))
+            if len(obs) >= EVAL_OBS_COUNT:
+                break
+    if obs:
+        parts.append("[Most recent observations (newest last)]\n"
+                     + "\n".join(f"- {o}" for o in reversed(obs)))
+
+    return "\n\n".join(parts)
+
+
 def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
-                         dose: float, rlog=None) -> tuple[dict, dict]:
+                         dose: float, rlog=None, stats: dict | None = None) -> tuple[dict, dict]:
     """Evaluate + Select — 실행(commit) 후보가 여럿이면 점수화 후 argmax, 하나면 그대로.
 
     여기 들어오는 candidates 는 grounding/learning 뿐이다 — retrieval 은 planning 단계에서
     이미 처리되어 이 지점에 오지 않는다.
 
     후보 1개면 LLM 호출 없이 통과시킨다(논문 §4.6: 단순 상황은 평가 생략). 여럿이면 plain
-    LLM 으로 유용성·안전(dose/광손상)·근거성을 0~1 점수화한다. 파싱 실패 시 첫 후보로
-    폴백해 사이클이 멈추지 않게 한다.
+    LLM 으로 유용성·안전(dose/광손상)·근거성을 0~1 점수화한다. 실패하면 첫 후보로 폴백해
+    사이클이 멈추지 않게 하고, 폴백했다는 사실은 stats 에 남긴다.
 
-    Returns (선택된 tool_call, {"scores": [...], "reason": str}) — 두 번째는 UI/로그용.
+    Parameters
+    ----------
+    stats : _eval_stats() 카운터. 없으면 집계만 생략하고 동작은 같다.
+
+    Returns
+    -------
+    (선택된 tool_call, meta)
+        meta = {"scores": [...], "reason": str, "mode": str}
+        mode ∈ {"skipped_single", "scored", "parse_failed", "llm_error"} — 어느 경로로
+        골랐는지다. 폴백 셋이 전부 같은 후보를 고르므로, 이 필드가 없으면 로그만 보고는
+        평가가 돈 것과 안 돈 것을 구분할 수 없다.
     """
     rlog = rlog or reason_log.NULL
+
+    def _bump(key: str) -> None:
+        if stats is not None:
+            stats[key] = stats.get(key, 0) + 1
+
     if len(candidates) == 1:
+        _bump("skipped_single")
         rlog.phase("evaluate", "1 candidate - evaluation skipped (paper 4.6: simple case)",
                    _label(candidates[0]))
-        return candidates[0], {"scores": [1.0], "reason": "single execution candidate - evaluation skipped"}
+        return candidates[0], {"scores": [1.0], "mode": "skipped_single",
+                               "reason": "single execution candidate - evaluation skipped"}
+
+    # 후보가 지나치게 많으면 앞에서 자른다 — 평가 입력이 후보 수에 비례해 커지는 유일한
+    # 자리다. 잘린 후보는 다음 사이클에 다시 제안될 수 있으므로 정보가 사라지지 않는다.
+    dropped = candidates[MAX_EVAL_CANDIDATES:]
+    candidates = candidates[:MAX_EVAL_CANDIDATES]
+    if dropped:
+        rlog.phase("evaluate", f"{len(dropped)} candidate(s) beyond the scoring cap "
+                               f"({MAX_EVAL_CANDIDATES}) dropped",
+                   " / ".join(_label(c) for c in dropped))
 
     listing = "\n".join(f"{i}. {_label(c)}" for i, c in enumerate(candidates))
+    evidence = _eval_evidence(wm, candidates)
     prompt = (
         "You are the 'execution-action evaluator' of a Raman experiment agent. Looking at the working memory "
         "and execution candidates below, score how valuable each candidate is to execute right now from 0.0 to 1.0. "
         "Consider usefulness (progress toward the goal), safety (photodamage/dose), and groundedness "
         "(consistency with working memory/memory).\n\n"
         f"{wm.render()}\n\n"
-        f"Current cumulative dose {dose:.1f}/{runtime.MAX_DOSE_MJ_PER_TURN} mJ. For laser irradiation "
+        + (evidence + "\n\n" if evidence else "")
+        + f"Current cumulative dose {dose:.1f}/{runtime.MAX_DOSE_MJ_PER_TURN} mJ. For laser irradiation "
         "(acquire_spectrum), consider this budget together with photodamage (irreversible).\n\n"
         f"[Execution candidates]\n{listing}\n\n"
+        "Exactly one candidate will be executed and the rest are discarded, so judge them as alternatives, "
+        "not as steps of a plan. The tool descriptions above are the actual contract of this instrument - "
+        "when they state a precondition or a limit, treat it as fact rather than guessing from convention.\n\n"
         "Output only the following JSON (no explanation): "
         '{"scores": [number, ...], "reason": "one sentence on why the highest candidate was chosen"}'
     )
     rlog.phase("evaluate",
-               f"Scoring {len(candidates)} candidates (cumulative dose {dose:.1f} mJ considered)",
+               f"Scoring {len(candidates)} candidates (cumulative dose {dose:.1f} mJ considered, "
+               f"evidence {len(evidence)} chars)",
                listing)
 
-    scores, reason = None, ""
+    scores, reason, mode = None, "", "scored"
     try:
         resp = rlog.invoke([HumanMessage(content=prompt)], llm=llm_plain,
                            stage="CoALA evaluate (evaluator call without tools)")
@@ -301,17 +431,29 @@ def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
             data = json.loads(m.group(0))
             scores = [float(x) for x in data.get("scores", [])][:len(candidates)]
             reason = str(data.get("reason", ""))
-    except Exception:
-        scores = None
+    except Exception as e:
+        # LLM 자체가 죽은 것과 응답이 이상한 것을 가른다 — 전자는 평가가 아예 없었다는
+        # 뜻이라, 같은 폴백이어도 실험 해석이 달라진다.
+        scores, mode = None, "llm_error"
+        rlog.phase("evaluate", f"evaluator LLM call failed ({type(e).__name__}) "
+                               f"-> falling back to the first candidate")
 
     if not scores or len(scores) != len(candidates):
-        rlog.phase("evaluate", "Score JSON parse failed -> falling back to the first candidate")
-        return candidates[0], {"scores": [], "reason": "evaluation parse failed - first candidate chosen"}
+        if mode != "llm_error":
+            mode = "parse_failed"
+            rlog.phase("evaluate", "Score JSON parse failed -> falling back to the first candidate")
+        _bump(mode)
+        return candidates[0], {"scores": [], "mode": mode,
+                               "reason": f"evaluation {mode} - first candidate chosen"}
 
     best = max(range(len(candidates)), key=lambda i: scores[i])
+    _bump("scored")
+    if best != 0:
+        # 폴백은 언제나 0번을 고른다. 0번이 아닌 것을 골랐을 때만 평가가 결과를 바꿨다.
+        _bump("changed")
     rlog.phase("evaluate", "Scores " + ", ".join(
         f"{_label(c)}={s:.2f}" for c, s in zip(candidates, scores)), reason)
-    return candidates[best], {"scores": scores, "reason": reason}
+    return candidates[best], {"scores": scores, "reason": reason, "mode": "scored"}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -462,7 +604,11 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
             return
 
         ctx = {"dispatch": runtime.get_tool_dispatch(), "dose": 0.0, "session_id": session_id,
-               "tool_call_order": [], "learned": False, "goal": user_message.strip()}
+               "tool_call_order": [], "learned": False, "goal": user_message.strip(),
+               # evaluate 가 실제로 돌았는지의 집계. ctx 에 두는 이유는 턴이 어디서 끝나든
+               # (finish/stuck/error/사이클 소진) 같은 자리에 남아 로그·벤치가 읽을 수
+               # 있어야 하기 때문이다.
+               "eval_stats": _eval_stats()}
         wm = WorkingMemory(goal=user_message.strip(),
                            messages=list(history) + [HumanMessage(content=user_message)])
         propose_budget = [MAX_AGENT_STEPS]   # 턴 전체 propose 총량 가드(가변 공유)
@@ -506,7 +652,8 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
                        "candidates": labels}
             try:
                 chosen, meta = _evaluate_and_select(llm_plain, wm, commit_candidates,
-                                                    ctx["dose"], rlog=rlog)
+                                                    ctx["dose"], rlog=rlog,
+                                                    stats=ctx["eval_stats"])
             except Exception as e:
                 detail = runtime.llm_error_detail(e, "LLM call (evaluate)")
                 rlog.failed(detail)
@@ -564,3 +711,123 @@ def run_experiment(user_message: str, session_id: str = "") -> dict:
         lambda history, sid: run_stream(_get_llm_tools(), _get_llm_plain(),
                                         history, user_message, session_id=sid),
         user_message, session_id)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 자체 점검:  python -m backend.agents.architectures.single_agent_CoALA
+#
+# 가상 에이전트로 사이클 전체를 돈다 — Ollama 도 장비도 없이.
+#   가짜 LLM      대본대로 tool_calls / 점수 JSON 을 돌려준다
+#   가짜 디스패치 하드웨어 도구 이름을 받아 그럴듯한 결과 dict 를 돌려준다
+# 검사 대상은 '판단의 질'이 아니라 **배선**이다: 후보가 여럿일 때 평가가 실제로 도는가,
+# 평가 프롬프트에 근거가 실리는가, 폴백 셋이 구분되어 집계되는가, 사이클당 하나만
+# 실행되는가. 판단의 질은 실기 로그로만 볼 수 있다.
+# ══════════════════════════════════════════════════════════════════════════════
+if __name__ == "__main__":
+    class _FakeLLM:
+        """대본을 순서대로 돌려주는 LLM 대역.
+
+        propose 용은 tool_calls 를, evaluate 용은 텍스트를 낸다. 받은 프롬프트를 전부
+        모아 두어(seen) 무엇이 실렸는지 사후에 검사한다 — 이 대역의 진짜 목적이다.
+        """
+
+        def __init__(self, script: list):
+            self.script, self.seen, self.calls = list(script), [], 0
+
+        def invoke(self, messages, **kw):
+            self.calls += 1
+            self.seen.append("\n".join(getattr(m, "content", "") or "" for m in messages))
+            item = self.script.pop(0) if self.script else ""
+            if isinstance(item, Exception):
+                raise item
+            if isinstance(item, list):                     # tool_calls 대본
+                return AIMessage(content="", tool_calls=[
+                    {"name": n, "args": a, "id": f"call_{self.calls}_{i}"}
+                    for i, (n, a) in enumerate(item)])
+            return AIMessage(content=str(item))            # 텍스트(최종 보고서 / 점수 JSON)
+
+    # 하드웨어 도구 이름만 쓴다 — FILE_DISPATCH·RUNTIME_DISPATCH 는 가로채기가 먼저라
+    # 가짜 디스패치까지 오지 않는다(runtime._dispatch 의 순서).
+    _fake_dispatch = {
+        "start_camera_stream": lambda a: {"ok": True, "already_streaming": False},
+        "acquire_spectrum": lambda a: {"ok": True, "max_intensity": 1294.0,
+                                       "laser_power_pct": a.get("power"), "length": 1024},
+        "move_stage": lambda a: {"ok": True, "position": {"x": a.get("x"), "y": a.get("y")}},
+    }
+    runtime.get_tool_dispatch = lambda: _fake_dispatch        # noqa: E731
+    run_store.begin_session("selfcheck-coala", ARCH, isolated=True)
+
+    def _drive(propose_script, eval_script):
+        """가상 에이전트 한 턴. (이벤트들, ctx, 평가LLM) 을 돌려준다."""
+        plan_llm, eval_llm = _FakeLLM(propose_script), _FakeLLM(eval_script)
+        events = list(run_stream(plan_llm, eval_llm, [], "measure this sample",
+                                 session_id="selfcheck-coala"))
+        ctx = next(e["ctx"] for e in events if e["type"] == "final")
+        return events, ctx, eval_llm
+
+    # ── 1) 후보 2개 → 평가가 실제로 돌고, 점수가 선택을 바꾼다 ────────────────
+    # 점수 [0.2, 0.9] 는 1번을 가리킨다. 폴백은 언제나 0번이므로, 1번이 실행됐다면
+    # 그것만으로 '평가가 결과에 개입했다'가 증명된다.
+    events, ctx, ev_llm = _drive(
+        [[("acquire_spectrum", {"power": 50}), ("acquire_spectrum", {"power": 1})],
+         "done."],
+        ['{"scores": [0.2, 0.9], "reason": "start low to avoid photodamage"}'])
+    st = ctx["eval_stats"]
+    assert st["scored"] == 1 and st["changed"] == 1, st
+    assert ctx["tool_call_order"] == ["acquire_spectrum"], ctx["tool_call_order"]
+    tool_ev = [e for e in events if e["type"] == "tool"]
+    assert tool_ev[0]["args"]["power"] == 1, "평가가 고른 후보가 실행되지 않았다"
+
+    # 평가 프롬프트에 근거가 실렸는가 — 이것이 a/b 수정의 핵심이다.
+    prompt = ev_llm.seen[0]
+    assert "[What these tools actually do]" in prompt
+    assert "irradiates" in prompt or "laser" in prompt.lower(), "도구 설명이 안 실렸다"
+    assert "alternatives" in prompt, "후보를 대안으로 보라는 지시가 빠졌다"
+    # 근거는 상한 안에 있어야 한다(입력이 후보 수에 비례해 터지지 않게).
+    assert len(prompt) < 6000, f"평가 프롬프트가 너무 크다: {len(prompt)}자"
+
+    # ── 2) 후보 1개 → LLM 호출 없이 통과(논문 §4.6) ──────────────────────────
+    events, ctx, ev_llm = _drive([[("start_camera_stream", {})], "done."], [])
+    assert ctx["eval_stats"] == {"scored": 0, "skipped_single": 1, "parse_failed": 0,
+                                 "llm_error": 0, "changed": 0}, ctx["eval_stats"]
+    assert ev_llm.calls == 0, "후보 1개인데 평가 LLM 을 불렀다"
+
+    # ── 3) 점수 JSON 이 깨지면 첫 후보로 폴백하고, 그 사실이 남는다 ──────────
+    events, ctx, _ = _drive(
+        [[("acquire_spectrum", {"power": 50}), ("acquire_spectrum", {"power": 1})], "done."],
+        ["I think the second one is better, honestly."])
+    assert ctx["eval_stats"]["parse_failed"] == 1, ctx["eval_stats"]
+    assert [e for e in events if e["type"] == "tool"][0]["args"]["power"] == 50
+
+    # ── 4) 평가 LLM 이 죽어도 턴은 살고, 파싱 실패와 구분된다 ────────────────
+    events, ctx, _ = _drive(
+        [[("acquire_spectrum", {"power": 50}), ("acquire_spectrum", {"power": 1})], "done."],
+        [RuntimeError("ollama down")])
+    assert ctx["eval_stats"] == {"scored": 0, "skipped_single": 0, "parse_failed": 0,
+                                 "llm_error": 1, "changed": 0}, ctx["eval_stats"]
+    assert next(e for e in events if e["type"] == "final")["text"] == "done."
+
+    # ── 5) 후보가 상한을 넘으면 앞에서 자른다(평가 입력이 터지지 않게) ────────
+    many = [("move_stage", {"x": i, "y": 0}) for i in range(7)]
+    events, ctx, ev_llm = _drive(
+        [many, "done."], ['{"scores": [0.1, 0.2, 0.3, 0.4], "reason": "last one"}'])
+    assert ctx["eval_stats"]["scored"] == 1, ctx["eval_stats"]
+    assert ev_llm.seen[0].count("move_stage(x=") == MAX_EVAL_CANDIDATES, "상한이 안 걸렸다"
+    assert [e for e in events if e["type"] == "tool"][0]["args"]["x"] == 3
+
+    # ── 6) 사이클당 실행은 언제나 하나 — 나머지 후보는 버려진다 ──────────────
+    # (레이저 비가역성의 근거가 되는 불변식이라 여기서 못 박는다.)
+    events, ctx, _ = _drive(
+        [[("acquire_spectrum", {"power": 1}), ("acquire_spectrum", {"power": 2})],
+         [("acquire_spectrum", {"power": 3})],
+         "done."],
+        ['{"scores": [0.9, 0.1], "reason": "a"}'])
+    assert ctx["tool_call_order"] == ["acquire_spectrum", "acquire_spectrum"], ctx["tool_call_order"]
+
+    # ── 7) 프롬프트가 '대안을 내라'고 말하는가 — d1 이 살아 있는지 ────────────
+    assert "ALTERNATIVES" in SYSTEM_PROMPT, "CoALA 프롬프트에 대안 제안 지시가 없다"
+    assert "Do NOT propose a sequence" in SYSTEM_PROMPT
+
+    print(f"통과: 평가 개입(선택 변경) · 후보1 생략 · 폴백 3종 구분(parse/llm) · "
+          f"후보 상한 {MAX_EVAL_CANDIDATES} · 사이클당 1회 실행 · 근거 주입 "
+          f"({len(prompt)}자 프롬프트)")

@@ -93,9 +93,15 @@ Your actions are of two kinds, and their nature is completely different.
     recording tools ({recording_tools}).
     - These actually change the world or long-term memory. In particular, acquire_spectrum irradiates the
       sample with the laser, and photodamage is irreversible.
-    - Always execute 'only one at a time'. When execution is needed, choose the single most valuable
-      execution action in the current situation. After seeing its result (observation), decide the next
+    - Exactly ONE of them is executed per cycle. After seeing its result (observation), decide the next
       execution in the following cycle.
+    - When there is a genuine choice about what to do next, propose 2-3 execution actions as ALTERNATIVES
+      in the same reply and they will be scored against each other; the best one is executed and the rest
+      are discarded. Alternatives means different ways to proceed from the SAME current state - for example
+      "acquire at 1% first" vs "acquire at 10% first", or "autofocus now" vs "measure now".
+    - Do NOT propose a sequence of steps that depend on each other (move, then acquire, then save). Only the
+      first would survive and the rest would be thrown away, wasting the cycle. If the next step is already
+      decided, propose that one action alone - a single candidate is executed without scoring.
 
   · Principle: finish the necessary planning actions (information gathering) 'before' choosing an execution
     action. The laser should only be fired after enough evidence is gathered.
@@ -106,7 +112,7 @@ Your actions are of two kinds, and their nature is completely different.
 def coala(episodic: bool = True) -> dict:
     """CoALA 프로필. episodic=False 면 에피소딕 메모리를 '언급조차 하지 않는' 프롬프트가 된다.
 
-    RAMAN_EPISODIC_MEMORY=0 ablation 에서 쓴다 — 도구를 바인딩에서 빼는 것만으로는
+    llm_config.COALA_EPISODIC_MEMORY=False ablation 에서 쓴다 — 도구를 바인딩에서 빼는 것만으로는
     부족하고(모델이 없는 도구를 호출하려 사이클을 태운다) 지시문도 함께 빠져야 한다.
     """
     planning_tools = ("search_knowledge_base, recall_experiences, recall_insights,\n"
