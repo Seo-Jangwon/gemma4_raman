@@ -138,7 +138,11 @@ def run_stream(llm, history: list, user_message: str) -> Iterator[dict]:
                 yield {"type": "final", "text": final_text, "ctx": ctx, "messages": messages}
                 return
 
-            messages.append(ai_msg)   # tool_calls 를 담은 assistant 메시지를 그대로 추가
+            # messages.append(ai_msg)   # tool_calls 를 담은 assistant 메시지를 그대로 추가
+            
+            ## 	AILA↔CoALA 비교의 독립변수가 오케스트레이션 하나여야 함. 양쪽 다 think를 남기지 말자. 
+            messages.append(AIMessage(content=runtime.text_of(ai_msg), tool_calls=ai_msg.tool_calls))
+
             rlog.reasoning(step + 1,
                            f"Decided to run {len(ai_msg.tool_calls)} tool(s) -> "
                            + ", ".join(str(tc["name"]) for tc in ai_msg.tool_calls))

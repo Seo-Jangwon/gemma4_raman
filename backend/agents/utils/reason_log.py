@@ -271,7 +271,12 @@ class _Null:
     path = None
     enabled = False
 
-    def invoke(self, messages, llm=None, stage="", step=0, note=""):
+    def invoke(self, messages, llm=None, stage="", step=0, note="", reasoning=None):
+        # 로깅이 꺼져 있어도 think 를 끄라는 요청은 그대로 넘긴다 — 그건 로그 설정이
+        # 아니라 호출 자체의 성질이다(출력 상한 안에 결론이 들어가느냐가 걸려 있다).
+        # 켜는 쪽은 넘기지 않는다: 여기는 think 지원 여부를 판정하지 않는 경로다.
+        if reasoning is False:
+            return llm.invoke(messages, reasoning=False)
         return llm.invoke(messages)
 
     def __getattr__(self, _name):
@@ -280,6 +285,24 @@ class _Null:
 
 # 로거를 못 받은 헬퍼가 `rlog = rlog or reason_log.NULL` 로 쓰는 공용 무동작 대역.
 NULL = _Null()
+
+
+def _eval_summary(ctx: Optional[dict]) -> str:
+    """CoALA 의 evaluate 집계를 FINAL/ERROR 줄에 붙일 한 조각으로.
+
+    평가의 실패·생략 경로가 넷인데 전부 조용히 첫 후보로 폴백한다. 이 한 조각이 없으면
+    '평가가 돌긴 했나'를 로그 전체를 훑어야 알 수 있다. AILA 는 이 키가 없어 빈 문자열이
+    되고, 그 빈 문자열 자체가 '평가 단계가 없는 아키텍처'라는 뜻이다.
+    """
+    ev = (ctx or {}).get("eval_stats")
+    if not ev:
+        return ""
+    return (f" · evaluate scored {ev.get('scored', 0)}"
+            f"(changed {ev.get('changed', 0)}, retried {ev.get('retried', 0)})"
+            f" · skipped {ev.get('skipped_single', 0)}"
+            f" · fallback truncated {ev.get('truncated', 0)}"
+            f"/parse {ev.get('parse_failed', 0)}"
+            f"/llm {ev.get('llm_error', 0)}")
 
 
 class ReasonLog:
@@ -342,10 +365,26 @@ class ReasonLog:
         self.rec("QUESTION", "", _clip(question, 4000))
 
     # ── LLM 호출 ─────────────────────────────────────────────────────────────
-    def invoke(self, messages, llm=None, stage: str = "LLM", step: int = 0, note: str = ""):
+    def invoke(self, messages, llm=None, stage: str = "LLM", step: int = 0, note: str = "",
+               reasoning: Optional[bool] = None):
         """llm.invoke 를 감싸 프롬프트·응답·토큰통계를 남기고 AIMessage 를 그대로 돌려준다.
 
-        think 가 켜져 있으면 reasoning=True 로 호출한다(생각 토큰을 따로 받기 위해).
+        Parameters
+        ----------
+        reasoning : None 이면 모델이 think 를 지원하는지 보고 알아서 정한다(기본). ``False``
+            를 주면 이 호출에만 think 를 끈다 — 호출자가 '숙고가 필요 없다'를 아는 경우다.
+
+            [왜 호출별로 끄는 길이 필요한가]
+            think 토큰도 출력 상한(num_predict)을 먹는다. CoALA 의 evaluate 는 답이 점수
+            JSON 한 줄인데 thinking 이 상한을 다 써서 결론이 잘리는 일이 실제로 있었다
+            (2026-08-13: `{"scores": [1.0,` 에서 절단, 2회). 그때 같은 호출을 think 없이
+            한 번 더 하면 결론만 받아 낼 수 있다 — 숙고는 1차에서 이미 끝났고 로그에도
+            남아 있으므로, 잃는 것은 '한 번 더 생각할 기회'뿐이고 얻는 것은 점수 자체다.
+            상한을 올려 재시도하는 방법도 있지만 그러면 thinking 을 처음부터 다시 돌려
+            8~9초가 더 든다.
+
+        Notes
+        -----
         모델이 think 를 지원하지 않으면 Ollama 가 에러를 내므로, 첫 실패에서 think 를
         영구 강등하고 같은 호출을 한 번만 재시도한다 — 실험이 그것 때문에 죽지 않게.
         """
@@ -357,12 +396,24 @@ class ReasonLog:
             self.rec("Gemma <- PROMPT", f"{head} · {len(messages)} msgs",
                      _roster(messages))
 
+        # think 를 켜는 것은 호출자가 못 정한다 — 지원하지 않는 모델에 켜면 Ollama 가
+        # 에러를 낸다. 반대로 끄는 것은 호출자만 안다(숙고가 필요 없는 호출인지).
+        #
+        # 세 경우가 서로 다른 호출이 된다. 특히 아래 두 번째와 세 번째를 뭉치면 안 된다:
+        # 인자를 아예 안 넘기면 ChatOllama 가 self.reasoning(=None, '모델 기본값')을 쓰므로
+        # **끄라고 했는데 모델 기본값이 켜짐이면 그대로 켜진 채 나간다.** 끄려면 False 를
+        # 명시적으로 넘겨야 한다(langchain-ollama 는 이 값을 Ollama 의 think 로 넘긴다).
         think_on, _ = think_capability()
         t0 = time.time()
         try:
-            ai = llm.invoke(messages, reasoning=True) if think_on else llm.invoke(messages)
+            if reasoning is False:
+                ai = llm.invoke(messages, reasoning=False)   # 이 호출만 think OFF
+            elif think_on:
+                ai = llm.invoke(messages, reasoning=True)    # 생각 토큰을 따로 받는다
+            else:
+                ai = llm.invoke(messages)                    # 모델 기본값
         except Exception as e:
-            if think_on and "think" in f"{e}".lower():
+            if think_on and reasoning is not False and "think" in f"{e}".lower():
                 _disable_think(f"{type(e).__name__}: {e}")
                 self.rec("Gemma THINK-OFF",
                          "Ollama rejected think - disabling it for the remaining calls",
@@ -452,19 +503,17 @@ class ReasonLog:
         # CoALA 의 evaluate 집계를 같은 줄에 싣는다. 평가의 실패·생략 경로가 셋인데 전부
         # 조용히 첫 후보로 폴백하므로, 이 한 줄이 없으면 '평가가 돌긴 했나'를 로그 전체를
         # 훑어야 알 수 있다. AILA 는 이 키가 없어 그대로 빠진다.
-        ev = ctx.get("eval_stats")
-        if ev:
-            head += (f" · evaluate scored {ev.get('scored', 0)}"
-                     f"(changed {ev.get('changed', 0)})"
-                     f" · skipped {ev.get('skipped_single', 0)}"
-                     f" · fallback parse {ev.get('parse_failed', 0)}/llm {ev.get('llm_error', 0)}")
+        head += _eval_summary(ctx)
         self.rec("FINAL", head, _clip(text, 8000))
         self.close()
 
-    def failed(self, detail: str) -> None:
+    def failed(self, detail: str, ctx: Optional[dict] = None) -> None:
+        # 실패한 턴에도 평가 집계를 싣는다 — 실패는 대개 '평가가 이상했다'의 결과이므로,
+        # 여기서 빠지면 원인을 가장 알고 싶은 턴에서만 계측이 없다.
         self.rec("ERROR",
                  f"{time.time() - self._t0:.2f}s · LLM {self._llm_calls} calls · "
-                 f"tools {self._tool_calls} calls", _clip(detail, 4000))
+                 f"tools {self._tool_calls} calls" + _eval_summary(ctx),
+                 _clip(detail, 4000))
         self.close()
 
     def close(self) -> None:

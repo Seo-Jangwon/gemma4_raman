@@ -82,7 +82,12 @@ MAX_EVAL_CANDIDATES = 4     # 후보가 더 많아도 앞의 4개만 채점한�
 EVAL_DESC_CHARS = 400       # 후보 도구 설명을 이 길이에서 자른다 — 앞머리에 계약이 있다
 EVAL_OBS_CHARS = 500        # 직전 관측 1건의 최대 길이
 EVAL_OBS_COUNT = 2          # 몇 건까지 실을 것인가
-EVAL_NUM_PREDICT = 512      # 평가 응답 출력 토큰 상한 — 답은 점수 JSON 한 줄이다
+# 평가 응답 출력 토큰 상한. **thinking 토큰이 여기 포함된다** — 답이 JSON 한 줄이라고
+# 상한을 그 크기로 잡으면 안 된다. 512 로 잡았다가 2026-08-13 실행에서 평가 2회가 전부
+# `done=length` 로 잘렸다(thinking 1,971자·2,176자를 쓰고 `{"scores": [1.0,` 에서 절단).
+# 근거를 붙인 뒤 thinking 이 실측 500~550 토큰이므로 그 3배로 잡는다. 근거 없던 시절의
+# 폭주값(2,584 토큰)은 여전히 상한에 걸린다.
+EVAL_NUM_PREDICT = 1536
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -296,8 +301,16 @@ def _eval_stats() -> dict:
 
     changed 는 '평가가 선택을 바꾼 횟수'다. 폴백은 언제나 0번 후보를 고르므로, 0번이
     아닌 것을 골랐을 때만 evaluate 가 결과에 실제로 기여했다고 말할 수 있다.
+
+    [세는 방식 — 결과 4종은 배타적, retried 는 별개]
+      scored / skipped_single / truncated / parse_failed / llm_error 는 평가 1회의 결과라
+      서로 겹치지 않는다. 다 더하면 평가 시도 횟수가 된다.
+      retried 는 결과가 아니라 사건이다 — 잘려서 think 를 끄고 다시 물은 횟수. 재시도가
+      성공하면 결과는 scored 이고 retried 만 올라간다. 그래서 'scored 인데 retried 가
+      같이 오른' 상태가 곧 '상한이 빠듯하지만 결론은 건졌다'는 뜻이 된다.
     """
-    return {"scored": 0, "skipped_single": 0, "parse_failed": 0, "llm_error": 0, "changed": 0}
+    return {"scored": 0, "skipped_single": 0, "parse_failed": 0, "truncated": 0,
+            "llm_error": 0, "changed": 0, "retried": 0}
 
 
 def _clip(text: str, limit: int) -> str:
@@ -373,9 +386,14 @@ def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
     -------
     (선택된 tool_call, meta)
         meta = {"scores": [...], "reason": str, "mode": str}
-        mode ∈ {"skipped_single", "scored", "parse_failed", "llm_error"} — 어느 경로로
-        골랐는지다. 폴백 셋이 전부 같은 후보를 고르므로, 이 필드가 없으면 로그만 보고는
-        평가가 돈 것과 안 돈 것을 구분할 수 없다.
+        mode ∈ {"skipped_single", "scored", "truncated", "parse_failed", "llm_error"} —
+        어느 경로로 골랐는지다. 폴백 넷이 전부 같은 후보를 고르므로, 이 필드가 없으면
+        로그만 보고는 평가가 돈 것과 안 돈 것을 구분할 수 없다.
+
+        truncated 를 parse_failed 와 가르는 이유: 원인과 처방이 다르다. 잘림은
+        EVAL_NUM_PREDICT 를 올리면 되고, 파싱 실패는 모델이 JSON 을 안 냈다는 뜻이라
+        프롬프트 문제다. 뭉쳐 두면 '점수 JSON 파싱 실패' 한 줄만 보고 상한이 원인인 줄
+        모른다 — 실제로 2026-08-13 실행에서 그렇게 놓쳤다.
     """
     rlog = rlog or reason_log.NULL
 
@@ -422,10 +440,45 @@ def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
                f"evidence {len(evidence)} chars)",
                listing)
 
+    def _cut_off(resp) -> bool:
+        """출력 상한에 걸려 잘렸는가. 잘리면 JSON 이 안 닫혀 파싱도 실패하는데, 그때
+        '파싱 실패'로만 적으면 상한이 원인이라는 것이 로그에 안 남는다."""
+        return (getattr(resp, "response_metadata", None) or {}).get("done_reason") == "length"
+
     scores, reason, mode = None, "", "scored"
     try:
-        resp = rlog.invoke([HumanMessage(content=prompt)], llm=llm_plain,
+        msg = [HumanMessage(content=prompt)]
+        resp = rlog.invoke(msg, llm=llm_plain,
                            stage="CoALA evaluate (evaluator call without tools)")
+
+        # ── 잘렸으면 think 를 끄고 한 번만 다시 묻는다 ────────────────────────
+        # think 토큰도 출력 상한을 먹는다. 답이 점수 JSON 한 줄인데 thinking 이 예산을
+        # 다 써서 결론만 잘리는 일이 실제로 있었다(2026-08-13: `{"scores": [1.0,` 에서
+        # 절단, 2회). 그 상태로 폴백하면 평가가 통째로 없던 일이 된다.
+        #
+        # 상한을 올려 재시도하지 않고 think 를 끄는 이유: 숙고는 1차에서 이미 끝났고
+        # 로그에도 남아 있다. 잘린 것은 결론 한 줄뿐이므로, think 없이 다시 물으면
+        # 같은 근거를 보고 결론만 받아 낼 수 있다 — 그리고 1~2초면 끝난다(상한을 올려
+        # 재시도하면 thinking 을 처음부터 다시 돌려 8~9초가 더 든다).
+        #
+        # 2차 점수는 숙고를 안 거쳤으니 1차보다 못하다. 하지만 폴백(무조건 0번 후보)
+        # 에는 판단이 아예 없으므로, 못한 판단이라도 있는 쪽이 낫다.
+        if _cut_off(resp):
+            _bump("retried")     # 재시도했다는 사실은 성공하든 아니든 남긴다 —
+                                 # 성공했더라도 '상한이 빠듯하다'는 신호다.
+            rlog.phase("evaluate",
+                       f"evaluator reply hit the output cap ({EVAL_NUM_PREDICT} tokens) - "
+                       f"thinking ate the budget. Retrying once with thinking OFF.")
+            resp = rlog.invoke(msg, llm=llm_plain, reasoning=False,
+                               stage="CoALA evaluate (retry, thinking OFF)")
+            if _cut_off(resp):
+                # 2차까지 잘렸으면 think 가 아니라 상한 자체가 모자라다 — 처방을 적는다.
+                mode = "truncated"
+                rlog.phase("evaluate",
+                           f"the retry was cut off too -> falling back to the first candidate. "
+                           f"Raise EVAL_NUM_PREDICT (now {EVAL_NUM_PREDICT}); even without "
+                           f"thinking the reply does not fit.")
+
         m = re.search(r"\{.*\}", runtime.text_of(resp), re.DOTALL)
         if m:
             data = json.loads(m.group(0))
@@ -439,7 +492,7 @@ def _evaluate_and_select(llm_plain, wm: WorkingMemory, candidates: list[dict],
                                f"-> falling back to the first candidate")
 
     if not scores or len(scores) != len(candidates):
-        if mode != "llm_error":
+        if mode == "scored":       # 잘림도 LLM 오류도 아닌데 점수가 안 나왔다 = 형식 문제
             mode = "parse_failed"
             rlog.phase("evaluate", "Score JSON parse failed -> falling back to the first candidate")
         _bump(mode)
@@ -626,7 +679,7 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
             kind = outcome.get("kind")
 
             if kind == "error":
-                rlog.failed(outcome.get("detail", "planning failed"))
+                rlog.failed(outcome.get("detail", "planning failed"), ctx)
                 yield {"type": "error", "detail": outcome.get("detail", "planning failed")}
                 return
             if kind == "finish":
@@ -656,7 +709,7 @@ def run_stream(llm_tools, llm_plain, history: list, user_message: str,
                                                     stats=ctx["eval_stats"])
             except Exception as e:
                 detail = runtime.llm_error_detail(e, "LLM call (evaluate)")
-                rlog.failed(detail)
+                rlog.failed(detail, ctx)
                 yield {"type": "error", "detail": detail}
                 return
 
@@ -733,9 +786,11 @@ if __name__ == "__main__":
 
         def __init__(self, script: list):
             self.script, self.seen, self.calls = list(script), [], 0
+            self.reasoning_seen = []          # 호출마다 think 를 켰는지 — 재시도 검사용
 
         def invoke(self, messages, **kw):
             self.calls += 1
+            self.reasoning_seen.append(kw.get("reasoning"))
             self.seen.append("\n".join(getattr(m, "content", "") or "" for m in messages))
             item = self.script.pop(0) if self.script else ""
             if isinstance(item, Exception):
@@ -744,6 +799,9 @@ if __name__ == "__main__":
                 return AIMessage(content="", tool_calls=[
                     {"name": n, "args": a, "id": f"call_{self.calls}_{i}"}
                     for i, (n, a) in enumerate(item)])
+            if isinstance(item, dict):                     # 잘린 응답 대본
+                return AIMessage(content=item["text"],
+                                 response_metadata={"done_reason": item["done_reason"]})
             return AIMessage(content=str(item))            # 텍스트(최종 보고서 / 점수 JSON)
 
     # 하드웨어 도구 이름만 쓴다 — FILE_DISPATCH·RUNTIME_DISPATCH 는 가로채기가 먼저라
@@ -788,8 +846,7 @@ if __name__ == "__main__":
 
     # ── 2) 후보 1개 → LLM 호출 없이 통과(논문 §4.6) ──────────────────────────
     events, ctx, ev_llm = _drive([[("start_camera_stream", {})], "done."], [])
-    assert ctx["eval_stats"] == {"scored": 0, "skipped_single": 1, "parse_failed": 0,
-                                 "llm_error": 0, "changed": 0}, ctx["eval_stats"]
+    assert ctx["eval_stats"] == {**_eval_stats(), "skipped_single": 1}, ctx["eval_stats"]
     assert ev_llm.calls == 0, "후보 1개인데 평가 LLM 을 불렀다"
 
     # ── 3) 점수 JSON 이 깨지면 첫 후보로 폴백하고, 그 사실이 남는다 ──────────
@@ -799,12 +856,36 @@ if __name__ == "__main__":
     assert ctx["eval_stats"]["parse_failed"] == 1, ctx["eval_stats"]
     assert [e for e in events if e["type"] == "tool"][0]["args"]["power"] == 50
 
+    # ── 3-b) 잘리면 think 를 끄고 한 번 더 물어 점수를 건진다 ────────────────
+    # 1차는 상한에 걸려 잘리고, 2차(think OFF)가 성공하는 대본. 폴백으로 끝나면 안 되고
+    # 2차 점수대로 골라야 한다 — 여기서는 [0.2, 0.9] 라 1번(power=1)이 실행돼야 한다.
+    events, ctx, ev_llm = _drive(
+        [[("acquire_spectrum", {"power": 50}), ("acquire_spectrum", {"power": 1})], "done."],
+        [{"text": '```json\n{"scores": [1.0,', "done_reason": "length"},
+         '{"scores": [0.2, 0.9], "reason": "retry succeeded"}'])
+    assert ctx["eval_stats"] == {**_eval_stats(), "scored": 1, "changed": 1, "retried": 1}, \
+        ctx["eval_stats"]
+    assert ev_llm.calls == 2, "재시도가 일어나지 않았다"
+    assert ev_llm.reasoning_seen[1] is False, "재시도인데 thinking 을 안 껐다"
+    assert ev_llm.seen[0] == ev_llm.seen[1], "재시도는 같은 프롬프트여야 한다"
+    assert [e for e in events if e["type"] == "tool"][0]["args"]["power"] == 1
+
+    # ── 3-c) 재시도까지 잘리면 폴백하고, 그때만 truncated 로 센다 ────────────
+    # 원인과 처방이 다르다: 잘림은 EVAL_NUM_PREDICT 를 올리면 되고, 파싱 실패는 모델이
+    # JSON 을 안 낸 것이라 프롬프트 문제다. 실기(2026-08-13)에서 뭉쳐 세다가 상한이
+    # 원인인 것을 못 봤다. thinking 토큰도 상한에 포함된다는 점이 원인이었다.
+    cut = {"text": '```json\n{"scores": [1.0,', "done_reason": "length"}
+    events, ctx, ev_llm = _drive(
+        [[("acquire_spectrum", {"power": 50}), ("acquire_spectrum", {"power": 1})], "done."],
+        [cut, cut])
+    assert ctx["eval_stats"] == {**_eval_stats(), "truncated": 1, "retried": 1}, ctx["eval_stats"]
+    assert [e for e in events if e["type"] == "tool"][0]["args"]["power"] == 50
+
     # ── 4) 평가 LLM 이 죽어도 턴은 살고, 파싱 실패와 구분된다 ────────────────
     events, ctx, _ = _drive(
         [[("acquire_spectrum", {"power": 50}), ("acquire_spectrum", {"power": 1})], "done."],
         [RuntimeError("ollama down")])
-    assert ctx["eval_stats"] == {"scored": 0, "skipped_single": 0, "parse_failed": 0,
-                                 "llm_error": 1, "changed": 0}, ctx["eval_stats"]
+    assert ctx["eval_stats"] == {**_eval_stats(), "llm_error": 1}, ctx["eval_stats"]
     assert next(e for e in events if e["type"] == "final")["text"] == "done."
 
     # ── 5) 후보가 상한을 넘으면 앞에서 자른다(평가 입력이 터지지 않게) ────────
@@ -828,6 +909,7 @@ if __name__ == "__main__":
     assert "ALTERNATIVES" in SYSTEM_PROMPT, "CoALA 프롬프트에 대안 제안 지시가 없다"
     assert "Do NOT propose a sequence" in SYSTEM_PROMPT
 
-    print(f"통과: 평가 개입(선택 변경) · 후보1 생략 · 폴백 3종 구분(parse/llm) · "
-          f"후보 상한 {MAX_EVAL_CANDIDATES} · 사이클당 1회 실행 · 근거 주입 "
-          f"({len(prompt)}자 프롬프트)")
+    print(f"통과: 평가 개입(선택 변경) · 후보1 생략 · 잘림→think OFF 재시도로 점수 회수 · "
+          f"폴백 3종 구분(truncated/parse/llm) · 후보 상한 {MAX_EVAL_CANDIDATES} · "
+          f"사이클당 1회 실행 · 근거 주입 ({len(prompt)}자 프롬프트, "
+          f"출력 상한 {EVAL_NUM_PREDICT} 토큰)")
