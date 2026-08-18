@@ -50,7 +50,6 @@ if str(_PROJECT_ROOT) not in sys.path:
 from backend.tools.hw_tools.hao.USE_stage_test       import TangoController   # noqa: E402
 from backend.tools.hw_tools.hao.USE_laser_with_power import LaserController    # noqa: E402
 from backend.tools.hw_tools.hw_tools           import hw_core             # noqa: E402
-from backend.tools.hw_tools.SDKs.andor_codes   import AndorCCD            # noqa: E402
 from backend.tools.hw_tools.config import (                                        # noqa: E402
     STAGE_MAX_X, STAGE_MAX_Y, STAGE_CENTER_X, STAGE_CENTER_Y,
     LASER_NM, FOCAL_LENGTH_MM, RAMAN_CENTER_CM1,
@@ -59,6 +58,19 @@ from backend.tools.hw_tools.config import (                                     
 # StreamingTUCam 은 _init_camera() 안에서 lazy import
 # → TUCam.py 가 import 시점에 TUCam.dll 을 바로 로드하기 때문에
 #   DLL 이 없는 환경에서 모듈 import 자체가 실패하는 것을 방지
+
+# AndorCCD·RamanCalibrator 는 없을 수 있다 — 둘 다 없으면 None 으로 두고 _init_ccd 가 거절한다.
+#
+# [왜 AndorCCD 도 tolerant 여야 하는가 — 2026-08-15]
+# 예전에는 최상단에서 하드 import 했다. andor_codes/__init__ 은 pyAndorSDK2 를 못 찾으면
+# 'andor_camera library load error' 만 찍고 AndorCCD 를 내보내지 않으므로, Andor SDK 가
+# 없는 PC 에서는 이 모듈 **전체**가 ImportError 로 죽었다. 그러면 스테이지·레이저·카메라는
+# 멀쩡한데도 매니저를 아예 못 만든다 — 가상 하드웨어로 도구 계층을 돌리려는 경로가 CCD
+# 하나 때문에 통째로 막힌다. 바로 아래 RamanCalibrator 가 이미 이 패턴이었다.
+try:
+    from backend.tools.hw_tools.SDKs.andor_codes import AndorCCD                        # noqa: E402
+except ImportError:
+    AndorCCD = None
 
 try:
     from backend.tools.hw_tools.SDKs.andor_codes import RamanCalibrator                 # noqa: E402
@@ -74,7 +86,7 @@ LASER_PORT       = "COM4"
 # 실패하므로, 정본을 여기 두면 하드웨어 없는 환경의 모든 호출부가 각자 폴백 사본을
 # 갖게 된다(실제로 그랬다: 에이전트 4개 + reason_log 에 같은 문자열이 다섯 벌).
 # 기존 `from hardware_manager import OLLAMA_MODEL` 호출부를 깨지 않으려고 이름은 유지한다.
-from backend.llm_config import OLLAMA_HOST, OLLAMA_MODEL   # noqa: E402,F401
+from backend.llm_config import OLLAMA_HOST, OLLAMA_MODEL, VIRTUAL_HW   # noqa: E402,F401
 
 # CCD 온도 목표 (°C)
 CCD_COOL_TARGET = -40   # 냉각 목표 — 안정화될 때까지 블로킹
@@ -288,7 +300,13 @@ class HardwareManager:
           모두 wait=True (블로킹).
         """
         print("\n[STAGE] 스테이지 연결 중...")
-        tango = TangoController(STAGE_DLL_PATH)
+        if VIRTUAL_HW:
+            # 대역은 load_dll/create_session/connect/set_velocity/move_absolute 를 모두 갖고
+            # 있으므로 아래 초기화 절차가 실물과 똑같이 실행된다. 바뀌는 것은 이 한 줄뿐이다.
+            from backend.tools.hw_tools.hao_vertual.virtual_stage import VirtualStage
+            tango = VirtualStage(STAGE_DLL_PATH)
+        else:
+            tango = TangoController(STAGE_DLL_PATH)
 
         if not tango.load_dll():
             raise RuntimeError("스테이지 DLL 로드 실패")
@@ -349,7 +367,17 @@ class HardwareManager:
 
         # ── CCD 초기화 ──
         # initialize_to_defaults=False: 냉각/셔터/gain 등을 여기서 직접 제어
-        ccd = AndorCCD(initialize_to_defaults=False)
+        if VIRTUAL_HW:
+            # 대역도 아래 파라미터 설정·냉각 대기 절차를 전부 통과한다. mgr/scene 을 받는
+            # 이유는 '지금 어느 자리에 레이저가 놓여 있는가'를 신호 합성이 봐야 하기 때문이다.
+            from backend.tools.hw_tools.hao_vertual.scene import get_scene
+            from backend.tools.hw_tools.hao_vertual.virtual_ccd import VirtualCCD
+            ccd = VirtualCCD(initialize_to_defaults=False, mgr=self, scene=get_scene())
+        elif AndorCCD is None:
+            raise RuntimeError("Andor SDK(pyAndorSDK2)를 찾지 못해 CCD 를 초기화할 수 없습니다. "
+                               "장비 없이 돌리려면 RAMAN_VIRTUAL_HW=1 로 띄우세요.")
+        else:
+            ccd = AndorCCD(initialize_to_defaults=False)
         ccd._calibrator = calibrator
 
         # ── 취득 전 하드웨어 파라미터 명시 설정 ──
@@ -420,9 +448,16 @@ class HardwareManager:
     @_guarded("camera")
     def _init_camera(self):
         """TUCam 카메라 연결 + 스트리밍 시작."""
-        from backend.tools.hw_tools.hao.USE_camera_stream import StreamingTUCam  # lazy: DLL 로드
         print("\n[CAM]   TUCam 카메라 연결 중...")
-        cam = StreamingTUCam(exposure_ms=50.0)
+        if VIRTUAL_HW:
+            # 가상 카메라는 스테이지·레이저를 봐야 하므로 매니저 자신을 넘긴다. 생성 시점의
+            # 핸들이 아니라 '지금의 핸들'을 읽게 하려는 것이다 — startup 순서상 여기서는
+            # self.laser 가 아직 None 이고, 재연결로도 교체된다(virtual_camera 머리말).
+            from backend.tools.hw_tools.hao_vertual.virtual_camera import VirtualCamera
+            cam = VirtualCamera(self, exposure_ms=50.0)
+        else:
+            from backend.tools.hw_tools.hao.USE_camera_stream import StreamingTUCam  # lazy: DLL 로드
+            cam = StreamingTUCam(exposure_ms=50.0)
         cam.start_stream()
         print("[CAM]   연결 완료")
         self.camera = cam
@@ -431,7 +466,11 @@ class HardwareManager:
     def _init_laser(self):
         """레이저 컨트롤러 연결."""
         print(f"\n[LASER] 레이저 연결 중... (포트: {LASER_PORT})")
-        laser = LaserController(port=LASER_PORT)
+        if VIRTUAL_HW:
+            from backend.tools.hw_tools.hao_vertual.virtual_laser import VirtualLaser
+            laser = VirtualLaser(port=LASER_PORT)
+        else:
+            laser = LaserController(port=LASER_PORT)
         if not (laser.ser and laser.ser.is_open):
             raise RuntimeError(f"레이저 포트 연결 실패 ({LASER_PORT})")
         print("[LASER] 연결 완료")

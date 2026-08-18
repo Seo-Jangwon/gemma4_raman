@@ -136,11 +136,17 @@ def begin_session(session_id: str, agent: str = "", isolated: bool = False) -> d
         d.mkdir(parents=True, exist_ok=True)
         mpath = d / "manifest.json"
         if not mpath.exists():
+            # virtual/scene 을 남기는 이유: 가상 장비로 돈 측정이 data/results 에 실측과
+            # **똑같은 형식**으로 쌓인다. 파일만 봐서는 구분할 방법이 없고, 섞인 뒤에는
+            # 되돌릴 수도 없다. 채점·비교 전에 걸러낼 수 있는 유일한 표식이다.
+            from backend.llm_config import VIRTUAL_HW, VIRTUAL_SCENE
             _write_manifest({
                 "session_id": _current.session_id,
                 "agent": _current.agent,
                 "label": label,
                 "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "virtual": VIRTUAL_HW,
+                "scene": VIRTUAL_SCENE if VIRTUAL_HW else None,
                 "artifacts": [],
             })
     except Exception as e:

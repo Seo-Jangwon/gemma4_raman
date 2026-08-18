@@ -26,6 +26,9 @@ from typing import Callable
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+#: 가상/실물 판단의 단일 출처. 이 라우터가 매니저의 _init_camera/_init_laser 를 우회해
+#: 직접 생성하는 자리가 둘 있어서, 그 두 곳도 같은 값을 봐야 한다.
+from backend.llm_config import VIRTUAL_HW
 from backend.tools.hw_tools.hw_tools.hw_core import (
     # 장비 조작 직렬화 가드. 락 순서는 항상 instrument_guard -> component_lock 이다
     # (hw_core.instrument_guard docstring 참고) — 뒤집으면 reconnect_hardware 와 교착한다.
@@ -87,8 +90,14 @@ async def camera_connect(body: CameraConnectRequest, state: StateDep):
         with instrument_guard("camera connect"), hw.component_lock("camera"):
             if hw.camera is not None:
                 return "카메라 이미 연결됨"
-            from backend.tools.hw_tools.hao.USE_camera_stream import StreamingTUCam
-            cam = StreamingTUCam(exposure_ms=body.exposure_ms)
+            # 가상/실물 분기는 매니저의 _init_camera 와 같은 판단이다. 여기가 그것을 우회하는
+            # 이유(노출시간을 인자로 받으려고)는 위 주석 참고 — 판단 자체는 갈라지면 안 된다.
+            if VIRTUAL_HW:
+                from backend.tools.hw_tools.hao_vertual.virtual_camera import VirtualCamera
+                cam = VirtualCamera(hw, exposure_ms=body.exposure_ms)
+            else:
+                from backend.tools.hw_tools.hao.USE_camera_stream import StreamingTUCam
+                cam = StreamingTUCam(exposure_ms=body.exposure_ms)
             cam.start_stream()
             hw.camera = cam
             rt_sync_handles(hw)
@@ -134,8 +143,12 @@ async def laser_connect(body: LaserConnectRequest, state: StateDep):
         with instrument_guard("laser connect"), hw.component_lock("laser"):
             if hw.laser is not None:
                 return "레이저 이미 연결됨"
-            from backend.tools.hw_tools.hao.USE_laser_with_power import LaserController
-            laser = LaserController(port=body.port)
+            if VIRTUAL_HW:
+                from backend.tools.hw_tools.hao_vertual.virtual_laser import VirtualLaser
+                laser = VirtualLaser(port=body.port)
+            else:
+                from backend.tools.hw_tools.hao.USE_laser_with_power import LaserController
+                laser = LaserController(port=body.port)
             if not (laser.ser and laser.ser.is_open):
                 raise RuntimeError(f"레이저 포트 연결 실패 ({body.port})")
             hw.laser = laser

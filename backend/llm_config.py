@@ -91,12 +91,13 @@ def _flag(*names: str, default: str) -> bool:
 # ── 모델 ──────────────────────────────────────────────────────────────────────
 # 두 에이전트(AILA/CoALA)와 KB 캡션이 전부 이 하나를 쓴다.
 # 비교 실험의 독립변수는 오케스트레이션 하나여야 하므로, 여기가 갈라지면 안 된다.
-# gemma4:31b, gemma4:12b
+# RAMAN_OLLAMA_MODEL — Ollama 모델 태그. 예: gemma4:31b · gemma4:12b 등등
 OLLAMA_MODEL = _env("RAMAN_OLLAMA_MODEL", default="gemma4:31b")
 
 # ── 호스트 ────────────────────────────────────────────────────────────────────
 # OLLAMA_HOST 도 함께 보는 이유: ollama 공식 클라이언트가 쓰는 표준 변수명이라
 # 이미 그걸로 띄워 둔 환경이 있을 수 있다. RAMAN_ 접두사 쪽이 우선한다.
+# RAMAN_OLLAMA_HOST > OLLAMA_HOST — Ollama 서버 URL. 예: http://192.168.1.15:11434 · http://localhost:11434
 OLLAMA_HOST = _env("RAMAN_OLLAMA_HOST", "OLLAMA_HOST",
                    default="http://192.168.1.15:11434")
 
@@ -108,6 +109,7 @@ OLLAMA_HOST = _env("RAMAN_OLLAMA_HOST", "OLLAMA_HOST",
 #
 # ★ 모델 크기를 바꿀 때 같이 봐야 하는 값이다. 31b → 12b 로 내리면 VRAM 이 남으므로
 #   그대로 둬도 되지만, 반대로 VRAM 이 모자라 OOM 이 나면 이 값을 낮춘다.
+# RAMAN_NUM_CTX — 컨텍스트 윈도우 토큰 수(정수). 예: 100000 · 32768 등등
 NUM_CTX = int(_env("RAMAN_NUM_CTX", default="100000"))
 
 # ── LLM HTTP 호출 상한(초) ────────────────────────────────────────────────────
@@ -116,6 +118,7 @@ NUM_CTX = int(_env("RAMAN_NUM_CTX", default="100000"))
 # 돌아온다. 스텝 카운터(_MAX_AGENT_STEPS)는 반복 횟수 가드일 뿐 벽시계 가드가 아니라
 # 이 경우를 전혀 못 막는다. 정상 호출의 최악값(모델 로드 ~60s + 장문 생성)보다 넉넉히
 # 크게 잡아, 멀쩡한 호출은 안 자르면서 무한 정지만 '명확한 에러'로 강등한다.
+# RAMAN_LLM_TIMEOUT_S — LLM 호출 1회 상한(초, 실수). 예: 600 · 1200 등등
 LLM_TIMEOUT_S = float(_env("RAMAN_LLM_TIMEOUT_S", default="600"))
 
 # ── 에이전트 아키텍처 ─────────────────────────────────────────────────────────
@@ -128,6 +131,7 @@ LLM_TIMEOUT_S = float(_env("RAMAN_LLM_TIMEOUT_S", default="600"))
 #: 그게 두 아키텍처를 비교하는 실험의 독립변수 자체였다.
 #:
 #: 정규화는 select_agent_module 이 한다(대소문자·오타 폴백 규칙이 거기 하나로 모여 있다).
+# RAMAN_AGENT — 기본 아키텍처. CoALA · AILA(ReAct구조). 대소문자 무관
 AGENT_ARCH = _env("RAMAN_AGENT", default="CoALA")
 
 # ── CoALA 장기기억 ────────────────────────────────────────────────────────────
@@ -140,6 +144,7 @@ AGENT_ARCH = _env("RAMAN_AGENT", default="CoALA")
 #:
 #: CHAT_SESSION_ISOLATED 와는 다른 축이다 — 그쪽은 '파일', 이쪽은 '기억'이다. 세션 격리를
 #: 켜도 이 값이 global 이면 앞 세션의 경험은 그대로 조회된다.
+# RAMAN_COALA_MEMORY_SCOPE > RAMAN_MEMORY_SCOPE — session(세션마다 빈 기억) · global(계속 축적)
 COALA_MEMORY_SCOPE = _env("RAMAN_COALA_MEMORY_SCOPE", "RAMAN_MEMORY_SCOPE",
                           default="session").lower()
 
@@ -150,6 +155,7 @@ COALA_MEMORY_SCOPE = _env("RAMAN_COALA_MEMORY_SCOPE", "RAMAN_MEMORY_SCOPE",
 #: 도구 쪽(long_term_memory)과 프롬프트 쪽(agents/prompts)이 각자 환경변수를 읽고 있었다.
 #: 한쪽만 바뀌면 '프롬프트는 기록하라는데 도구가 없는' 상태가 되고, 모델은 없는 도구를
 #: 계속 부른다. 한 곳에서 읽어 둘 다 같은 값을 보게 한다.
+# RAMAN_COALA_EPISODIC_MEMORY > RAMAN_EPISODIC_MEMORY — 1(에피소딕 켬) · 0(ablation, 도구+지시문 제거)
 COALA_EPISODIC_MEMORY = _flag("RAMAN_COALA_EPISODIC_MEMORY", "RAMAN_EPISODIC_MEMORY",
                               default="1")
 
@@ -171,15 +177,49 @@ COALA_EPISODIC_MEMORY = _flag("RAMAN_COALA_EPISODIC_MEMORY", "RAMAN_EPISODIC_MEM
 #
 # ※ CoALA 장기기억은 이 스위치와 별개다. 위의 COALA_MEMORY_SCOPE 가 따로 가른다 —
 #   여기를 켜도 그쪽이 global 이면 앞 세션의 '경험'은 그대로 조회된다.
+# RAMAN_CHAT_ISOLATED — 1(자기 세션 파일만 읽음) · 0(모든 세션 결과 열람 허용)
 CHAT_SESSION_ISOLATED = _flag("RAMAN_CHAT_ISOLATED", default="1")
+
+# ── 가상 하드웨어 ─────────────────────────────────────────────────────────────
+#: True 면 장비 4종(스테이지·레이저·CCD·카메라) 자리에 hao_vertual 의 대역이 들어간다.
+#: 장비 없는 PC 에서 도구 계층을 **실제로 실행**하기 위한 것이다.
+#:
+#: [test/fakes.py 와 무엇이 다른가]
+#: 그쪽은 runtime.get_tool_dispatch 를 통째로 갈아 끼워 도구 함수 자체가 안 돈다 — 락·범위
+#: 검증·조사량 가드·저장·이벤트가 전부 건너뛰어진다. "에이전트가 무엇을 부르기로 했는가"는
+#: 재지만 "그 도구가 제대로 도는가"는 못 잰다. 이 스위치는 그보다 한 층 아래(장비 핸들)를
+#: 바꾸므로 도구 계층이 그대로 실행된다. 두 대역은 목적이 달라 공존한다.
+#:
+#: [읽는 곳은 둘뿐이다]
+#: hardware_manager._init_*(4곳) 과 controllers/hardware.py(2곳). 도구 계층·에이전트·프론트는
+#: 이 값을 모른다 — 도구가 가상/실물을 알기 시작하면 분기가 도구 수만큼 번진다.
+#: 도구 계층이 Z 축 유무를 알아야 하는 자리(run_autofocus)는 이 값이 아니라 스테이지 객체의
+#: has_z 속성으로 판정한다.
+# RAMAN_VIRTUAL_HW — 0(실물 장비) · 1(장비 4종 전부 hao_vertual 대역으로 교체)
+VIRTUAL_HW = _flag("RAMAN_VIRTUAL_HW", default="0")
+
+#: 쓸 씬(= data/virtual_stage/<이름>/) 폴더 이름. 이미지와 scene.json 이 그 안에 있다.
+# RAMAN_VIRTUAL_SCENE — 씬 폴더 이름. 예: default(기본). VIRTUAL_HW=1 일 때만 쓰인다
+VIRTUAL_SCENE = _env("RAMAN_VIRTUAL_SCENE", default="default")
+
+#: 씬 뿌리 경로 덮어쓰기. 비어 있으면 data/virtual_stage.
+#: 여기서 기본 경로를 '계산'하지 않는 이유: 그러려면 service.store 를 import 해야 하는데,
+#: 이 모듈은 아무 것도 끌지 않아야 한다(아래 자체 점검의 _leaked 검사). 해석은 scene.py 가 한다.
+# RAMAN_VIRTUAL_ROOT — 씬 뿌리 절대경로. 빈 값(기본)이면 data/virtual_stage
+VIRTUAL_SCENE_ROOT = _env("RAMAN_VIRTUAL_ROOT", default="")
 
 
 def describe() -> str:
     """기동 로그·health 응답에 쓰는 한 줄 요약. 어떤 설정으로 도는지 즉시 보이게 한다."""
+    # 가상 여부를 여기 싣는 이유: 가상으로 돈 측정이 data/results 에 실측과 **같은 형식**으로
+    # 쌓인다. 기동 로그 한 줄이 사후에 그 실행이 무엇이었는지 가리는 첫 번째 단서다
+    # (두 번째는 run manifest 의 virtual 필드).
+    hw = f"virtual:{VIRTUAL_SCENE}" if VIRTUAL_HW else "real-hw"
     return (f"{AGENT_ARCH} · {OLLAMA_MODEL} @ {OLLAMA_HOST} "
             f"(num_ctx={NUM_CTX}, timeout={LLM_TIMEOUT_S:.0f}s, "
             f"chat_isolated={CHAT_SESSION_ISOLATED}, "
-            f"memory={COALA_MEMORY_SCOPE}, episodic={COALA_EPISODIC_MEMORY})")
+            f"memory={COALA_MEMORY_SCOPE}, episodic={COALA_EPISODIC_MEMORY}, "
+            f"{hw})")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -201,6 +241,12 @@ if __name__ == "__main__":
     # 문자열 "0" 이 새면 참으로 평가되어 '껐는데 켜져 있는' 상태가 된다.
     assert isinstance(CHAT_SESSION_ISOLATED, bool)
     assert isinstance(COALA_EPISODIC_MEMORY, bool)
+    assert isinstance(VIRTUAL_HW, bool)
+    # 가상 모드로 돈 실행이 실측으로 오인되지 않으려면 요약 한 줄에 반드시 드러나야 한다.
+    assert ("virtual:" in describe()) is VIRTUAL_HW
+    # ※ 소비자(hardware_manager._init_*)를 여기서 대조하지 못한다 — 그 모듈을 import 하면
+    #   아래 _leaked 검사가 잡는 backend.tools.hw_tools 가 딸려 온다. 가상/실물 분기가 실제로
+    #   먹는지는 서버를 띄워 describe() 로그와 /api/hardware/state 로 확인한다.
     for off in ("0", "false", "no", "off", "OFF", "False"):
         os.environ["_RAMAN_SELFCHECK_FLAG"] = off
         assert _flag("_RAMAN_SELFCHECK_FLAG", default="1") is False, off

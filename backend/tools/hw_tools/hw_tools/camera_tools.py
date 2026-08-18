@@ -86,16 +86,18 @@ def set_camera_exposure(
 def set_camera_auto_exposure(
     enabled: Annotated[bool, Field(description='true = auto exposure ON, false = manual exposure')],
 ) -> dict:
-    """카메라 자동 노출을 활성화(True) 또는 비활성화(False)한다."""
+    """카메라 자동 노출을 활성화(True) 또는 비활성화(False)한다.
+
+    [SDK 를 직접 부르지 않는 이유 — 2026-08-15]
+    예전에는 여기서 TUCAM_Capa_SetValue(_camera.TUCAMOPEN.hIdxTUCam, ...) 를 직접 불렀다.
+    바로 위 set_camera_exposure 는 드라이버 메서드(set_exposure)를 부르는데 이것만 SDK
+    핸들 내부를 파고드는 비대칭이었고, 그래서 카메라 드라이버를 갈아 끼우면(가상 카메라)
+    다른 도구는 다 도는데 이 하나만 낄 자리가 없었다. 설정은 드라이버가 갖는다.
+    """
     if _hw._camera is None:
         return fail("Camera is not initialized.")
     try:
-        from backend.tools.hw_tools.SDKs.TuCam.TUCam import TUCAM_Capa_SetValue, TUCAM_IDCAPA
-        TUCAM_Capa_SetValue(
-            _hw._camera.TUCAMOPEN.hIdxTUCam,
-            TUCAM_IDCAPA.TUIDC_ATEXPOSURE.value,
-            1 if enabled else 0,
-        )
+        _hw._camera.set_auto_exposure(bool(enabled))
         return ok(auto_exposure=enabled)
     except Exception as e:
         return fail(str(e))
@@ -147,6 +149,16 @@ def run_autofocus(
     stage_err = _stage_unavailable()
     if stage_err:
         return stage_err
+    # Z 축이 없는 스테이지에서는 이 도구가 성립하지 않는다 — 본질이 Z 를 훑으며 스팟 면적을
+    # 최소화하는 힐클라이밍이기 때문이다. 가짜로 '수렴했다'를 돌려주면 에이전트는 초점이
+    # 맞았다고 믿고 그 뒤 판단을 전부 그 위에 쌓는다.
+    #
+    # 판정을 llm_config.VIRTUAL_HW 가 아니라 **스테이지 객체의 속성**으로 하는 이유: 도구
+    # 계층이 '지금 가상인가'를 알기 시작하면 같은 분기가 도구 수만큼 번진다. 여기서 필요한
+    # 사실은 '가상인가'가 아니라 'Z 를 움직일 수 있는가' 하나다.
+    if not getattr(_hw._stage, "has_z", True):
+        return fail("This stage has no Z axis, so autofocus cannot run. The focus is fixed; "
+                    "proceed with the measurement without focusing.")
     if _hw._camera is None:
         return fail("Camera is not initialized.")
     if _hw._laser is None:

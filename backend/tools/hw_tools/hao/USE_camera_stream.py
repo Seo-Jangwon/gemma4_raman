@@ -55,6 +55,22 @@ class StreamingTUCam:
         TUCAM_Capa_SetValue(self.TUCAMOPEN.hIdxTUCam, TUCAM_IDCAPA.TUIDC_ATEXPOSURE.value, 0)
         TUCAM_Prop_SetValue(self.TUCAMOPEN.hIdxTUCam, TUCAM_IDPROP.TUIDP_EXPOSURETM.value, c_double(ms), 0)
 
+    def set_auto_exposure(self, enabled: bool):
+        """자동 노출 on/off.
+
+        [왜 여기로 옮겼는가 — 2026-08-15]
+        camera_tools.set_camera_auto_exposure 가 이 SDK 호출을 직접 갖고 있었다. 노출 설정
+        (set_exposure)은 이 클래스 메서드인데 자동 노출만 도구 계층에 있는 비대칭이었고,
+        그래서 카메라 객체를 갈아 끼우면(가상 카메라) 그 도구만 낄 자리가 없었다.
+        위 set_exposure 와 같은 자리·같은 방식이라 실물 동작은 그대로다.
+
+        ※ 락을 잡지 않는 것도 set_exposure 와 같다. 파일 상단 [스레드 안전성] 이 말하는
+          보호는 start/get/stop 프레임 버퍼 경로이고, 이 둘은 그 밖에 있다. 여기만 락을
+          잡으면 같은 성격의 두 메서드가 다르게 동작해 오히려 오해를 만든다.
+        """
+        TUCAM_Capa_SetValue(self.TUCAMOPEN.hIdxTUCam, TUCAM_IDCAPA.TUIDC_ATEXPOSURE.value,
+                            1 if enabled else 0)
+
     def start_stream(self):
         with self._lock:
             if self.is_streaming:
